@@ -6,24 +6,26 @@ final class QuotaLoadingView: NSView {
     override var isFlipped: Bool { true }
     private let logoSize: CGFloat
     private let checkingForUpdates: Bool
+    private let offline: Bool
     private var artworkLayer: CALayer?
     /// Deterministic layout state for headless assertions.
     private(set) var logoPoint: CGPoint = .zero
     private(set) var captionHidden = true
 
-    init(frame: NSRect, logoSize: CGFloat = 28, checkingForUpdates: Bool = false) {
+    init(frame: NSRect, logoSize: CGFloat = 28, checkingForUpdates: Bool = false, offline: Bool = false) {
         self.logoSize = logoSize
         self.checkingForUpdates = checkingForUpdates
+        self.offline = offline
         super.init(frame: frame)
-        captionHidden = !checkingForUpdates
-        logoPoint = CGPoint(x: frame.midX, y: frame.midY - (checkingForUpdates ? 32 : 0))
+        captionHidden = !(checkingForUpdates || offline)
+        logoPoint = CGPoint(x: frame.midX, y: frame.midY - (captionHidden ? 0 : 32))
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
-        setAccessibilityLabel(checkingForUpdates ? "업데이트 확인 중. 최신 버전인지 확인하고 있어요." : "사용량을 불러오는 중")
-        if checkingForUpdates {
+        setAccessibilityLabel(offline ? "네트워크 연결 없음" : checkingForUpdates ? "업데이트 확인 중. 최신 버전인지 확인하고 있어요." : "사용량을 불러오는 중")
+        if !captionHidden {
             for (text, size, weight, color, y) in [
-                ("업데이트 확인 중", CGFloat(17), NSFont.Weight.semibold, NSColor.labelColor, frame.midY + 12),
-                ("최신 버전인지 확인하고 있어요.", CGFloat(11), NSFont.Weight.regular, NSColor.secondaryLabelColor, frame.midY + 42)
+                (offline ? "네트워크 연결 없음" : "업데이트 확인 중", CGFloat(17), NSFont.Weight.semibold, NSColor.labelColor, frame.midY + 12),
+                (offline ? "연결되면 다시 확인할게요." : "최신 버전인지 확인하고 있어요.", CGFloat(11), NSFont.Weight.regular, NSColor.secondaryLabelColor, frame.midY + min(42, frame.height / 2 - 26))
             ] {
                 let label = NSTextField(labelWithString: text)
                 label.font = .systemFont(ofSize: size, weight: weight)
@@ -56,10 +58,18 @@ final class QuotaLoadingView: NSView {
         artworkLayer = artwork
 
         let host = CALayer()
-        host.frame = NSRect(x: (bounds.width - logoSize) / 2, y: (bounds.height - logoSize) / 2 - (checkingForUpdates ? 32 : 0),
+        host.frame = NSRect(x: (bounds.width - logoSize) / 2, y: (bounds.height - logoSize) / 2 - (captionHidden ? 0 : 32),
                             width: logoSize, height: logoSize)
         artwork.addSublayer(host)
         logoPoint = CGPoint(x: host.frame.midX, y: host.frame.midY)
+
+        if offline {
+            let icon = CodexStatusIcon.image(size: 96, offline: true)
+            var rect = CGRect(x: 0, y: 0, width: 96, height: 96)
+            host.contents = icon?.cgImage(forProposedRect: &rect, context: nil, hints: nil)
+            CATransaction.commit()
+            return
+        }
 
         guard let logo = loadLogo() else {
             // Resource fallback: a small moving light so the state never looks frozen.

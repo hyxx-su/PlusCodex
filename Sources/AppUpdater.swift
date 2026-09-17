@@ -5,6 +5,7 @@ import Sparkle
 /// Only the short checking phase is reflected in the menu's existing loader.
 final class AppUpdater: NSObject, SPUUpdaterDelegate {
     var onCheckingChanged: ((Bool) -> Void)?
+    var onUpdateAvailable: ((String, String) -> Void)?
     private(set) var isChecking = false
     private var timeout: Timer?
     private var started = false
@@ -21,10 +22,6 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate {
             finishChecking()
             NSLog("PlusCodex updater configuration: %@", error.localizedDescription)
         }
-    }
-
-    @objc func checkForUpdates(_ sender: Any?) {
-        controller.checkForUpdates(sender)
     }
 
     func checkOnMenuOpen() {
@@ -44,7 +41,10 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate {
         RunLoop.main.add(timer, forMode: .eventTracking)
     }
 
-    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) { finishChecking() }
+    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        finishChecking()
+        onUpdateAvailable?(item.displayVersionString, item.versionString)
+    }
     func updaterDidNotFindUpdate(_ updater: SPUUpdater) { finishChecking() }
     func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
         finishChecking()

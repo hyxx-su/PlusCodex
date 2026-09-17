@@ -1,4 +1,5 @@
 import AppKit
+import Network
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var item: NSStatusItem?
@@ -20,11 +21,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var notifications = AppNotifications()
     private let updater = AppUpdater()
     private var checkingForUpdates = false
-    private var updateItem: NSMenuItem?
-    // Start the intro only when the user first opens the menu in this process.
-    private var hasOpenedMenu = false
-    private var introTimer: Timer?
-    private var introUntil: Date?
+    private let networkMonitor = NWPathMonitor()
+    private var offline = false
+    private var stateScreenHeight: CGFloat?
     private lazy var statusWindow: StatusWindow = {
         let controller = StatusWindow()
         controller.onRefresh = { [weak self] in self?.refresh() }
@@ -49,6 +48,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         item?.button?.imagePosition = .imageLeading
         item?.button?.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         render()
+        networkMonitor.pathUpdateHandler = { [weak self] path in
+            let disconnected = path.status != .satisfied
+            RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) {
+                guard let self, self.offline != disconnected else { return }
+                self.offline = disconnected
+                self.render()
+                if !disconnected {
+                    self.refresh()
+                    self.updater.checkOnMenuOpen()
+                }
+            }
+            CFRunLoopWakeUp(CFRunLoopGetMain())
+        }
+        networkMonitor.start(queue: DispatchQueue(label: "PlusCodex.network"))
         updater.onCheckingChanged = { [weak self] checking in
             RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) {
                 self?.checkingForUpdates = checking
@@ -56,8 +69,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             CFRunLoopWakeUp(CFRunLoopGetMain())
         }
-        updater.start()
         notifications.start()
+        updater.onUpdateAvailable = { [weak self] version, build in
+            self?.notifications.updateAvailable(version: version, build: build)
+        }
+        updater.start()
         refresh()
         activityMonitor = ThreadActivityMonitor { [weak self] activities, _ in
             guard let self else { return }
@@ -72,7 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func refresh() {
-        guard !fetching else { return }
+        guard !fetching, !offline else { return }
         fetching = true
         statusWindow.update(quota: quota, fetching: true, failure: nil)
         DispatchQueue.global(qos: .utility).async {
@@ -96,7 +112,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     self.updatedAt = Date()
                     self.failure = nil
                 case .failure(let error):
-                    self.account = nil
                     self.failure = error.localizedDescription
                 }
                 self.render()
@@ -109,43 +124,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusWindow.update(quota: quota, fetching: fetching, failure: failure)
         let primary = quota?.primary ?? quota?.secondary
         let valid = failure == nil
-        let percent = valid ? primary.map { "\($0.remaining)%" } ?? (quota == nil ? "…" : "—") : "--%"
+        let percent = offline ? ""
+            : valid ? primary.map { "\($0.remaining)%" } ?? (quota == nil ? "…" : "—") : "--%"
         if let button = item?.button {
-            button.title = " " + percent
-            button.setAccessibilityLabel("Codex 남은 사용량 " + percent)
-            button.toolTip = "Codex · \(primary?.displayLabel(planType: account?.planType, isPrimary: quota?.primary != nil) ?? "사용 한도") 잔여 \(percent)"
+            button.image = CodexStatusIcon.image(size: 18, offline: offline)
+            button.imagePosition = offline ? .imageOnly : .imageLeading
+            button.attributedTitle = NSAttributedString(string: offline ? "" : " " + percent, attributes: [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: offline ? 9 : 11, weight: .medium),
+                .foregroundColor: offline ? NSColor.systemGray : NSColor.labelColor
+            ])
+            button.setAccessibilityLabel(offline ? "네트워크 연결 없음" : "Codex 남은 사용량 " + percent)
+            button.toolTip = offline ? "네트워크 연결 없음" : "Codex · \(primary?.displayLabel(planType: account?.planType, isPrimary: quota?.primary != nil) ?? "사용 한도") 잔여 \(percent)"
         }
-        // Menu structure stays minimal during the 2 second intro: logo panel only.
-        let intro = isIntroVisible
-        updateItem?.isHidden = intro
+        // Measure AppKit's native row heights before hiding them; the status panel
+        // then occupies exactly the same menu content area, including action rows.
+        let intro = false
+        let oldPanel = dashboardItem?.view as? QuotaMenuView
+        let stateScreen = (offline || checkingForUpdates) && builtItems != nil
+        if stateScreen, stateScreenHeight == nil, let built = builtItems, let oldPanel {
+            let probe = NSMenu()
+            let row = NSMenuItem()
+            row.view = NSView(frame: oldPanel.frame)
+            probe.addItem(row)
+            let padding = probe.size.height - oldPanel.frame.height
+            stateScreenHeight = built.menu.size.height - padding
+        }
+        if !stateScreen { stateScreenHeight = nil }
         if let panel = dashboardItem?.view as? QuotaMenuView, panel.intro == intro,
-           panel.checkingForUpdates == checkingForUpdates {
+           panel.checkingForUpdates == checkingForUpdates, panel.offline == offline {
             panel.update(quota: quota, account: account, updatedAt: updatedAt, failure: failure)
             return
         }
         let panel = QuotaMenuView(quota: quota, account: account, updatedAt: updatedAt,
-                                  failure: failure, intro: intro, checkingForUpdates: checkingForUpdates)
+                                  failure: failure, intro: intro, checkingForUpdates: stateScreen && checkingForUpdates,
+                                  offline: stateScreen && offline, preservedHeight: stateScreenHeight)
         if let dashboardItem, let built = builtItems {
             dashboardItem.view = panel
-            StatusMenuBuilder.apply(intro: intro, activity: built.activity,
+            StatusMenuBuilder.apply(intro: stateScreen, activity: built.activity,
                                     separator: built.separator, refresh: built.refresh, quit: built.quit)
             updateActivityView()
-            NSLog("PlusCodex render[intro=%d] visible=%d dashboard=%d activity=%d sep=%d refresh=%d quit=%d",
-                  intro ? 1 : 0, testHookMenuItemCount,
-                  built.dashboard.isHidden ? 1 : 0, built.activity.isHidden ? 1 : 0,
-                  built.separator.isHidden ? 1 : 0, built.refresh.isHidden ? 1 : 0,
-                  built.quit.isHidden ? 1 : 0)
             return
         }
         let built = StatusMenuBuilder.make(intro: intro, dashboardView: panel, delegate: self,
                                            target: self, refreshAction: #selector(refresh),
                                            quitAction: #selector(quitApp))
         builtItems = built
-        let update = NSMenuItem(title: "업데이트 확인…", action: #selector(AppUpdater.checkForUpdates(_:)), keyEquivalent: "")
-        update.target = updater
-        update.isHidden = intro
-        built.menu.insertItem(update, at: built.menu.items.count - 1)
-        updateItem = update
         dashboardItem = built.dashboard
         activityItem = built.activity
         refreshItem = built.refresh
@@ -153,31 +176,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         separatorItem = built.separator
         updateActivityView()
         item?.menu = built.menu
+        if offline || checkingForUpdates { render() }
     }
 
     @objc private func quitApp() { NSApp.terminate(nil) }
 
-    /// Reopening the menu never restarts the first-open deadline.
-    private var isIntroVisible: Bool {
-        if checkingForUpdates { return true }
-        guard let until = introUntil else { return false }
-        return Date() < until
-    }
-
     func menuWillOpen(_ menu: NSMenu) {
-        updater.checkOnMenuOpen()
-        if !hasOpenedMenu {
-            hasOpenedMenu = true
-            introUntil = Date().addingTimeInterval(2)
-            let timer = Timer(timeInterval: 2, repeats: false) { [weak self] _ in
-                self?.introUntil = nil
-                self?.render()
-            }
-            introTimer = timer
-            // Native menus run in event-tracking mode, not just the default mode.
-            RunLoop.main.add(timer, forMode: .common)
-            RunLoop.main.add(timer, forMode: .eventTracking)
-        }
+        if !offline { updater.checkOnMenuOpen() }
         render()
         refresh()
     }
@@ -190,21 +195,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // MARK: Test hooks (no production behavior change)
-    func testHookStartLaunchClock() {
-        introTimer?.invalidate()
-        hasOpenedMenu = false
-        introUntil = nil
-    }
     func testHookSetActivities(_ value: [ThreadActivity]) {
         activities = value
         updateActivityView()
     }
     func testHookMenuWillOpen(_ menu: NSMenu) { menuWillOpen(menu) }
     func testHookRenderForMenu() { render() }
-    func testHookAdvanceIntroClock(_ seconds: TimeInterval) {
-        introUntil = introUntil.map { $0.addingTimeInterval(-seconds) }
-    }
-    var testHookIsIntroVisible: Bool { isIntroVisible }
     var testHookDashboardView: NSView? { dashboardItem?.view }
     var testHookMenu: NSMenu? { builtItems?.menu }
     var testHookMenuItemCount: Int {
@@ -215,12 +211,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func testHookSetQuota(_ value: Quota?) { quota = value }
 
     private func updateActivityView() {
+        if stateScreenHeight != nil {
+            activityItem?.isHidden = true
+            return
+        }
         let visible = readReceipts.visibleRows(activities)
         activityItem?.view = ThreadActivityView(activities: visible) { [weak self] opened in
             guard let self else { return }
             self.readReceipts.acknowledge(opened)
             self.updateActivityView()
         }
-        activityItem?.isHidden = isIntroVisible || visible.isEmpty
+        activityItem?.isHidden = visible.isEmpty
+    }
+
+    func applicationWillTerminate(_ notification: Notification) { networkMonitor.cancel() }
+
+    func testHookSetPresentation(offline: Bool, checking: Bool) {
+        self.offline = offline
+        checkingForUpdates = checking
+        render()
     }
 }

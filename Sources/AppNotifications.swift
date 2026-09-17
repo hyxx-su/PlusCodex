@@ -5,6 +5,34 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
     private let center = UNUserNotificationCenter.current()
     private var scheduled: [String: Double] = [:]
     private var accountKey: String?
+    private var pendingUpdateBuilds = Set<String>()
+
+    func updateAvailable(version: String, build: String) {
+        center.getNotificationSettings { [weak self] settings in
+            guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
+            DispatchQueue.main.async {
+                guard let self,
+                      UserDefaults.standard.string(forKey: "notifiedUpdateBuild") != build,
+                      self.pendingUpdateBuilds.insert(build).inserted else { return }
+                let content = UNMutableNotificationContent()
+                content.title = "PlusCodex 새 업데이트"
+                content.body = "v\(version) 버전을 사용할 수 있습니다. 업데이트 안내를 확인하세요."
+                content.sound = .default
+                content.userInfo = ["updateAvailable": true]
+                // Persist only after successful submission; failures may retry on the next check.
+                self.center.add(UNNotificationRequest(identifier: "update-\(build)", content: content, trigger: nil)) { error in
+                    DispatchQueue.main.async {
+                        self.pendingUpdateBuilds.remove(build)
+                        if let error {
+                            NSLog("PlusCodex update notification: %@", error.localizedDescription)
+                        } else {
+                            UserDefaults.standard.set(build, forKey: "notifiedUpdateBuild")
+                        }
+                    }
+                }
+            }
+        }
+    }
     private var alertTracker: QuotaAlertTracker = {
         guard let data = UserDefaults.standard.data(forKey: "quotaAlertState"),
               let value = try? JSONDecoder().decode(QuotaAlertTracker.self, from: data) else { return QuotaAlertTracker() }
@@ -111,6 +139,12 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
+        if response.actionIdentifier == UNNotificationDefaultActionIdentifier,
+           response.notification.request.content.userInfo["updateAvailable"] as? Bool == true {
+            DispatchQueue.main.async {
+                NSWorkspace.shared.open(URL(string: "https://github.com/hyxx-su/PlusCodex/releases/latest")!)
+            }
+        }
         if response.actionIdentifier == UNNotificationDefaultActionIdentifier,
            let id = response.notification.request.content.userInfo["threadID"] as? String,
            UUID(uuidString: id) != nil, let url = URL(string: "codex://threads/\(id)") {

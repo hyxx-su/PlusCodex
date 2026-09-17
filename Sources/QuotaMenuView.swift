@@ -8,27 +8,31 @@ final class QuotaMenuView: NSView {
     private var failure: String?
     let intro: Bool
     let checkingForUpdates: Bool
+    let offline: Bool
     private let headerIcon: NSImage? = Bundle.main.url(forResource: "Codex", withExtension: "svg")
         .flatMap { NSImage(contentsOf: $0) }
     override var isFlipped: Bool { true }
 
     init(quota: Quota?, account: CodexAccount? = nil, updatedAt: Date?, failure: String?, intro: Bool = false,
-         checkingForUpdates: Bool = false) {
+         checkingForUpdates: Bool = false, offline: Bool = false, preservedHeight: CGFloat? = nil) {
         self.quota = quota
         self.account = account
         self.updatedAt = updatedAt
         self.failure = failure
         self.intro = intro
         self.checkingForUpdates = checkingForUpdates
-        super.init(frame: NSRect(x: 0, y: 0, width: 300, height: Self.panelHeight(quota: quota, intro: intro)))
+        self.offline = offline
+        super.init(frame: NSRect(x: 0, y: 0, width: 300,
+            height: preservedHeight ?? Self.panelHeight(quota: quota, intro: intro)))
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
         // Only the first opening's intro panel carries the tiny logo loader;
         // after it expires the dashboard renders immediately, even without data.
-        if intro {
+        if intro || checkingForUpdates || offline {
             setAccessibilityLabel(checkingForUpdates ? "업데이트 확인 중. 최신 버전인지 확인하고 있어요." : "사용량을 불러오는 중")
-            addSubview(QuotaLoadingView(frame: bounds, logoSize: checkingForUpdates ? 40 : 28,
-                                       checkingForUpdates: checkingForUpdates))
+            if offline { setAccessibilityLabel("네트워크 연결 없음") }
+            addSubview(QuotaLoadingView(frame: bounds, logoSize: checkingForUpdates || offline ? 40 : 28,
+                                       checkingForUpdates: checkingForUpdates, offline: offline))
         } else {
             let windows = [quota?.primary, quota?.secondary].compactMap { $0 }
             setAccessibilityLabel((["Codex 남은 사용량"] + windows.enumerated().map { index, window in
@@ -45,7 +49,7 @@ final class QuotaMenuView: NSView {
         self.account = account
         self.updatedAt = updatedAt
         self.failure = failure
-        guard !intro else { return }
+        guard !intro && !checkingForUpdates && !offline else { return }
         if previousCount != quota?.windows.count {
             setFrameSize(NSSize(width: 300, height: Self.panelHeight(quota: quota, intro: false)))
             needsDisplay = true
@@ -66,7 +70,7 @@ final class QuotaMenuView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        guard !intro else { return }
+        guard !intro && !checkingForUpdates && !offline else { return }
         if let headerIcon {
             let tintedIcon = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
                 headerIcon.draw(in: rect)
