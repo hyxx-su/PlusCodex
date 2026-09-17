@@ -1,0 +1,38 @@
+# 업데이트 배포
+
+## 동작
+
+Sparkle 2.10.0이 실행 시 및 주기적으로 공개 GitHub Release의 `appcast.xml`을 확인합니다.
+서명된 피드와 ZIP을 검증한 뒤 자동 다운로드하고, 종료 시 설치하거나 필요하면 재실행을 안내합니다.
+강제로 사용자의 작업을 종료하지 않습니다. 메뉴에서 수동 확인도 가능합니다.
+
+업데이트 확인 로딩은 실제 Sparkle 조회 상태를 사용합니다. 실패·최신 버전·새 버전 확인 시 종료되며,
+네트워크 지연 시에도 15초 후 사용량 메뉴를 복구합니다. 이 제한은 UI만 해제하며 진행 중인 안전한 다운로드를 취소하지 않습니다.
+
+## 키 보관
+
+업데이트 개인 키는 이 Mac의 로그인 Keychain에 Sparkle 계정명 `PlusCodex`로 보관합니다.
+`Info.plist`에는 공개 키만 있습니다. 개인 키, GitHub 토큰, 사용자 로그인 정보는 저장소나 앱에 넣지 않습니다.
+키를 잃으면 기존 설치본에 업데이트를 제공하지 못할 수 있으므로 Keychain을 안전하게 백업하세요.
+다른 빌드 Mac으로 이전할 때 Sparkle `generate_keys --account PlusCodex -x /안전한/경로`로 내보낼 수 있지만,
+내보낸 파일은 Git에 추가하지 말고 암호화된 별도 보관소로 관리해야 합니다.
+
+## 다음 버전
+
+1. `Info.plist`의 `CFBundleShortVersionString`을 사용자용 버전(예: `1.0.1`)으로 바꾸고,
+   `CFBundleVersion`은 현재 `1`보다 큰 정수로 올립니다.
+2. `RELEASE_NOTES.md`를 수정하고 `bash test.sh`를 실행합니다.
+3. `bash package-release.sh /absolute/path/new-release-directory`를 실행합니다.
+4. 생성된 DMG·ZIP·서명된 `appcast.xml` 세 파일을 같은 GitHub Release `v1.0.1`에 업로드합니다.
+   모두 업로드할 때까지 초안으로 유지하고, 완성된 릴리즈를 Latest로 게시합니다.
+5. 이전 버전에서 ‘업데이트 확인…’을 실행해 다운로드·설치·재실행을 실제 확인합니다.
+
+`appcast.xml`은 서명되어 있으므로 생성 후 직접 편집하지 마세요. 수정이 필요하면 다시 생성합니다.
+저장소와 릴리즈는 인증 없이 접근 가능해야 합니다. 비공개 GitHub 토큰을 앱에 포함하면 안 됩니다.
+단순 커밋이나 버전만 같은 재빌드는 자동 업데이트 대상이 아닙니다.
+
+## 배포 제한
+
+현재 Apple Silicon / macOS 14 이상 전용입니다. 앱은 ad-hoc 서명이며 Developer ID·공증은 없습니다.
+Sparkle 서명은 업데이트 출처와 무결성을 검증하지만 macOS Gatekeeper 공증을 대체하지 않습니다.
+실서비스 배포 전에 Developer ID 서명·공증과 별도 Mac에서의 설치·업데이트 검증을 권장합니다.
