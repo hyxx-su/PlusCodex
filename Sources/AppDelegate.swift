@@ -113,7 +113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let button = item?.button {
             button.title = " " + percent
             button.setAccessibilityLabel("Codex 남은 사용량 " + percent)
-            button.toolTip = "Codex · \(primary?.label ?? "사용 한도") 잔여 \(percent)"
+            button.toolTip = "Codex · \(primary?.displayLabel(planType: account?.planType, isPrimary: quota?.primary != nil) ?? "사용 한도") 잔여 \(percent)"
         }
         // Menu structure stays minimal during the 2 second intro: logo panel only.
         let intro = isIntroVisible
@@ -165,6 +165,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
+        updater.checkOnMenuOpen()
         if !hasOpenedMenu {
             hasOpenedMenu = true
             introUntil = Date().addingTimeInterval(2)

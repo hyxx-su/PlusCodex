@@ -17,7 +17,7 @@ struct QuotaAlertTracker: Codable {
     }
     private var states: [String: State] = [:]
 
-    mutating func update(_ quota: Quota, account: String?, now: Date = Date()) -> [Alert] {
+    mutating func update(_ quota: Quota, account: String?, now: Date = Date(), planType: String? = nil) -> [Alert] {
         // An optional account/read timeout is not a new account. Defer until identified.
         guard let account = account?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
               !account.isEmpty else { return [] }
@@ -50,7 +50,8 @@ struct QuotaAlertTracker: Codable {
             let level = window.usedPercent >= 100 ? 2 : (window.usedPercent >= 90 ? 1 : 0)
             if level > state.level {
                 alerts.append(Alert(key: key, reset: state.reset, level: level,
-                                    previousLevel: state.level, label: window.label))
+                                    previousLevel: state.level,
+                                    label: window.displayLabel(planType: planType, isPrimary: name == "primary")))
                 state.level = level
             }
             states[key] = state

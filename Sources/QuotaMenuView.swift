@@ -31,8 +31,8 @@ final class QuotaMenuView: NSView {
                                        checkingForUpdates: checkingForUpdates))
         } else {
             let windows = [quota?.primary, quota?.secondary].compactMap { $0 }
-            setAccessibilityLabel((["Codex 남은 사용량"] + windows.map {
-                "\($0.label) \($0.remaining)% 남음"
+            setAccessibilityLabel((["Codex 남은 사용량"] + windows.enumerated().map { index, window in
+                "\(window.displayLabel(planType: account?.planType, isPrimary: index == 0 && quota?.primary != nil)) \(window.remaining)% 남음"
             } + [failure ?? ""]).joined(separator: ", "))
         }
     }
@@ -51,8 +51,8 @@ final class QuotaMenuView: NSView {
             needsDisplay = true
         }
         let windows = [quota?.primary, quota?.secondary].compactMap { $0 }
-        setAccessibilityLabel((["Codex 남은 사용량"] + windows.map {
-            "\($0.label) \($0.remaining)% 남음"
+        setAccessibilityLabel((["Codex 남은 사용량"] + windows.enumerated().map { index, window in
+            "\(window.displayLabel(planType: account?.planType, isPrimary: index == 0 && quota?.primary != nil)) \(window.remaining)% 남음"
         } + [failure ?? ""]).joined(separator: ", "))
         setNeedsDisplay(NSRect(x: 116, y: 12, width: 168, height: 38))
         setNeedsDisplay(NSRect(x: 12, y: 62, width: 276, height: 176))
@@ -92,7 +92,8 @@ final class QuotaMenuView: NSView {
             text(message, x: 16, y: 70, size: 11, color: .secondaryLabelColor, width: 268, height: 42)
         } else {
             for (index, window) in windows.enumerated() {
-                card(window, fallback: "사용 한도", y: 62 + CGFloat(index) * 92)
+                card(window, title: window.displayLabel(planType: account?.planType,
+                     isPrimary: index == 0 && quota?.primary != nil), y: 62 + CGFloat(index) * 92)
             }
         }
     }
@@ -103,7 +104,7 @@ final class QuotaMenuView: NSView {
         return count == 0 ? 124 : 66 + CGFloat(count) * 92
     }
 
-    private func card(_ window: QuotaWindow?, fallback: String, y: CGFloat) {
+    private func card(_ window: QuotaWindow?, title: String, y: CGFloat) {
         let rect = NSRect(x: 12, y: y, width: 276, height: 84)
         NSColor.labelColor.withAlphaComponent(0.025).setFill()
         NSBezierPath(roundedRect: rect, xRadius: 14, yRadius: 14).fill()
@@ -114,7 +115,7 @@ final class QuotaMenuView: NSView {
         let stale = failure != nil
         let remaining = window?.remaining
         let tint: NSColor = stale || remaining == nil ? .secondaryLabelColor : .labelColor
-        text(window?.label ?? fallback, x: 24, y: y + 11, size: 12, weight: .semibold, width: 120)
+        text(title, x: 24, y: y + 11, size: 12, weight: .semibold, width: 120)
         text(stale ? "이전 조회" : "남음", x: 180, y: y + 14, size: 10, color: .secondaryLabelColor,
              width: 43, align: .right)
         text(remaining.map { "\($0)%" } ?? "--%", x: 228, y: y + 10, size: 15, weight: .medium,

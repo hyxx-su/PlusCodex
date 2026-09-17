@@ -18,6 +18,14 @@ import AppKit
             precondition(view.bounds.height == 124)
         }
         precondition(QuotaWindow(usedPercent: 1, windowDurationMins: 15, resetsAt: nil).label == "15분")
+        let monthly = QuotaWindow(usedPercent: 40, windowDurationMins: 43200, resetsAt: 12345)
+        precondition(monthly.displayLabel(planType: "free", isPrimary: true) == "1개월")
+        for plan in ["pro", "pro_5x", "pro_20x", "pro-200"] {
+            precondition(monthly.displayLabel(planType: plan, isPrimary: true) == "주간")
+        }
+        precondition(short.displayLabel(planType: "plus", isPrimary: true) == "5시간")
+        precondition(weekly.displayLabel(planType: "free", isPrimary: false) == "주간")
+        precondition(monthly.resetsAt == 12345 && monthly.remaining == 60)
         print("PASS: missing windows, real limits on all plans, dynamic height")
     }
 }

@@ -7,12 +7,14 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate {
     var onCheckingChanged: ((Bool) -> Void)?
     private(set) var isChecking = false
     private var timeout: Timer?
+    private var started = false
     private lazy var controller = SPUStandardUpdaterController(
         startingUpdater: false, updaterDelegate: self, userDriverDelegate: nil)
 
     func start() {
         do {
             try controller.updater.start()
+            started = true
             // Run immediately on launch, independent of Sparkle's periodic schedule.
             controller.updater.checkForUpdatesInBackground()
         } catch {
@@ -23,6 +25,12 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate {
 
     @objc func checkForUpdates(_ sender: Any?) {
         controller.checkForUpdates(sender)
+    }
+
+    func checkOnMenuOpen() {
+        guard started, !controller.updater.sessionInProgress,
+              controller.updater.canCheckForUpdates else { return }
+        controller.updater.checkForUpdatesInBackground()
     }
 
     func updater(_ updater: SPUUpdater, mayPerform updateCheck: SPUUpdateCheck) throws {

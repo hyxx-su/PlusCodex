@@ -16,7 +16,7 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
             guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
             DispatchQueue.main.async {
                 guard let self else { return }
-                let alerts = self.alertTracker.update(quota, account: account?.email)
+                let alerts = self.alertTracker.update(quota, account: account?.email, planType: account?.planType)
                 self.saveAlertState()
                 for alert in alerts {
                     let content = UNMutableNotificationContent()
@@ -82,7 +82,7 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
             guard scheduled[id] != timestamp else { continue }
             scheduled[id] = timestamp
             let content = UNMutableNotificationContent()
-            content.title = "Codex \(window.label) 초기화 시간"
+            content.title = "Codex \(window.displayLabel(planType: account?.planType, isPrimary: name == "primary")) 초기화 시간"
             content.body = "사용량 초기화 예정 시간이 되었습니다. PlusCodex에서 남은 사용량을 확인하세요."
             content.sound = .default
             let interval = max(1, timestamp - Date().timeIntervalSince1970)

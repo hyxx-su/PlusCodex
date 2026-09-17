@@ -9,7 +9,17 @@ struct QuotaWindow: Decodable {
     var label: String {
         guard let minutes = windowDurationMins else { return "사용 한도" }
         if minutes == 10080 { return "주간" }
+        if minutes == 43200 { return "1개월" }
         return minutes % 60 == 0 ? "\(minutes / 60)시간" : "\(minutes)분"
+    }
+
+    /// Plan-specific presentation only; never changes server reset dates or quota math.
+    func displayLabel(planType: String?, isPrimary: Bool) -> String {
+        guard isPrimary else { return label }
+        let plan = planType?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if plan == "free" { return "1개월" }
+        if plan == "pro" || plan.hasPrefix("pro_") || plan.hasPrefix("pro-") { return "주간" }
+        return label
     }
 }
 
