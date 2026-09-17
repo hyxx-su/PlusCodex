@@ -16,14 +16,14 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
             guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
             DispatchQueue.main.async {
                 guard let self else { return }
-                let alerts = self.alertTracker.update(quota, account: account?.email ?? "local-codex")
+                let alerts = self.alertTracker.update(quota, account: account?.email)
                 self.saveAlertState()
                 for alert in alerts {
                     let content = UNMutableNotificationContent()
-                    content.title = alert.level == 2 ? "Codex \(alert.label) 사용량 소진" : "Codex \(alert.label) 10% 이하 남음"
+                    content.title = alert.level == 2 ? "Codex \(alert.label) 사용량 소진" : "Codex \(alert.label) 10% 남았습니다."
                     content.body = alert.level == 2
                         ? "남은 사용량이 0%입니다. 초기화 시간을 확인하세요."
-                        : "남은 사용량이 10% 이하입니다. PlusCodex에서 한도를 확인하세요."
+                        : "사용량이 얼마 남지 않았습니다. PlusCodex에서 현재 잔여량과 초기화 시간을 확인하세요."
                     content.sound = .default
                     self.center.add(UNNotificationRequest(identifier: "quota-\(UUID().uuidString)", content: content, trigger: nil)) { error in
                         if let error {

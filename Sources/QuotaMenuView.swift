@@ -20,7 +20,7 @@ final class QuotaMenuView: NSView {
         self.failure = failure
         self.intro = intro
         self.checkingForUpdates = checkingForUpdates
-        super.init(frame: NSRect(x: 0, y: 0, width: 300, height: 250))
+        super.init(frame: NSRect(x: 0, y: 0, width: 300, height: Self.panelHeight(quota: quota, intro: intro)))
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
         // Only the first opening's intro panel carries the tiny logo loader;
@@ -40,11 +40,16 @@ final class QuotaMenuView: NSView {
     required init?(coder: NSCoder) { nil }
 
     func update(quota: Quota?, account: CodexAccount?, updatedAt: Date?, failure: String?) {
+        let previousCount = self.quota?.windows.count
         self.quota = quota
         self.account = account
         self.updatedAt = updatedAt
         self.failure = failure
         guard !intro else { return }
+        if previousCount != quota?.windows.count {
+            setFrameSize(NSSize(width: 300, height: Self.panelHeight(quota: quota, intro: false)))
+            needsDisplay = true
+        }
         let windows = [quota?.primary, quota?.secondary].compactMap { $0 }
         setAccessibilityLabel((["Codex 남은 사용량"] + windows.map {
             "\($0.label) \($0.remaining)% 남음"
@@ -81,8 +86,21 @@ final class QuotaMenuView: NSView {
         text(account?.planType?.capitalized ?? "—", x: 116, y: 32, size: 10,
              weight: .medium, color: .secondaryLabelColor, width: 168, height: 14, align: .right)
 
-        card(quota?.primary, fallback: "5시간", y: 62)
-        card(quota?.secondary, fallback: "주간", y: 154)
+        let windows = quota?.windows ?? []
+        if windows.isEmpty {
+            let message = failure ?? (quota == nil ? "사용량을 확인하고 있어요." : "현재 계정에서 제공되는 한도 정보가 없습니다.")
+            text(message, x: 16, y: 70, size: 11, color: .secondaryLabelColor, width: 268, height: 42)
+        } else {
+            for (index, window) in windows.enumerated() {
+                card(window, fallback: "사용 한도", y: 62 + CGFloat(index) * 92)
+            }
+        }
+    }
+
+    static func panelHeight(quota: Quota?, intro: Bool) -> CGFloat {
+        if intro { return 250 }
+        let count = quota?.windows.count ?? 0
+        return count == 0 ? 124 : 66 + CGFloat(count) * 92
     }
 
     private func card(_ window: QuotaWindow?, fallback: String, y: CGFloat) {

@@ -16,6 +16,7 @@ struct QuotaWindow: Decodable {
 struct Quota: Decodable {
     let primary: QuotaWindow?
     let secondary: QuotaWindow?
+    var windows: [QuotaWindow] { [primary, secondary].compactMap { $0 } }
 }
 
 struct QuotaResponse: Decodable {
@@ -121,9 +122,9 @@ final class QuotaClient {
         try send(["method": "initialized"])
         try send(["id": 2, "method": "account/rateLimits/read"])
         let result = try JSONDecoder().decode(QuotaResponse.self, from: response(2))
-        guard let quota = result.codex, quota.primary != nil || quota.secondary != nil else {
-            throw QuotaError.unavailable("현재 계정의 Codex 한도 정보가 없습니다.")
-        }
+        // A successful response without windows is not evidence of a 5-hour limit
+        // (nor of unlimited usage). Still fetch the account and show an empty state.
+        let quota = result.codex ?? Quota(primary: nil, secondary: nil)
         // Publish usable limits before optional identity lookup or process cleanup.
         onQuota?(quota)
         // Account details are optional; a failed identity lookup must not hide valid usage.

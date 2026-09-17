@@ -109,7 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusWindow.update(quota: quota, fetching: fetching, failure: failure)
         let primary = quota?.primary ?? quota?.secondary
         let valid = failure == nil
-        let percent = valid ? primary.map { "\($0.remaining)%" } ?? "…" : "--%"
+        let percent = valid ? primary.map { "\($0.remaining)%" } ?? (quota == nil ? "…" : "—") : "--%"
         if let button = item?.button {
             button.title = " " + percent
             button.setAccessibilityLabel("Codex 남은 사용량 " + percent)
