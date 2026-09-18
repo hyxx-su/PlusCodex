@@ -31,7 +31,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
         actions = [separator]
         for (title, selector, shortcut) in [
             ("지금 새로고침", #selector(refreshClicked), "r"),
-            ("설정…", #selector(settingsClicked), ","),
+            ("설정", #selector(settingsClicked), ","),
             ("PlusCodex 종료", #selector(quit), "q")
         ] {
             let row = NSMenuItem(title: title, action: selector, keyEquivalent: shortcut)
@@ -137,12 +137,13 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
             let disable = NSMenuItem(title: "\(provider.name) 끄기", action: #selector(disable), keyEquivalent: "")
             disable.target = self
             context.addItem(disable)
-            context.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.minY), in: button)
+            context.popUpFollowingSystemAppearance(from: button)
         } else {
-            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.minY), in: button)
+            menu.popUpFollowingSystemAppearance(from: button)
         }
     }
     func menuWillOpen(_ menu: NSMenu) { onOpen?(); refresh() }
+    func dismissMenu() { menu.cancelTracking() }
     @objc private func disable() {
         // Remove the status item only after AppKit finishes tracking its context menu.
         DispatchQueue.main.async { self.settings.setEnabled(false, for: self.provider) }

@@ -13,69 +13,70 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate {
 
     init(settings: ProviderSettings, login: LoginLaunchController = LoginLaunchController()) {
         self.settings = settings; self.login = login
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 534),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 420),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        window.title = "일반"; window.isReleasedWhenClosed = false; window.center()
+        window.title = "설정"; window.isReleasedWhenClosed = false; window.center()
         super.init(window: window)
         window.delegate = self
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: 480, height: 534))
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 440, height: 420))
         window.contentView = root
         func label(_ text: String, _ frame: NSRect, _ size: CGFloat, bold: Bool = false) {
             let field = NSTextField(labelWithString: text)
             field.font = .systemFont(ofSize: size, weight: bold ? .semibold : .regular)
             field.frame = frame; root.addSubview(field)
         }
-        let gear = NSImageView(frame: NSRect(x: 222, y: 478, width: 36, height: 36))
-        gear.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "일반")
-        gear.contentTintColor = .controlAccentColor; root.addSubview(gear)
-        let heading = NSTextField(labelWithString: "일반")
-        heading.alignment = .center; heading.textColor = .controlAccentColor
-        heading.frame = NSRect(x: 190, y: 453, width: 100, height: 20); root.addSubview(heading)
-        let divider = NSBox(frame: NSRect(x: 0, y: 438, width: 480, height: 1))
-        divider.boxType = .separator; root.addSubview(divider)
-        label("AI 표시", NSRect(x: 30, y: 399, width: 400, height: 22), 13, bold: true)
+        label("AI 표시", NSRect(x: 36, y: 377, width: 368, height: 20), 13, bold: true)
         func card(_ frame: NSRect) {
             let box = NSBox(frame: frame)
             box.boxType = .custom; box.borderWidth = 0; box.cornerRadius = 12
             box.fillColor = .labelColor.withAlphaComponent(0.035); root.addSubview(box)
         }
-        card(NSRect(x: 24, y: 206, width: 432, height: 180))
+        func placeSwitch(_ toggle: NSSwitch, centerY: CGFloat) {
+            toggle.controlSize = .mini
+            toggle.sizeToFit()
+            toggle.setFrameOrigin(NSPoint(x: 404 - toggle.frame.width,
+                                          y: centerY - toggle.frame.height / 2))
+        }
+        card(NSRect(x: 24, y: 202, width: 392, height: 156))
         for (index, provider) in AIProvider.allCases.enumerated() {
-            let y = CGFloat(326 - index * 60)
-            let icon = NSImageView(frame: NSRect(x: 36, y: y + 20, width: 20, height: 20))
+            let y = CGFloat(306 - index * 52)
+            let icon = NSImageView(frame: NSRect(x: 36, y: y + 16, width: 20, height: 20))
             icon.image = CodexStatusIcon.image(size: 20, offline: false, provider: provider); root.addSubview(icon)
-            label(provider.name, NSRect(x: 66, y: y + 30, width: 280, height: 20), 13)
+            label(provider.name, NSRect(x: 66, y: y + 27, width: 280, height: 18), 13)
             let status = NSTextField(labelWithString: settings.enabled(provider) ? "연결 확인 중" : "메뉴바에서 꺼짐")
             status.font = .systemFont(ofSize: 10); status.textColor = .secondaryLabelColor
             status.lineBreakMode = .byTruncatingTail
-            status.frame = NSRect(x: 66, y: y + 11, width: 324, height: 16)
+            status.frame = NSRect(x: 66, y: y + 9, width: 280, height: 16)
             root.addSubview(status); statuses[provider] = status
-            let toggle = NSSwitch(frame: NSRect(x: 403, y: y + 20, width: 38, height: 24))
+            let toggle = NSSwitch()
+            placeSwitch(toggle, centerY: y + 26)
             toggle.identifier = NSUserInterfaceItemIdentifier(provider.rawValue)
             toggle.target = self; toggle.action = #selector(toggled(_:))
             toggle.setAccessibilityLabel("\(provider.name) 메뉴바에 표시")
             root.addSubview(toggle); toggles[provider] = toggle
             if index < 2 {
-                let line = NSBox(frame: NSRect(x: 36, y: y, width: 408, height: 1))
+                let line = NSBox(frame: NSRect(x: 36, y: y, width: 368, height: 1))
                 line.boxType = .separator; root.addSubview(line)
             }
         }
-        label("자동 실행", NSRect(x: 30, y: 166, width: 400, height: 22), 13, bold: true)
-        card(NSRect(x: 24, y: 100, width: 432, height: 58))
-        label("로그인 시 PlusCodex 자동 실행", NSRect(x: 36, y: 130, width: 360, height: 20), 13)
+        label("자동 실행", NSRect(x: 36, y: 165, width: 368, height: 20), 13, bold: true)
+        card(NSRect(x: 24, y: 100, width: 392, height: 54))
+        label("로그인 시 PlusCodex 자동 실행", NSRect(x: 36, y: 128, width: 310, height: 18), 13)
         loginStatus.font = .systemFont(ofSize: 10); loginStatus.textColor = .secondaryLabelColor
-        loginStatus.frame = NSRect(x: 36, y: 110, width: 359, height: 17)
+        loginStatus.frame = NSRect(x: 36, y: 110, width: 310, height: 16)
         loginStatus.lineBreakMode = .byTruncatingTail; root.addSubview(loginStatus)
-        loginToggle.frame = NSRect(x: 403, y: 118, width: 38, height: 24)
+        placeSwitch(loginToggle, centerY: 127)
         loginToggle.identifier = NSUserInterfaceItemIdentifier("launchAtLogin")
         loginToggle.target = self; loginToggle.action = #selector(toggleLogin(_:))
         loginToggle.setAccessibilityLabel("로그인 시 PlusCodex 자동 실행"); root.addSubview(loginToggle)
-        label("알림", NSRect(x: 30, y: 66, width: 100, height: 22), 13, bold: true)
-        card(NSRect(x: 24, y: 14, width: 432, height: 44))
+        label("알림", NSRect(x: 36, y: 64, width: 100, height: 20), 13, bold: true)
+        card(NSRect(x: 24, y: 16, width: 392, height: 40))
         notificationStatus.font = .systemFont(ofSize: 11); notificationStatus.textColor = .secondaryLabelColor
-        notificationStatus.frame = NSRect(x: 36, y: 26, width: 290, height: 19); root.addSubview(notificationStatus)
-        let notify = NSButton(title: "알림 설정…", target: self, action: #selector(openNotifications))
-        notify.bezelStyle = .rounded; notify.frame = NSRect(x: 346, y: 22, width: 100, height: 28)
+        notificationStatus.lineBreakMode = .byTruncatingTail
+        notificationStatus.frame = NSRect(x: 36, y: 27, width: 256, height: 18); root.addSubview(notificationStatus)
+        let notify = NSButton(title: "알림 설정", target: self, action: #selector(openNotifications))
+        notify.bezelStyle = .rounded; notify.controlSize = .small
+        notify.frame = NSRect(x: 302, y: 23, width: 104, height: 26)
         root.addSubview(notify)
         synchronize()
     }

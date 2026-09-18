@@ -3,19 +3,23 @@ import Sparkle
 
 /// Sparkle owns download, signature verification, installation and restart.
 /// Only the short checking phase is reflected in the menu's existing loader.
-final class AppUpdater: NSObject, SPUUpdaterDelegate {
+final class AppUpdater: NSObject, SPUUpdaterDelegate, SPUStandardUserDriverDelegate {
     var onCheckingChanged: ((Bool) -> Void)?
     var onUpdateAvailable: ((String, String) -> Void)?
+    var onWillPresentUpdate: (() -> Void)?
+    private(set) var updateAwaitingChoice = false
     private(set) var isChecking = false
     private var timeout: Timer?
     private var started = false
     private lazy var controller = SPUStandardUpdaterController(
-        startingUpdater: false, updaterDelegate: self, userDriverDelegate: nil)
+        startingUpdater: false, updaterDelegate: self, userDriverDelegate: self)
 
     func start() {
         // Beta builds stay on the tester's version until a separate beta feed exists.
         guard Bundle.main.object(forInfoDictionaryKey: "PlusCodexBeta") as? Bool != true else { return }
         do {
+            // SUAllowsAutomaticUpdates=false also overrides old persisted silent-install
+            // preferences. Checks remain automatic; installation requires a choice.
             try controller.updater.start()
             started = true
             // Run immediately on launch, independent of Sparkle's periodic schedule.
@@ -27,9 +31,46 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate {
     }
 
     func checkOnMenuOpen() {
+        if updateAwaitingChoice {
+            presentUpdateInFocus()
+            return
+        }
         guard started, !controller.updater.sessionInProgress,
               controller.updater.canCheckForUpdates else { return }
         controller.updater.checkForUpdatesInBackground()
+    }
+
+    var supportsGentleScheduledUpdateReminders: Bool { true }
+
+    func standardUserDriverShouldHandleShowingScheduledUpdate(_ update: SUAppcastItem,
+                                                              andInImmediateFocus immediateFocus: Bool) -> Bool {
+        // The standard dialog is retained, but explicitly focused for this dockless app.
+        false
+    }
+
+    func standardUserDriverWillHandleShowingUpdate(_ handleShowingUpdate: Bool,
+                                                   forUpdate update: SUAppcastItem, state: SPUUserUpdateState) {
+        updateAwaitingChoice = true
+        if !handleShowingUpdate { presentUpdateInFocus() }
+    }
+
+    private func presentUpdateInFocus() {
+        onWillPresentUpdate?()
+        // Leave menu tracking and Sparkle's delegate callback before re-entering its UI.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.updateAwaitingChoice else { return }
+            NSApp.activate(ignoringOtherApps: true)
+            self.controller.checkForUpdates(nil)
+        }
+    }
+
+    func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) {
+        updateAwaitingChoice = false
+    }
+
+    func standardUserDriverWillFinishUpdateSession() {
+        updateAwaitingChoice = false
+        finishChecking()
     }
 
     func updater(_ updater: SPUUpdater, mayPerform updateCheck: SPUUpdateCheck) throws {

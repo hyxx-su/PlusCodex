@@ -23,6 +23,15 @@ import Sparkle
             "url": "https://github.com/hyxx-su/PlusCodex/releases/download/v1.0.3/PlusCodex-1.0.3.zip",
             "sparkle:version": "4", "sparkle:shortVersionString": "1.0.3"
         ]])!
+        precondition(updater.supportsGentleScheduledUpdateReminders)
+        precondition(!updater.standardUserDriverShouldHandleShowingScheduledUpdate(update, andInImmediateFocus: false))
+        precondition(!updater.standardUserDriverShouldHandleShowingScheduledUpdate(update, andInImmediateFocus: true))
+        precondition(Bundle.main.object(forInfoDictionaryKey: "SUAutomaticallyUpdate") as? Bool == false)
+        precondition(!wrapper.updater.allowsAutomaticUpdates)
+        precondition(!wrapper.updater.automaticallyDownloadsUpdates)
+        precondition(Bundle.main.preferredLocalizations.first == "ko")
+        let sparkle = Bundle(for: SPUStandardUserDriver.self)
+        precondition(sparkle.localizedString(forKey: "Software Update", value: nil, table: "Sparkle") == "소프트웨어 업데이트")
         try updater.updater(wrapper.updater, mayPerform: .updatesInBackground)
         updater.updater(wrapper.updater, didFindValidUpdate: update)
         precondition(!updater.isChecking)

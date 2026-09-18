@@ -46,6 +46,12 @@ final class QuotaLoadingView: NSView {
         needsLayout = true
     }
 
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        // Layer-backed logo colors are snapshots, unlike dynamic text colors.
+        needsLayout = true
+    }
+
     override func layout() {
         super.layout()
         wantsLayer = true

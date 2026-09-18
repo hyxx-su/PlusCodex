@@ -82,6 +82,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updater.onUpdateAvailable = { [weak self] version, build in
             self?.notifications.updateAvailable(version: version, build: build)
         }
+        updater.onWillPresentUpdate = { [weak self] in
+            self?.builtItems?.menu.cancelTracking()
+            self?.extraProviders.forEach { $0.dismissMenu() }
+        }
         updater.start()
         refresh()
         activityMonitor = ThreadActivityMonitor { [weak self] activities, _ in
@@ -184,7 +188,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                            target: self, refreshAction: #selector(refresh),
                                            quitAction: #selector(quitApp))
         builtItems = built
-        let settings = NSMenuItem(title: "설정…", action: #selector(openSettings), keyEquivalent: ",")
+        let settings = NSMenuItem(title: "설정", action: #selector(openSettings), keyEquivalent: ",")
+        settings.image = nil
         settings.target = self
         built.menu.insertItem(settings, at: built.menu.items.count - 1)
         settingsItem = settings
@@ -232,9 +237,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let disable = NSMenuItem(title: "Codex 끄기", action: #selector(disableCodex), keyEquivalent: "")
             disable.target = self
             context.addItem(disable)
-            context.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.minY), in: button)
+            context.popUpFollowingSystemAppearance(from: button)
         } else {
-            builtItems?.menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.minY), in: button)
+            builtItems?.menu.popUpFollowingSystemAppearance(from: button)
         }
     }
 

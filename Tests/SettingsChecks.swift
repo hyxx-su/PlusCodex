@@ -24,6 +24,13 @@ import ServiceManagement
         let window = AISettingsWindow(settings: settings, login: login)
         let toggles = window.window!.contentView!.subviews.compactMap { $0 as? NSSwitch }
         precondition(toggles.count == 4 && toggles.allSatisfy { $0.state == .on })
+        precondition(window.window!.title == "설정")
+        precondition(window.window!.contentView!.frame.size == NSSize(width: 440, height: 420))
+        precondition(toggles.allSatisfy { $0.controlSize == .mini && $0.frame.width <= 54 })
+        precondition(toggles.allSatisfy { abs($0.frame.maxX - 404) < 1 })
+        let aiRows = toggles.filter { $0.identifier?.rawValue != "launchAtLogin" }.sorted { $0.frame.midY < $1.frame.midY }
+        precondition(abs(aiRows[1].frame.midY - aiRows[0].frame.midY - 52) < 1)
+        precondition(abs(aiRows[2].frame.midY - aiRows[1].frame.midY - 52) < 1)
         let claude = toggles.first { $0.identifier?.rawValue == "claude" }!
         claude.state = .off
         _ = claude.sendAction(claude.action, to: claude.target)
@@ -31,6 +38,9 @@ import ServiceManagement
         for provider in [AIProvider.claude, .grok] {
             settings.setEnabled(false, for: provider)
             let controller = ProviderStatusController(provider: provider, settings: settings)
+            let settingsRow = controller.testHookMenu.items.first { $0.title == "설정" }
+            precondition(settingsRow != nil && settingsRow?.image == nil)
+            precondition(settingsRow?.keyEquivalent == ",")
             var opens = 0
             controller.onOpen = { opens += 1 }
             controller.menuWillOpen(controller.testHookMenu)

@@ -3,19 +3,22 @@
 <plist version="1.0"><dict>
 <key>CFBundleIdentifier</key><string>local.codexquota.menubar</string>
 <key>CFBundleName</key><string>PlusCodex</string>
+<key>CFBundleDevelopmentRegion</key><string>ko</string>
+<key>CFBundleLocalizations</key><array><string>ko</string></array>
 <key>CFBundleDisplayName</key><string>PlusCodex</string>
 <key>CFBundleExecutable</key><string>PlusCodex</string>
 <key>CFBundleIconFile</key><string>PlusCodex.icns</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>1.0.4</string>
-<key>CFBundleVersion</key><string>6</string>
+<key>CFBundleShortVersionString</key><string>1.0.5</string>
+<key>CFBundleVersion</key><string>7</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>
 <key>SUFeedURL</key><string>https://github.com/hyxx-su/PlusCodex/releases/latest/download/appcast.xml</string>
 <key>SUPublicEDKey</key><string>mSR0W6OtaFvmD/H8eGbAqxAU7ue0cbk65BQGX4oqPiY=</string>
 <key>SUEnableAutomaticChecks</key><true/>
-<key>SUAutomaticallyUpdate</key><true/>
+<key>SUAutomaticallyUpdate</key><false/>
+<key>SUAllowsAutomaticUpdates</key><false/>
 <key>SUVerifyUpdateBeforeExtraction</key><true/>
 <key>SURequireSignedFeed</key><true/>
 <key>SUSendProfileInfo</key><false/>
