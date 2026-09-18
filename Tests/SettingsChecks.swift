@@ -25,7 +25,7 @@ import ServiceManagement
         let toggles = window.window!.contentView!.subviews.compactMap { $0 as? NSSwitch }
         precondition(toggles.count == 4 && toggles.allSatisfy { $0.state == .on })
         precondition(window.window!.title == "설정")
-        precondition(window.window!.contentView!.frame.size == NSSize(width: 440, height: 420))
+        precondition(window.window!.contentView!.frame.size == NSSize(width: 440, height: 520))
         precondition(toggles.allSatisfy { $0.controlSize == .mini && $0.frame.width <= 54 })
         precondition(toggles.allSatisfy { abs($0.frame.maxX - 404) < 1 })
         let aiRows = toggles.filter { $0.identifier?.rawValue != "launchAtLogin" }.sorted { $0.frame.midY < $1.frame.midY }

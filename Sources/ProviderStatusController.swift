@@ -30,9 +30,9 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
         menu.addItem(separator)
         actions = [separator]
         for (title, selector, shortcut) in [
-            ("지금 새로고침", #selector(refreshClicked), "r"),
-            ("설정", #selector(settingsClicked), ","),
-            ("PlusCodex 종료", #selector(quit), "q")
+            (L10n.text("지금 새로고침"), #selector(refreshClicked), "r"),
+            (L10n.text("설정"), #selector(settingsClicked), ","),
+            (L10n.text("PlusCodex 종료"), #selector(quit), "q")
         ] {
             let row = NSMenuItem(title: title, action: selector, keyEquivalent: shortcut)
             row.target = self
@@ -59,7 +59,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
             self.item = nil
             snapshot = nil
             failure = nil
-            onState?(settings.enabled(provider) ? "미설치 · 메뉴바에서 숨김" : "메뉴바에서 꺼짐")
+            onState?(settings.enabled(provider) ? L10n.text("미설치 · 메뉴바에서 숨김") : L10n.text("메뉴바에서 꺼짐"))
         }
     }
 
@@ -74,11 +74,11 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
     func refresh() {
         guard settings.enabled(provider), CLIInstallation.executable(provider) != nil, !fetching, !offline else { return }
         guard Date() >= nextFetch else {
-            if snapshot == nil && failure == nil { onState?("다음 사용량 조회 대기 중") }
+            if snapshot == nil && failure == nil { onState?(L10n.text("다음 사용량 조회 대기 중")) }
             return
         }
         fetching = true
-        onState?("사용량 확인 중")
+        onState?(L10n.text("사용량 확인 중"))
         render()
         let provider = self.provider
         DispatchQueue.global(qos: .utility).async {
@@ -92,7 +92,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
                     self.snapshot = snapshot
                     self.failure = nil
                     self.nextFetch = Date().addingTimeInterval(provider == .claude ? 300 : 60)
-                    self.onState?(snapshot.account?.email ?? "연결됨 · 사용량 조회 완료")
+                    self.onState?(snapshot.account?.email ?? L10n.text("연결됨 · 사용량 조회 완료"))
                 case .failure(let error):
                     self.failure = error.localizedDescription
                     // Never retain a previous account's percentage after auth errors.
@@ -113,7 +113,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
         item?.button?.imagePosition = offline || percent.isEmpty ? .imageOnly : .imageLeading
         item?.button?.attributedTitle = NSAttributedString(string: offline ? "" : percent, attributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium), .foregroundColor: NSColor.labelColor])
-        item?.button?.setAccessibilityLabel(provider.name + (offline ? " 네트워크 연결 없음" : percent))
+        item?.button?.setAccessibilityLabel(provider.name + " " + (offline ? L10n.text("네트워크 연결 없음") : percent))
         let overlay = offline || checking
         if overlay, overlayHeight == nil, let view = dashboard.view {
             let probe = NSMenu()
@@ -134,7 +134,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
         guard let button = item?.button else { return }
         if NSApp.currentEvent?.type == .rightMouseUp {
             let context = NSMenu()
-            let disable = NSMenuItem(title: "\(provider.name) 끄기", action: #selector(disable), keyEquivalent: "")
+            let disable = NSMenuItem(title: L10n.text("%@ 끄기", provider.name), action: #selector(disable), keyEquivalent: "")
             disable.target = self
             context.addItem(disable)
             context.popUpFollowingSystemAppearance(from: button)

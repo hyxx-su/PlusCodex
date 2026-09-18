@@ -58,17 +58,17 @@ enum ClaudeCLIUsage {
     static func blockingMessage(_ text: String) -> String? {
         let value = clean(text).lowercased()
         if value.range(of: "do you trust|trust the files|safety check|choose.*text style|select.*theme", options: .regularExpression) != nil {
-            return "Claude CLI 초기 설정·신뢰 확인이 필요합니다. 안내된 usage-probe 폴더에서 claude를 직접 실행해 확인하세요."
+            return L10n.text("Claude CLI 초기 설정·신뢰 확인이 필요합니다. 안내된 usage-probe 폴더에서 claude를 직접 실행해 확인하세요.")
         }
         if value.range(of: "not logged in|please log in|please login|select login method|sign in to", options: .regularExpression) != nil {
-            return "Claude CLI에서 로그인을 완료한 뒤 다시 조회하세요."
+            return L10n.text("Claude CLI에서 로그인을 완료한 뒤 다시 조회하세요.")
         }
         return nil
     }
 
     static func fetch() throws -> Quota {
         guard let binary = CLIInstallation.executable(.claude) else {
-            throw UsageFailure.message("Claude Code 실행 파일을 찾을 수 없습니다.")
+            throw UsageFailure.message(L10n.text("Claude Code 실행 파일을 찾을 수 없습니다."))
         }
         try FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
         return try run(binary: binary, arguments: [], cwd: workingDirectory.path)
@@ -78,7 +78,7 @@ enum ClaudeCLIUsage {
     static func run(binary: String, arguments: [String], cwd: String, timeout: TimeInterval = 25) throws -> Quota {
         var master: Int32 = -1, slave: Int32 = -1
         var size = winsize(ws_row: 40, ws_col: 120, ws_xpixel: 0, ws_ypixel: 0)
-        guard openpty(&master, &slave, nil, nil, &size) == 0 else { throw UsageFailure.message("Claude 조회 터미널을 열지 못했습니다.") }
+        guard openpty(&master, &slave, nil, nil, &size) == 0 else { throw UsageFailure.message(L10n.text("Claude 조회 터미널을 열지 못했습니다.")) }
         defer { close(master); close(slave) }
         _ = fcntl(master, F_SETFL, O_NONBLOCK)
         var actions: posix_spawn_file_actions_t?
@@ -105,7 +105,7 @@ enum ClaudeCLIUsage {
                 posix_spawn(&pid, binary, &actions, &attributes, args.baseAddress!, env.baseAddress!)
             }
         }
-        guard code == 0 else { throw UsageFailure.message("Claude CLI를 실행하지 못했습니다 (\(code)).") }
+        guard code == 0 else { throw UsageFailure.message(L10n.text("Claude CLI를 실행하지 못했습니다 (%d).", code)) }
         var reaped = false
         defer {
             // Do not signal a PID after waitpid has reaped it (it could be reused).
@@ -130,7 +130,7 @@ enum ClaudeCLIUsage {
             let now = ProcessInfo.processInfo.systemUptime
             if count > 0 {
                 data.append(contentsOf: buffer.prefix(count))
-                guard data.count <= 1_048_576 else { throw UsageFailure.message("Claude CLI 출력이 너무 많아 조회를 중단했습니다.") }
+                guard data.count <= 1_048_576 else { throw UsageFailure.message(L10n.text("Claude CLI 출력이 너무 많아 조회를 중단했습니다.")) }
                 lastChange = now
                 let output = String(decoding: data, as: UTF8.self)
                 if let message = blockingMessage(output) { throw UsageFailure.message(message) }
@@ -150,10 +150,10 @@ enum ClaudeCLIUsage {
             if waitpid(pid, &status, WNOHANG) == pid {
                 reaped = true
                 if let candidate { return candidate }
-                throw UsageFailure.message("Claude CLI가 사용량을 표시하기 전에 종료되었습니다.")
+                throw UsageFailure.message(L10n.text("Claude CLI가 사용량을 표시하기 전에 종료되었습니다."))
             }
         }
         if let candidate { return candidate }
-        throw UsageFailure.message("Claude /usage 조회 시간이 초과되었습니다. CLI에서 /usage가 표시되는지 확인하세요.")
+        throw UsageFailure.message(L10n.text("Claude /usage 조회 시간이 초과되었습니다. CLI에서 /usage가 표시되는지 확인하세요."))
     }
 }

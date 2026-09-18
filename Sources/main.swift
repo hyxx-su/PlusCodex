@@ -1,6 +1,8 @@
 import Foundation
 import AppKit
 
+LanguageSettings().configureFrameworkLanguage()
+
 if CommandLine.arguments.contains("--probe") {
     do {
         let quota = try QuotaClient.fetch()

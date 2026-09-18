@@ -31,14 +31,14 @@ final class QuotaMenuView: NSView {
         // Only the first opening's intro panel carries the tiny logo loader;
         // after it expires the dashboard renders immediately, even without data.
         if intro || checkingForUpdates || offline {
-            setAccessibilityLabel(checkingForUpdates ? "업데이트 확인 중. 최신 버전인지 확인하고 있어요." : "사용량을 불러오는 중")
-            if offline { setAccessibilityLabel("네트워크 연결 없음") }
+            setAccessibilityLabel(checkingForUpdates ? L10n.text("업데이트 확인 중. 최신 버전인지 확인하고 있어요.") : L10n.text("사용량을 불러오는 중"))
+            if offline { setAccessibilityLabel(L10n.text("네트워크 연결 없음")) }
             addSubview(QuotaLoadingView(frame: bounds, logoSize: checkingForUpdates || offline ? 40 : 28,
                                        checkingForUpdates: checkingForUpdates, offline: offline, provider: provider))
         } else {
             let windows = quota?.windows ?? []
-            setAccessibilityLabel((["\(provider.name) 남은 사용량"] + windows.enumerated().map { index, window in
-                "\(provider == .codex ? window.displayLabel(planType: account?.planType, isPrimary: index == 0 && quota?.primary != nil) : window.label) \(window.remaining)% 남음"
+            setAccessibilityLabel(([L10n.text("%@ 남은 사용량", provider.name)] + windows.enumerated().map { index, window in
+                L10n.text("%@ %d%% 남음", provider == .codex ? window.displayLabel(planType: account?.planType, isPrimary: index == 0 && quota?.primary != nil) : window.label, window.remaining)
             } + [failure ?? ""]).joined(separator: ", "))
         }
     }
@@ -57,8 +57,8 @@ final class QuotaMenuView: NSView {
             needsDisplay = true
         }
         let windows = quota?.windows ?? []
-        setAccessibilityLabel((["\(provider.name) 남은 사용량"] + windows.enumerated().map { index, window in
-            "\(provider == .codex ? window.displayLabel(planType: account?.planType, isPrimary: index == 0 && quota?.primary != nil) : window.label) \(window.remaining)% 남음"
+        setAccessibilityLabel(([L10n.text("%@ 남은 사용량", provider.name)] + windows.enumerated().map { index, window in
+            L10n.text("%@ %d%% 남음", provider == .codex ? window.displayLabel(planType: account?.planType, isPrimary: index == 0 && quota?.primary != nil) : window.label, window.remaining)
         } + [failure ?? ""]).joined(separator: ", "))
         setNeedsDisplay(NSRect(x: 116, y: 12, width: 168, height: 38))
         setNeedsDisplay(NSRect(x: 12, y: 62, width: 276, height: max(62, bounds.height - 62)))
@@ -85,8 +85,8 @@ final class QuotaMenuView: NSView {
                             respectFlipped: true, hints: nil)
         }
         text(provider.name, x: 38, y: 12, size: provider == .claude ? 13 : 16, weight: .bold, width: 108)
-        text("남은 사용량", x: 16, y: 35, size: 10, color: .secondaryLabelColor)
-        text(account?.email ?? (quota == nil && failure == nil ? "계정 정보 확인 중" : "계정 정보 없음"), x: 152, y: 15, size: 10,
+        text(L10n.text("남은 사용량"), x: 16, y: 35, size: 10, color: .secondaryLabelColor)
+        text(account?.email ?? (quota == nil && failure == nil ? L10n.text("계정 정보 확인 중") : L10n.text("계정 정보 없음")), x: 152, y: 15, size: 10,
              color: .secondaryLabelColor, width: 132, height: 14, align: .right,
              lineBreak: .byTruncatingMiddle)
         text(account?.planType?.capitalized ?? "—", x: 116, y: 32, size: 10,
@@ -94,7 +94,7 @@ final class QuotaMenuView: NSView {
 
         let windows = quota?.windows ?? []
         if windows.isEmpty {
-            let message = failure ?? (quota == nil ? "사용량을 확인하고 있어요." : "현재 계정에서 제공되는 한도 정보가 없습니다.")
+            let message = failure ?? (quota == nil ? L10n.text("사용량을 확인하고 있어요.") : L10n.text("현재 계정에서 제공되는 한도 정보가 없습니다."))
             text(message, x: 16, y: 70, size: 11, color: .secondaryLabelColor, width: 268, height: 42)
         } else {
             for (index, window) in windows.enumerated() {
@@ -122,7 +122,7 @@ final class QuotaMenuView: NSView {
         let remaining = window?.remaining
         let tint: NSColor = stale || remaining == nil ? .secondaryLabelColor : .labelColor
         text(title, x: 24, y: y + 11, size: 12, weight: .semibold, width: 120)
-        text(stale ? "이전 조회" : "남음", x: 180, y: y + 14, size: 10, color: .secondaryLabelColor,
+        text(stale ? L10n.text("이전 조회") : L10n.text("남음"), x: 180, y: y + 14, size: 10, color: .secondaryLabelColor,
              width: 43, align: .right)
         text(remaining.map { "\($0)%" } ?? "--%", x: 228, y: y + 10, size: 15, weight: .medium,
              color: tint, width: 48, align: .right, numeric: true)
@@ -140,9 +140,10 @@ final class QuotaMenuView: NSView {
         }
         let reset = window?.resetsAt.map { timestamp -> String in
             let date = Date(timeIntervalSince1970: timestamp)
-            let day = Calendar.current.isDateInToday(date) ? "오늘" : date.formatted(.dateTime.month().day())
-            return "\(day) \(date.formatted(date: .omitted, time: .shortened)) 초기화"
-        } ?? window?.resetDescription.map { "초기화: \($0)" } ?? "한도 정보 대기 중"
+            let day = Calendar.current.isDateInToday(date) ? L10n.text("오늘") : date.formatted(.dateTime.month().day().locale(L10n.locale))
+            let time = date.formatted(.dateTime.hour().minute().locale(L10n.locale))
+            return L10n.text("%@ 초기화", "\(day) \(time)")
+        } ?? window?.resetDescription.map { L10n.text("초기화: %@", $0) } ?? L10n.text("한도 정보 대기 중")
         text(reset, x: 24, y: y + 57, size: 10, color: .secondaryLabelColor, width: 252, height: 18)
     }
 

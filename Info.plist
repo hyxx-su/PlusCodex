@@ -4,13 +4,13 @@
 <key>CFBundleIdentifier</key><string>local.codexquota.menubar</string>
 <key>CFBundleName</key><string>PlusCodex</string>
 <key>CFBundleDevelopmentRegion</key><string>ko</string>
-<key>CFBundleLocalizations</key><array><string>ko</string></array>
+<key>CFBundleLocalizations</key><array><string>ko</string><string>en</string></array>
 <key>CFBundleDisplayName</key><string>PlusCodex</string>
 <key>CFBundleExecutable</key><string>PlusCodex</string>
 <key>CFBundleIconFile</key><string>PlusCodex.icns</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>1.0.5</string>
-<key>CFBundleVersion</key><string>7</string>
+<key>CFBundleShortVersionString</key><string>1.0.6</string>
+<key>CFBundleVersion</key><string>8</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>

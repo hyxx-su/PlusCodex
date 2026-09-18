@@ -1,3 +1,5 @@
+[한국어](./README.md) | [English](./README.en.md)
+
 <img src="Resources/PlusCodex-banner.png" alt="PlusCodex 배너" width="7680" height="4320" />
 
 # PlusCodex

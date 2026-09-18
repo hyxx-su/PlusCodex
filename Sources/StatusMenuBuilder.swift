@@ -32,11 +32,11 @@ enum StatusMenuBuilder {
         let separator = NSMenuItem.separator()
         menu.addItem(separator)
 
-        let refresh = NSMenuItem(title: "지금 새로고침", action: refreshAction, keyEquivalent: "r")
+        let refresh = NSMenuItem(title: L10n.text("지금 새로고침"), action: refreshAction, keyEquivalent: "r")
         refresh.target = target
         menu.addItem(refresh)
 
-        let quit = NSMenuItem(title: "PlusCodex 종료", action: quitAction, keyEquivalent: "q")
+        let quit = NSMenuItem(title: L10n.text("PlusCodex 종료"), action: quitAction, keyEquivalent: "q")
         quit.target = target
         menu.addItem(quit)
 

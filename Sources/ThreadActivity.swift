@@ -257,7 +257,7 @@ final class ThreadActivityMonitor {
         if change["type"] as? String == "snapshot",
            let state = change["conversationState"] as? [String: Any],
            let runtime = state["threadRuntimeStatus"] as? [String: Any], let status = runtime["type"] as? String {
-            activities[id] = ThreadActivity(id: id, title: state["title"] as? String ?? "Codex 채팅",
+            activities[id] = ThreadActivity(id: id, title: state["title"] as? String ?? L10n.text("Codex 채팅"),
                 runtime: status, unread: state["hasUnreadTurn"] as? Bool ?? false,
                 updatedAt: state["updatedAt"] as? Double ?? 0)
             owners[id] = owner

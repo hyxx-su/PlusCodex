@@ -15,8 +15,8 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
                       UserDefaults.standard.string(forKey: "notifiedUpdateBuild") != build,
                       self.pendingUpdateBuilds.insert(build).inserted else { return }
                 let content = UNMutableNotificationContent()
-                content.title = "PlusCodex 새 업데이트"
-                content.body = "v\(version) 버전을 사용할 수 있습니다. 업데이트 안내를 확인하세요."
+                content.title = L10n.text("PlusCodex 새 업데이트")
+                content.body = L10n.text("v%@ 버전을 사용할 수 있습니다. 업데이트 안내를 확인하세요.", version)
                 content.sound = .default
                 content.userInfo = ["updateAvailable": true]
                 // Persist only after successful submission; failures may retry on the next check.
@@ -48,10 +48,10 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
                 self.saveAlertState()
                 for alert in alerts {
                     let content = UNMutableNotificationContent()
-                    content.title = alert.level == 2 ? "Codex \(alert.label) 사용량 소진" : "Codex \(alert.label) 10% 남았습니다."
+                    content.title = alert.level == 2 ? L10n.text("Codex %@ 사용량 소진", alert.label) : L10n.text("Codex %@ 10% 남았습니다.", alert.label)
                     content.body = alert.level == 2
-                        ? "남은 사용량이 0%입니다. 초기화 시간을 확인하세요."
-                        : "사용량이 얼마 남지 않았습니다. PlusCodex에서 현재 잔여량과 초기화 시간을 확인하세요."
+                        ? L10n.text("남은 사용량이 0%입니다. 초기화 시간을 확인하세요.")
+                        : L10n.text("사용량이 얼마 남지 않았습니다. PlusCodex에서 현재 잔여량과 초기화 시간을 확인하세요.")
                     content.sound = .default
                     self.center.add(UNNotificationRequest(identifier: "quota-\(UUID().uuidString)", content: content, trigger: nil)) { error in
                         if let error {
@@ -82,7 +82,7 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
 
     func completed(_ activity: ThreadActivity) {
         let content = UNMutableNotificationContent()
-        content.title = "Codex 작업 완료"
+        content.title = L10n.text("Codex 작업 완료")
         content.body = activity.title
         content.sound = .default
         content.userInfo = ["threadID": activity.id]
@@ -110,8 +110,8 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
             guard scheduled[id] != timestamp else { continue }
             scheduled[id] = timestamp
             let content = UNMutableNotificationContent()
-            content.title = "Codex \(window.displayLabel(planType: account?.planType, isPrimary: name == "primary")) 초기화 시간"
-            content.body = "사용량 초기화 예정 시간이 되었습니다. PlusCodex에서 남은 사용량을 확인하세요."
+            content.title = L10n.text("Codex %@ 초기화 시간", window.displayLabel(planType: account?.planType, isPrimary: name == "primary"))
+            content.body = L10n.text("사용량 초기화 예정 시간이 되었습니다. PlusCodex에서 남은 사용량을 확인하세요.")
             content.sound = .default
             let interval = max(1, timestamp - Date().timeIntervalSince1970)
             center.add(UNNotificationRequest(identifier: id, content: content,

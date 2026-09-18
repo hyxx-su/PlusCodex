@@ -23,11 +23,11 @@ final class QuotaLoadingView: NSView {
         logoPoint = CGPoint(x: frame.midX, y: frame.midY - (captionHidden ? 0 : 32))
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
-        setAccessibilityLabel(offline ? "네트워크 연결 없음" : checkingForUpdates ? "업데이트 확인 중. 최신 버전인지 확인하고 있어요." : "사용량을 불러오는 중")
+        setAccessibilityLabel(offline ? L10n.text("네트워크 연결 없음") : checkingForUpdates ? L10n.text("업데이트 확인 중. 최신 버전인지 확인하고 있어요.") : L10n.text("사용량을 불러오는 중"))
         if !captionHidden {
             for (text, size, weight, color, y) in [
-                (offline ? "네트워크 연결 없음" : "업데이트 확인 중", CGFloat(17), NSFont.Weight.semibold, NSColor.labelColor, frame.midY + 12),
-                (offline ? "연결되면 다시 확인할게요." : "최신 버전인지 확인하고 있어요.", CGFloat(11), NSFont.Weight.regular, NSColor.secondaryLabelColor, frame.midY + min(42, frame.height / 2 - 26))
+                (offline ? L10n.text("네트워크 연결 없음") : L10n.text("업데이트 확인 중"), CGFloat(17), NSFont.Weight.semibold, NSColor.labelColor, frame.midY + 12),
+                (offline ? L10n.text("연결되면 다시 확인할게요.") : L10n.text("최신 버전인지 확인하고 있어요."), CGFloat(11), NSFont.Weight.regular, NSColor.secondaryLabelColor, frame.midY + min(42, frame.height / 2 - 26))
             ] {
                 let label = NSTextField(labelWithString: text)
                 label.font = .systemFont(ofSize: size, weight: weight)

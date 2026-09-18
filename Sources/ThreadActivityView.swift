@@ -18,7 +18,7 @@ final class ThreadActivityButton: NSButton {
         title = ""
         target = self
         action = #selector(openThread)
-        setAccessibilityLabel("\(activity.isRunning ? "작업 중" : "완료 · 미확인"), \(activity.title)")
+        setAccessibilityLabel("\(activity.isRunning ? L10n.text("작업 중") : L10n.text("완료 · 미확인")), \(activity.title)")
         wantsLayer = true
         shimmer.colors = [NSColor.clear.cgColor, NSColor.white.withAlphaComponent(0.9).cgColor, NSColor.clear.cgColor]
         shimmer.locations = [0, 0.5, 1]

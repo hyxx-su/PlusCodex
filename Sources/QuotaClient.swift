@@ -9,19 +9,19 @@ struct QuotaWindow: Decodable {
     var resetDescription: String? = nil
     var remaining: Int { Int(max(0, min(100, 100 - usedPercent)).rounded(.down)) }
     var label: String {
-        if let customLabel { return customLabel }
-        guard let minutes = windowDurationMins else { return "사용 한도" }
-        if minutes == 10080 { return "주간" }
-        if minutes == 43200 { return "1개월" }
-        return minutes % 60 == 0 ? "\(minutes / 60)시간" : "\(minutes)분"
+        if let customLabel { return L10n.quotaLabel(customLabel) }
+        guard let minutes = windowDurationMins else { return L10n.text("사용 한도") }
+        if minutes == 10080 { return L10n.text("주간") }
+        if minutes == 43200 { return L10n.text("1개월") }
+        return minutes % 60 == 0 ? L10n.text("%d시간", minutes / 60) : L10n.text("%d분", minutes)
     }
 
     /// Plan-specific presentation only; never changes server reset dates or quota math.
     func displayLabel(planType: String?, isPrimary: Bool) -> String {
         guard isPrimary else { return label }
         let plan = planType?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if plan == "free" { return "1개월" }
-        if plan == "pro" || plan.hasPrefix("pro_") || plan.hasPrefix("pro-") { return "주간" }
+        if plan == "free" { return L10n.text("1개월") }
+        if plan == "pro" || plan.hasPrefix("pro_") || plan.hasPrefix("pro-") { return L10n.text("주간") }
         return label
     }
 }
@@ -76,7 +76,7 @@ final class QuotaClient {
             "/opt/homebrew/bin/codex", "/usr/local/bin/codex"
         ]
         guard let binary = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
-            throw QuotaError.unavailable("Codex 실행 파일을 찾을 수 없습니다.")
+            throw QuotaError.unavailable(L10n.text("Codex 실행 파일을 찾을 수 없습니다."))
         }
         let process = Process()
         let input = Pipe(), output = Pipe()
@@ -113,7 +113,7 @@ final class QuotaClient {
                     guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
                           object["id"] as? Int == id else { continue }
                     if object["error"] != nil {
-                        throw QuotaError.unavailable("조회 실패 — Codex의 로그인 상태를 확인하세요.")
+                        throw QuotaError.unavailable(L10n.text("조회 실패 — Codex의 로그인 상태를 확인하세요."))
                     }
                     guard let result = object["result"] else { continue }
                     return try JSONSerialization.data(withJSONObject: result)
@@ -123,13 +123,13 @@ final class QuotaClient {
                 var bytes = [UInt8](repeating: 0, count: 65536)
                 let count = Darwin.read(fd, &bytes, bytes.count)
                 if count > 0 { pending.append(contentsOf: bytes.prefix(count)) }
-                else if count == 0 { throw QuotaError.unavailable("Codex 연결이 종료되었습니다.") }
+                else if count == 0 { throw QuotaError.unavailable(L10n.text("Codex 연결이 종료되었습니다.")) }
                 else if errno != EAGAIN && errno != EINTR {
-                    throw QuotaError.unavailable("Codex 응답을 읽을 수 없습니다.")
+                    throw QuotaError.unavailable(L10n.text("Codex 응답을 읽을 수 없습니다."))
                 }
-                if pending.count > 4_000_000 { throw QuotaError.unavailable("Codex 응답이 너무 큽니다.") }
+                if pending.count > 4_000_000 { throw QuotaError.unavailable(L10n.text("Codex 응답이 너무 큽니다.")) }
             }
-            throw QuotaError.unavailable("조회 시간 초과 — 60초 후 재시도합니다.")
+            throw QuotaError.unavailable(L10n.text("조회 시간 초과 — 60초 후 재시도합니다."))
         }
         try send(["id": 1, "method": "initialize", "params": ["clientInfo": ["name": "codex_quota", "version": "1.0"]]])
         _ = try response(1)

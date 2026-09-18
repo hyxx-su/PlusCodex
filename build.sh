@@ -18,6 +18,8 @@ done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/PlusCodex.icns"
 cp Resources/PlusCodex.png "$APP/Contents/Resources/PlusCodex.png"
 cp Info.plist "$APP/Contents/Info.plist"
+ditto Resources/ko.lproj "$APP/Contents/Resources/ko.lproj"
+ditto Resources/en.lproj "$APP/Contents/Resources/en.lproj"
 cp Resources/Codex.svg "$APP/Contents/Resources/Codex.svg"
 cp Resources/Claude.svg Resources/Grok.svg Resources/Orca-LICENSE "$APP/Contents/Resources/"
 cp Resources/CodexBar-LICENSE "$APP/Contents/Resources/CodexBar-LICENSE"

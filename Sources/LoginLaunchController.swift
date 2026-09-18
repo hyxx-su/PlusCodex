@@ -17,10 +17,10 @@ final class LoginLaunchController {
     var requested: Bool { readStatus() == .enabled || readStatus() == .requiresApproval }
     var message: String {
         switch readStatus() {
-        case .enabled: return "Mac에 로그인하면 자동으로 실행합니다."
-        case .requiresApproval: return "시스템 설정 → 일반 → 로그인 항목에서 허용하세요."
-        case .notFound: return "응용 프로그램 폴더에 설치한 뒤 켜주세요."
-        default: return "Mac에 로그인할 때 PlusCodex를 실행합니다."
+        case .enabled: return L10n.text("Mac에 로그인하면 자동으로 실행합니다.")
+        case .requiresApproval: return L10n.text("시스템 설정 → 일반 → 로그인 항목에서 허용하세요.")
+        case .notFound: return L10n.text("응용 프로그램 폴더에 설치한 뒤 켜주세요.")
+        default: return L10n.text("Mac에 로그인할 때 PlusCodex를 실행합니다.")
         }
     }
     func applyInitialDefault() throws {

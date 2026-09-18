@@ -127,7 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     self.account = snapshot.account
                     self.updatedAt = Date()
                     self.failure = nil
-                    self.settingsWindow.update(.codex, status: snapshot.account?.email ?? "연결됨 · 사용량 조회 완료")
+                    self.settingsWindow.update(.codex, status: snapshot.account?.email ?? L10n.text("연결됨 · 사용량 조회 완료"))
                 case .failure(let error):
                     self.failure = error.localizedDescription
                     self.settingsWindow.update(.codex, status: error.localizedDescription)
@@ -151,8 +151,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 .font: NSFont.monospacedDigitSystemFont(ofSize: offline ? 9 : 11, weight: .medium),
                 .foregroundColor: offline ? NSColor.systemGray : NSColor.labelColor
             ])
-            button.setAccessibilityLabel(offline ? "네트워크 연결 없음" : "Codex 남은 사용량 " + percent)
-            button.toolTip = offline ? "네트워크 연결 없음" : "Codex · \(primary?.displayLabel(planType: account?.planType, isPrimary: quota?.primary != nil) ?? "사용 한도") 잔여 \(percent)"
+            button.setAccessibilityLabel(offline ? L10n.text("네트워크 연결 없음") : L10n.text("Codex 남은 사용량 ") + percent)
+            button.toolTip = offline ? L10n.text("네트워크 연결 없음") : L10n.text("Codex · %@ 잔여 %@", primary?.displayLabel(planType: account?.planType, isPrimary: quota?.primary != nil) ?? L10n.text("사용 한도"), percent)
         }
         // Measure AppKit's native row heights before hiding them; the status panel
         // then occupies exactly the same menu content area, including action rows.
@@ -188,7 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                            target: self, refreshAction: #selector(refresh),
                                            quitAction: #selector(quitApp))
         builtItems = built
-        let settings = NSMenuItem(title: "설정", action: #selector(openSettings), keyEquivalent: ",")
+        let settings = NSMenuItem(title: L10n.text("설정"), action: #selector(openSettings), keyEquivalent: ",")
         settings.image = nil
         settings.target = self
         built.menu.insertItem(settings, at: built.menu.items.count - 1)
@@ -223,7 +223,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else if let item {
             NSStatusBar.system.removeStatusItem(item)
             self.item = nil
-            settingsWindow.update(.codex, status: "메뉴바에서 꺼짐")
+            settingsWindow.update(.codex, status: L10n.text("메뉴바에서 꺼짐"))
         }
         extraProviders.forEach { $0.synchronize() }
         settingsWindow.synchronize()
@@ -234,7 +234,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let button = item?.button else { return }
         if NSApp.currentEvent?.type == .rightMouseUp {
             let context = NSMenu()
-            let disable = NSMenuItem(title: "Codex 끄기", action: #selector(disableCodex), keyEquivalent: "")
+            let disable = NSMenuItem(title: L10n.text("Codex 끄기"), action: #selector(disableCodex), keyEquivalent: "")
             disable.target = self
             context.addItem(disable)
             context.popUpFollowingSystemAppearance(from: button)

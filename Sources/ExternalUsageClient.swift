@@ -12,11 +12,11 @@ enum UsageFailure: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .message(let value): return value
-        case .throttled: return "조회 요청이 많습니다. 잠시 후 다시 확인합니다."
-        case .authentication: return "사용량 API가 인증을 거부했습니다. 해당 AI CLI의 로그인 상태를 확인하세요."
-        case .missingScope: return "사용량 조회 권한(user:profile)이 없습니다. Claude CLI에서 다시 로그인하세요."
-        case .credentialsUnavailable: return "Claude 인증 정보를 읽지 못했습니다. CLI 로그인과 키체인 접근을 확인하세요."
-        case .server: return "사용량 서버에 일시적인 오류가 발생했습니다."
+        case .throttled: return L10n.text("조회 요청이 많습니다. 잠시 후 다시 확인합니다.")
+        case .authentication: return L10n.text("사용량 API가 인증을 거부했습니다. 해당 AI CLI의 로그인 상태를 확인하세요.")
+        case .missingScope: return L10n.text("사용량 조회 권한(user:profile)이 없습니다. Claude CLI에서 다시 로그인하세요.")
+        case .credentialsUnavailable: return L10n.text("Claude 인증 정보를 읽지 못했습니다. CLI 로그인과 키체인 접근을 확인하세요.")
+        case .server: return L10n.text("사용량 서버에 일시적인 오류가 발생했습니다.")
         }
     }
 }
@@ -84,7 +84,7 @@ enum ExternalUsageClient {
                     resetsAt: timestamp(raw["resets_at"]), customLabel: title))
             }
         }
-        guard !windows.isEmpty else { throw UsageFailure.message("이 계정에서 구독 사용량을 제공하지 않습니다.") }
+        guard !windows.isEmpty else { throw UsageFailure.message(L10n.text("이 계정에서 구독 사용량을 제공하지 않습니다.")) }
         return quota(windows)
     }
 
@@ -177,17 +177,17 @@ enum ExternalUsageClient {
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok")
         guard let bytes = try? Data(contentsOf: home.appendingPathComponent("auth.json")),
               let root = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] else {
-            throw UsageFailure.message("Grok CLI를 설치하고 grok login으로 로그인하세요.")
+            throw UsageFailure.message(L10n.text("Grok CLI를 설치하고 grok login으로 로그인하세요."))
         }
         guard let session = grokSession(root), let token = session["key"] as? String else {
-            throw UsageFailure.message("Grok을 실행해 로그인 상태를 갱신하세요. 메시지는 보낼 필요 없습니다.")
+            throw UsageFailure.message(L10n.text("Grok을 실행해 로그인 상태를 갱신하세요. 메시지는 보낼 필요 없습니다."))
         }
         var headers = ["Authorization": "Bearer \(token)", "X-XAI-Token-Auth": "xai-grok-cli"]
         headers["x-userid"] = session["user_id"] as? String
         var data = try request("https://cli-chat-proxy.grok.com/v1/billing?format=credits", headers: headers)
         if parseGrok(data) == nil { data = try request("https://cli-chat-proxy.grok.com/v1/billing", headers: headers) }
         guard let quota = parseGrok(data) else {
-            throw UsageFailure.message("이 계정에서 사용량 퍼센트를 제공하지 않습니다.")
+            throw UsageFailure.message(L10n.text("이 계정에서 사용량 퍼센트를 제공하지 않습니다."))
         }
         let config = data["config"] as? [String: Any] ?? data
         return QuotaSnapshot(quota: quota, account: CodexAccount(email: session["email"] as? String,
@@ -199,14 +199,14 @@ enum ExternalUsageClient {
         request.allHTTPHeaderFields = headers
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let semaphore = DispatchSemaphore(value: 0)
-        var result: Result<[String: Any], Error> = .failure(UsageFailure.message("조회 시간이 초과되었습니다."))
+        var result: Result<[String: Any], Error> = .failure(UsageFailure.message(L10n.text("조회 시간이 초과되었습니다.")))
         let session = URLSession(configuration: .ephemeral, delegate: NoUsageRedirects(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
         let task = session.dataTask(with: request) { data, response, error in
             defer { semaphore.signal() }
             result = Result {
-                if error != nil { throw UsageFailure.message("네트워크 연결을 확인한 후 다시 시도하세요.") }
-                guard let response = response as? HTTPURLResponse else { throw UsageFailure.message("응답을 확인할 수 없습니다.") }
+                if error != nil { throw UsageFailure.message(L10n.text("네트워크 연결을 확인한 후 다시 시도하세요.")) }
+                guard let response = response as? HTTPURLResponse else { throw UsageFailure.message(L10n.text("응답을 확인할 수 없습니다.")) }
                 if response.statusCode == 429 {
                     let seconds = Double(response.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 900
                     throw UsageFailure.throttled(Date().addingTimeInterval(max(60, seconds)))
@@ -217,10 +217,10 @@ enum ExternalUsageClient {
                 }
                 if [401, 403].contains(response.statusCode) { throw UsageFailure.authentication }
                 if response.statusCode >= 500 { throw UsageFailure.server }
-                if response.statusCode == 412 { throw UsageFailure.message("이 팀 계정은 사용량 조회를 지원하지 않습니다.") }
+                if response.statusCode == 412 { throw UsageFailure.message(L10n.text("이 팀 계정은 사용량 조회를 지원하지 않습니다.")) }
                 guard response.statusCode == 200, let data,
                       let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    throw UsageFailure.message("사용량 조회에 실패했습니다 (HTTP \(response.statusCode)).")
+                    throw UsageFailure.message(L10n.text("사용량 조회에 실패했습니다 (HTTP %d).", response.statusCode))
                 }
                 return object
             }
