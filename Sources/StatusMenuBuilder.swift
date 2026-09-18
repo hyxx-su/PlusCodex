@@ -36,7 +36,7 @@ enum StatusMenuBuilder {
         refresh.target = target
         menu.addItem(refresh)
 
-        let quit = NSMenuItem(title: "시스템 종료", action: quitAction, keyEquivalent: "q")
+        let quit = NSMenuItem(title: "PlusCodex 종료", action: quitAction, keyEquivalent: "q")
         quit.target = target
         menu.addItem(quit)
 

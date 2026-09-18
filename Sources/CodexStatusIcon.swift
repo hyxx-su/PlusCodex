@@ -1,8 +1,8 @@
 import AppKit
 
 enum CodexStatusIcon {
-    static func image(size: CGFloat, offline: Bool) -> NSImage? {
-        guard let url = Bundle.main.url(forResource: "Codex", withExtension: "svg"),
+    static func image(size: CGFloat, offline: Bool, provider: AIProvider = .codex) -> NSImage? {
+        guard let url = Bundle.main.url(forResource: provider.resource, withExtension: "svg"),
               let source = NSImage(contentsOf: url) else { return nil }
         let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
             source.draw(in: rect)

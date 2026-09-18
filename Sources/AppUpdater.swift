@@ -13,6 +13,8 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate {
         startingUpdater: false, updaterDelegate: self, userDriverDelegate: nil)
 
     func start() {
+        // Beta builds stay on the tester's version until a separate beta feed exists.
+        guard Bundle.main.object(forInfoDictionaryKey: "PlusCodexBeta") as? Bool != true else { return }
         do {
             try controller.updater.start()
             started = true

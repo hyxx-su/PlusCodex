@@ -9,12 +9,14 @@ final class QuotaMenuView: NSView {
     let intro: Bool
     let checkingForUpdates: Bool
     let offline: Bool
-    private let headerIcon: NSImage? = Bundle.main.url(forResource: "Codex", withExtension: "svg")
-        .flatMap { NSImage(contentsOf: $0) }
+    private let provider: AIProvider
+    private var headerIcon: NSImage? { CodexStatusIcon.image(size: 18, offline: false, provider: provider) }
     override var isFlipped: Bool { true }
 
     init(quota: Quota?, account: CodexAccount? = nil, updatedAt: Date?, failure: String?, intro: Bool = false,
-         checkingForUpdates: Bool = false, offline: Bool = false, preservedHeight: CGFloat? = nil) {
+         checkingForUpdates: Bool = false, offline: Bool = false, preservedHeight: CGFloat? = nil,
+         provider: AIProvider = .codex) {
+        self.provider = provider
         self.quota = quota
         self.account = account
         self.updatedAt = updatedAt
@@ -32,11 +34,11 @@ final class QuotaMenuView: NSView {
             setAccessibilityLabel(checkingForUpdates ? "업데이트 확인 중. 최신 버전인지 확인하고 있어요." : "사용량을 불러오는 중")
             if offline { setAccessibilityLabel("네트워크 연결 없음") }
             addSubview(QuotaLoadingView(frame: bounds, logoSize: checkingForUpdates || offline ? 40 : 28,
-                                       checkingForUpdates: checkingForUpdates, offline: offline))
+                                       checkingForUpdates: checkingForUpdates, offline: offline, provider: provider))
         } else {
-            let windows = [quota?.primary, quota?.secondary].compactMap { $0 }
-            setAccessibilityLabel((["Codex 남은 사용량"] + windows.enumerated().map { index, window in
-                "\(window.displayLabel(planType: account?.planType, isPrimary: index == 0 && quota?.primary != nil)) \(window.remaining)% 남음"
+            let windows = quota?.windows ?? []
+            setAccessibilityLabel((["\(provider.name) 남은 사용량"] + windows.enumerated().map { index, window in
+                "\(provider == .codex ? window.displayLabel(planType: account?.planType, isPrimary: index == 0 && quota?.primary != nil) : window.label) \(window.remaining)% 남음"
             } + [failure ?? ""]).joined(separator: ", "))
         }
     }
@@ -54,12 +56,12 @@ final class QuotaMenuView: NSView {
             setFrameSize(NSSize(width: 300, height: Self.panelHeight(quota: quota, intro: false)))
             needsDisplay = true
         }
-        let windows = [quota?.primary, quota?.secondary].compactMap { $0 }
-        setAccessibilityLabel((["Codex 남은 사용량"] + windows.enumerated().map { index, window in
-            "\(window.displayLabel(planType: account?.planType, isPrimary: index == 0 && quota?.primary != nil)) \(window.remaining)% 남음"
+        let windows = quota?.windows ?? []
+        setAccessibilityLabel((["\(provider.name) 남은 사용량"] + windows.enumerated().map { index, window in
+            "\(provider == .codex ? window.displayLabel(planType: account?.planType, isPrimary: index == 0 && quota?.primary != nil) : window.label) \(window.remaining)% 남음"
         } + [failure ?? ""]).joined(separator: ", "))
         setNeedsDisplay(NSRect(x: 116, y: 12, width: 168, height: 38))
-        setNeedsDisplay(NSRect(x: 12, y: 62, width: 276, height: 176))
+        setNeedsDisplay(NSRect(x: 12, y: 62, width: 276, height: max(62, bounds.height - 62)))
     }
 
     /// Intro state: `until` is the moment the tiny logo-only panel reverts.
@@ -82,10 +84,10 @@ final class QuotaMenuView: NSView {
                             from: .zero, operation: .sourceOver, fraction: 1,
                             respectFlipped: true, hints: nil)
         }
-        text("Codex", x: 38, y: 12, size: 16, weight: .bold, width: 70)
+        text(provider.name, x: 38, y: 12, size: provider == .claude ? 13 : 16, weight: .bold, width: 108)
         text("남은 사용량", x: 16, y: 35, size: 10, color: .secondaryLabelColor)
-        text(account?.email ?? (quota == nil && failure == nil ? "계정 정보 확인 중" : "계정 정보 없음"), x: 116, y: 15, size: 10,
-             color: .secondaryLabelColor, width: 168, height: 14, align: .right,
+        text(account?.email ?? (quota == nil && failure == nil ? "계정 정보 확인 중" : "계정 정보 없음"), x: 152, y: 15, size: 10,
+             color: .secondaryLabelColor, width: 132, height: 14, align: .right,
              lineBreak: .byTruncatingMiddle)
         text(account?.planType?.capitalized ?? "—", x: 116, y: 32, size: 10,
              weight: .medium, color: .secondaryLabelColor, width: 168, height: 14, align: .right)
@@ -96,8 +98,8 @@ final class QuotaMenuView: NSView {
             text(message, x: 16, y: 70, size: 11, color: .secondaryLabelColor, width: 268, height: 42)
         } else {
             for (index, window) in windows.enumerated() {
-                card(window, title: window.displayLabel(planType: account?.planType,
-                     isPrimary: index == 0 && quota?.primary != nil), y: 62 + CGFloat(index) * 92)
+                card(window, title: provider == .codex ? window.displayLabel(planType: account?.planType,
+                     isPrimary: index == 0 && quota?.primary != nil) : window.label, y: 62 + CGFloat(index) * 92)
             }
         }
     }
@@ -140,7 +142,7 @@ final class QuotaMenuView: NSView {
             let date = Date(timeIntervalSince1970: timestamp)
             let day = Calendar.current.isDateInToday(date) ? "오늘" : date.formatted(.dateTime.month().day())
             return "\(day) \(date.formatted(date: .omitted, time: .shortened)) 초기화"
-        } ?? "한도 정보 대기 중"
+        } ?? window?.resetDescription.map { "초기화: \($0)" } ?? "한도 정보 대기 중"
         text(reset, x: 24, y: y + 57, size: 10, color: .secondaryLabelColor, width: 252, height: 18)
     }
 

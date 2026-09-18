@@ -24,7 +24,7 @@ import AppKit
                              "Full menu height changed")
                 precondition(stateScreen ? panel.frame.height > height : panel.frame.height == height)
                 precondition(delegate.testHookMenu!.items.filter { !$0.isHidden }.count == (stateScreen ? 1 : visible))
-                precondition(delegate.testHookMenu!.items.filter { ["지금 새로고침", "시스템 종료"].contains($0.title) }.allSatisfy { $0.isHidden == stateScreen })
+                precondition(delegate.testHookMenu!.items.filter { ["지금 새로고침", "PlusCodex 종료", "설정…"].contains($0.title) }.allSatisfy { $0.isHidden == stateScreen })
                 let loader = panel.subviews.compactMap { $0 as? QuotaLoadingView }.first
                 precondition((loader != nil) == (offline || checking))
                 if let loader {

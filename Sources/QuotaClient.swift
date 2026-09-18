@@ -5,8 +5,11 @@ struct QuotaWindow: Decodable {
     let usedPercent: Double
     let windowDurationMins: Int?
     let resetsAt: Double?
+    var customLabel: String? = nil
+    var resetDescription: String? = nil
     var remaining: Int { Int(max(0, min(100, 100 - usedPercent)).rounded(.down)) }
     var label: String {
+        if let customLabel { return customLabel }
         guard let minutes = windowDurationMins else { return "사용 한도" }
         if minutes == 10080 { return "주간" }
         if minutes == 43200 { return "1개월" }
@@ -26,7 +29,8 @@ struct QuotaWindow: Decodable {
 struct Quota: Decodable {
     let primary: QuotaWindow?
     let secondary: QuotaWindow?
-    var windows: [QuotaWindow] { [primary, secondary].compactMap { $0 } }
+    var additional: [QuotaWindow]? = nil
+    var windows: [QuotaWindow] { [primary, secondary].compactMap { $0 } + (additional ?? []) }
 }
 
 struct QuotaResponse: Decodable {

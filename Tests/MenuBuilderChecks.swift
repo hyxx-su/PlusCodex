@@ -41,8 +41,8 @@ struct MenuBuilderChecks {
         }
         // Action rows keep their titles and shortcuts; view/separator rows may carry
         // a default "NSMenuItem" title that is never drawn, so only actions are checked.
-        let titled = items.menu.items.filter { $0.title == "지금 새로고침" || $0.title == "시스템 종료" }
-        precondition(titled.map { $0.title } == ["지금 새로고침", "시스템 종료"], "titles: \(items.menu.items.map { $0.title })")
+        let titled = items.menu.items.filter { $0.title == "지금 새로고침" || $0.title == "PlusCodex 종료" }
+        precondition(titled.map { $0.title } == ["지금 새로고침", "PlusCodex 종료"], "titles: \(items.menu.items.map { $0.title })")
         let shortcuts = items.menu.items.filter { $0.keyEquivalent == "r" || $0.keyEquivalent == "q" }
         precondition(shortcuts.count == 2, "shortcuts: \(items.menu.items.map { $0.keyEquivalent })")
     }

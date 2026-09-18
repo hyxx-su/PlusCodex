@@ -7,12 +7,14 @@ final class QuotaLoadingView: NSView {
     private let logoSize: CGFloat
     private let checkingForUpdates: Bool
     private let offline: Bool
+    private let provider: AIProvider
     private var artworkLayer: CALayer?
     /// Deterministic layout state for headless assertions.
     private(set) var logoPoint: CGPoint = .zero
     private(set) var captionHidden = true
 
-    init(frame: NSRect, logoSize: CGFloat = 28, checkingForUpdates: Bool = false, offline: Bool = false) {
+    init(frame: NSRect, logoSize: CGFloat = 28, checkingForUpdates: Bool = false, offline: Bool = false, provider: AIProvider = .codex) {
+        self.provider = provider
         self.logoSize = logoSize
         self.checkingForUpdates = checkingForUpdates
         self.offline = offline
@@ -64,7 +66,7 @@ final class QuotaLoadingView: NSView {
         logoPoint = CGPoint(x: host.frame.midX, y: host.frame.midY)
 
         if offline {
-            let icon = CodexStatusIcon.image(size: 96, offline: true)
+            let icon = CodexStatusIcon.image(size: 96, offline: true, provider: provider)
             var rect = CGRect(x: 0, y: 0, width: 96, height: 96)
             host.contents = icon?.cgImage(forProposedRect: &rect, context: nil, hints: nil)
             CATransaction.commit()
@@ -134,7 +136,7 @@ final class QuotaLoadingView: NSView {
     }
 
     private func loadLogo(tint: NSColor = .white) -> CGImage? {
-        guard let url = Bundle.main.url(forResource: "Codex", withExtension: "svg"),
+        guard let url = Bundle.main.url(forResource: provider.resource, withExtension: "svg"),
               let source = NSImage(contentsOf: url) else { return nil }
         // The menu header tints with labelColor; the sweep mask always stays white.
         let tinted = NSImage(size: NSSize(width: 96, height: 96), flipped: false) { rect in

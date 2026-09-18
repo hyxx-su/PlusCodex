@@ -24,6 +24,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let networkMonitor = NWPathMonitor()
     private var offline = false
     private var stateScreenHeight: CGFloat?
+    private let providerSettings = ProviderSettings()
+    private lazy var settingsWindow = AISettingsWindow(settings: providerSettings)
+    private var extraProviders: [ProviderStatusController] = []
+    private var settingsItem: NSMenuItem?
     private lazy var statusWindow: StatusWindow = {
         let controller = StatusWindow()
         controller.onRefresh = { [weak self] in self?.refresh() }
@@ -36,23 +40,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSApp.terminate(nil)
             return
         }
-        item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item?.autosaveName = "CodexQuota"
-        item?.isVisible = true
-        if let url = Bundle.main.url(forResource: "Codex", withExtension: "svg"),
-           let image = NSImage(contentsOf: url) {
-            image.size = NSSize(width: 18, height: 18)
-            image.isTemplate = true
-            item?.button?.image = image
+        extraProviders = [AIProvider.claude, .grok].map { provider in
+            let controller = ProviderStatusController(provider: provider, settings: providerSettings)
+            controller.onSettings = { [weak self] in self?.openSettings() }
+            controller.onOpen = { [weak self] in
+                guard let self, !self.offline else { return }
+                self.updater.checkOnMenuOpen()
+            }
+            controller.onState = { [weak self] in self?.settingsWindow.update(provider, status: $0) }
+            return controller
         }
-        item?.button?.imagePosition = .imageLeading
-        item?.button?.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        providerSettings.onChange = { [weak self] in self?.synchronizeProviders() }
+        synchronizeProviders()
         render()
         networkMonitor.pathUpdateHandler = { [weak self] path in
             let disconnected = path.status != .satisfied
             RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) {
                 guard let self, self.offline != disconnected else { return }
                 self.offline = disconnected
+                self.extraProviders.forEach { $0.presentation(offline: disconnected, checking: self.checkingForUpdates) }
                 self.render()
                 if !disconnected {
                     self.refresh()
@@ -65,11 +71,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updater.onCheckingChanged = { [weak self] checking in
             RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) {
                 self?.checkingForUpdates = checking
+                if let self { self.extraProviders.forEach { $0.presentation(offline: self.offline, checking: checking) } }
                 self?.render()
             }
             CFRunLoopWakeUp(CFRunLoopGetMain())
         }
         notifications.start()
+        do { try LoginLaunchController().applyInitialDefault() }
+        catch { NSLog("PlusCodex login item: %@", error.localizedDescription) }
         updater.onUpdateAvailable = { [weak self] version, build in
             self?.notifications.updateAvailable(version: version, build: build)
         }
@@ -82,13 +91,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         activityMonitor?.onCompletion = { [weak self] activity in self?.notifications.completed(activity) }
         activityMonitor?.start()
-        timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in self?.refresh() }
+        timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
+            self?.refresh()
+            self?.extraProviders.forEach { $0.synchronize() }
+        }
         if let timer { RunLoop.main.add(timer, forMode: .common) }
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(refresh), name: NSWorkspace.didWakeNotification, object: nil)
     }
 
     @objc private func refresh() {
-        guard !fetching, !offline else { return }
+        guard providerSettings.enabled(.codex), !fetching, !offline else { return }
         fetching = true
         statusWindow.update(quota: quota, fetching: true, failure: nil)
         DispatchQueue.global(qos: .utility).async {
@@ -111,8 +123,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     self.account = snapshot.account
                     self.updatedAt = Date()
                     self.failure = nil
+                    self.settingsWindow.update(.codex, status: snapshot.account?.email ?? "연결됨 · 사용량 조회 완료")
                 case .failure(let error):
                     self.failure = error.localizedDescription
+                    self.settingsWindow.update(.codex, status: error.localizedDescription)
                 }
                 self.render()
             }
@@ -150,6 +164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             stateScreenHeight = built.menu.size.height - padding
         }
         if !stateScreen { stateScreenHeight = nil }
+        settingsItem?.isHidden = stateScreen
         if let panel = dashboardItem?.view as? QuotaMenuView, panel.intro == intro,
            panel.checkingForUpdates == checkingForUpdates, panel.offline == offline {
             panel.update(quota: quota, account: account, updatedAt: updatedAt, failure: failure)
@@ -169,17 +184,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                            target: self, refreshAction: #selector(refresh),
                                            quitAction: #selector(quitApp))
         builtItems = built
+        let settings = NSMenuItem(title: "설정…", action: #selector(openSettings), keyEquivalent: ",")
+        settings.target = self
+        built.menu.insertItem(settings, at: built.menu.items.count - 1)
+        settingsItem = settings
         dashboardItem = built.dashboard
         activityItem = built.activity
         refreshItem = built.refresh
         quitItem = built.quit
         separatorItem = built.separator
         updateActivityView()
-        item?.menu = built.menu
         if offline || checkingForUpdates { render() }
     }
 
     @objc private func quitApp() { NSApp.terminate(nil) }
+
+    @objc private func openSettings() {
+        extraProviders.forEach { $0.synchronize() }
+        settingsWindow.present()
+    }
+
+    private func synchronizeProviders() {
+        if providerSettings.enabled(.codex) {
+            if item == nil {
+                item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+                item?.autosaveName = "CodexQuota"
+                item?.button?.target = self
+                item?.button?.action = #selector(statusClicked)
+                item?.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            }
+            render()
+            refresh()
+        } else if let item {
+            NSStatusBar.system.removeStatusItem(item)
+            self.item = nil
+            settingsWindow.update(.codex, status: "메뉴바에서 꺼짐")
+        }
+        extraProviders.forEach { $0.synchronize() }
+        settingsWindow.synchronize()
+        if AIProvider.allCases.allSatisfy({ !providerSettings.enabled($0) }) { openSettings() }
+    }
+
+    @objc private func statusClicked() {
+        guard let button = item?.button else { return }
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            let context = NSMenu()
+            let disable = NSMenuItem(title: "Codex 끄기", action: #selector(disableCodex), keyEquivalent: "")
+            disable.target = self
+            context.addItem(disable)
+            context.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.minY), in: button)
+        } else {
+            builtItems?.menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.minY), in: button)
+        }
+    }
+
+    @objc private func disableCodex() {
+        DispatchQueue.main.async { self.providerSettings.setEnabled(false, for: .codex) }
+    }
 
     func menuWillOpen(_ menu: NSMenu) {
         if !offline { updater.checkOnMenuOpen() }
@@ -189,7 +250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         // The menu bar icon and its menu cover recovery; no diagnostic window needed.
-        item?.isVisible = true
+        openSettings()
         refresh()
         return false
     }
