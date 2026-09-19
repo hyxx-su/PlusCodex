@@ -14,6 +14,20 @@ final class ProviderSettings {
     private let defaults: UserDefaults
     var onChange: (() -> Void)?
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+    var claudeShowRemaining: Bool {
+        showRemaining(.claude)
+    }
+    func setClaudeShowRemaining(_ enabled: Bool) {
+        setShowRemaining(enabled, for: .claude)
+    }
+    func showRemaining(_ provider: AIProvider) -> Bool {
+        defaults.object(forKey: "provider.\(provider.rawValue).showRemaining") as? Bool ?? true
+    }
+    func setShowRemaining(_ enabled: Bool, for provider: AIProvider) {
+        guard showRemaining(provider) != enabled else { return }
+        defaults.set(enabled, forKey: "provider.\(provider.rawValue).showRemaining")
+        onChange?()
+    }
     func enabled(_ provider: AIProvider) -> Bool {
         // Missing preferences also covers upgrading an existing Codex-only installation.
         defaults.object(forKey: "provider.\(provider.rawValue).enabled") as? Bool ?? true

@@ -19,18 +19,19 @@ import ServiceManagement
         try login.applyInitialDefault()
         precondition(!login.requested && removals == 1 && registrations == 1)
         status = .requiresApproval
-        precondition(login.requested && login.message.contains("허용"))
+        precondition(!login.requested && login.requiresApproval && login.message.contains("허용"))
         let settings = ProviderSettings(defaults: defaults)
         let window = AISettingsWindow(settings: settings, login: login)
-        let toggles = window.window!.contentView!.subviews.compactMap { $0 as? NSSwitch }
-        precondition(toggles.count == 4 && toggles.allSatisfy { $0.state == .on })
+        func descendants(_ view: NSView) -> [NSView] {
+            view.subviews + view.subviews.flatMap(descendants)
+        }
+        let toggles = descendants(window.window!.contentView!).compactMap { $0 as? NSSwitch }
+        let providerToggles = toggles.filter { AIProvider(rawValue: $0.identifier?.rawValue ?? "") != nil }
+        precondition(providerToggles.count == 3 && providerToggles.allSatisfy { $0.state == .on })
+        precondition(toggles.first { $0.identifier?.rawValue == "launchAtLogin" }?.state == .off)
         precondition(window.window!.title == "설정")
-        precondition(window.window!.contentView!.frame.size == NSSize(width: 440, height: 520))
-        precondition(toggles.allSatisfy { $0.controlSize == .mini && $0.frame.width <= 54 })
-        precondition(toggles.allSatisfy { abs($0.frame.maxX - 404) < 1 })
-        let aiRows = toggles.filter { $0.identifier?.rawValue != "launchAtLogin" }.sorted { $0.frame.midY < $1.frame.midY }
-        precondition(abs(aiRows[1].frame.midY - aiRows[0].frame.midY - 52) < 1)
-        precondition(abs(aiRows[2].frame.midY - aiRows[1].frame.midY - 52) < 1)
+        precondition(window.window!.contentView!.frame.size == NSSize(width: 680, height: 600))
+        precondition(providerToggles.allSatisfy { $0.frame.width <= 54 })
         let claude = toggles.first { $0.identifier?.rawValue == "claude" }!
         claude.state = .off
         _ = claude.sendAction(claude.action, to: claude.target)

@@ -28,3 +28,10 @@ with DSStore.open(os.path.join(root, '.DS_Store'), 'w+') as store:
     # Center the icon + filename group inside each 190-point card.
     store['PlusCodex.app']['Iloc'] = (187, 250)
     store['Applications']['Iloc'] = (533, 250)
+    # Hidden-file visibility is a Finder preference, not a per-volume setting.
+    # Keep resource icons outside the initial installation viewport even when enabled.
+    hidden_items = sorted(set(name for name in os.listdir(root) if name.startswith('.'))
+                          | {'.DS_Store', '.background', '.Trashes', '.fseventsd',
+                             '.Spotlight-V100', '.VolumeIcon.icns'})
+    for index, name in enumerate(hidden_items):
+        store[name]['Iloc'] = (100 + index * 120, 1000)

@@ -14,7 +14,10 @@ final class LoginLaunchController {
         self.defaults = defaults; self.readStatus = readStatus
         self.register = register; self.unregister = unregister
     }
-    var requested: Bool { readStatus() == .enabled || readStatus() == .requiresApproval }
+    // The switch represents an approved, active login item. A pending
+    // approval must remain off until macOS has actually enabled it.
+    var requested: Bool { readStatus() == .enabled }
+    var requiresApproval: Bool { readStatus() == .requiresApproval }
     var message: String {
         switch readStatus() {
         case .enabled: return L10n.text("Mac에 로그인하면 자동으로 실행합니다.")
@@ -30,7 +33,7 @@ final class LoginLaunchController {
     }
     func setEnabled(_ enabled: Bool) throws {
         if enabled && !requested { try register() }
-        else if !enabled && requested { try unregister() }
+        else if !enabled && (requested || requiresApproval) { try unregister() }
         // An explicit choice always wins over future launches and updates.
         defaults.set(true, forKey: "loginItemDefaultApplied.v1")
     }

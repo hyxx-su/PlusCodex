@@ -63,6 +63,16 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
         }
     }
 
+    func reloadLocalization() {
+        guard actions.count >= 4 else { return }
+        actions[1].title = L10n.text("지금 새로고침")
+        actions[2].title = L10n.text("설정")
+        actions[3].title = L10n.text("PlusCodex 종료")
+        // Recompute the current status text as well; otherwise a status
+        // emitted before the language change can remain in the old language.
+        synchronize()
+    }
+
     func presentation(offline: Bool, checking: Bool) {
         let reconnected = self.offline && !offline
         self.offline = offline
@@ -108,7 +118,8 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
     }
 
     private func render() {
-        let percent = snapshot?.quota.windows.first.map { " \($0.remaining)%" } ?? ""
+        let showRemaining = settings.showRemaining(provider)
+        let percent = snapshot?.quota.windows.first.map { " \($0.displayPercent(showRemaining: showRemaining))%" } ?? ""
         item?.button?.image = CodexStatusIcon.image(size: 18, offline: offline, provider: provider)
         item?.button?.imagePosition = offline || percent.isEmpty ? .imageOnly : .imageLeading
         item?.button?.attributedTitle = NSAttributedString(string: offline ? "" : percent, attributes: [
@@ -126,7 +137,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
         dashboard.view = QuotaMenuView(quota: snapshot?.quota, account: snapshot?.account,
             updatedAt: nil, failure: failure, intro: fetching && snapshot == nil && !overlay,
             checkingForUpdates: checking, offline: offline,
-            preservedHeight: overlayHeight, provider: provider)
+            preservedHeight: overlayHeight, provider: provider, showRemaining: showRemaining)
         actions.forEach { $0.isHidden = overlay }
     }
 

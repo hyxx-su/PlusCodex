@@ -7,10 +7,33 @@ struct ThreadActivity: Equatable {
     let id: String
     var title: String
     var runtime: String
+    var activeFlags: [String] = []
+    var approvalRequestIDs: Set<String> = []
     var unread: Bool
     var updatedAt: Double
 
-    var isRunning: Bool { runtime == "active" }
+    private static func normalizedRuntime(_ runtime: String) -> String {
+        runtime
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
+            .lowercased()
+    }
+
+    static func isApprovalWaitingRuntime(_ runtime: String) -> Bool {
+        let normalized = normalizedRuntime(runtime)
+        return normalized == "waitingonapproval"
+            || normalized == "waitingforapproval"
+            || normalized == "waitingonpermission"
+            || normalized == "waitingforpermission"
+            || normalized == "awaitingapproval"
+    }
+
+    var isWaitingForApproval: Bool {
+        Self.isApprovalWaitingRuntime(runtime)
+            || activeFlags.contains(where: Self.isApprovalWaitingRuntime)
+            || !approvalRequestIDs.isEmpty
+    }
+    var isRunning: Bool { runtime == "active" || isWaitingForApproval }
     var isVisible: Bool { isRunning || (runtime == "idle" && unread) }
     var url: URL? {
         guard UUID(uuidString: id) != nil else { return nil }
@@ -27,6 +50,46 @@ struct CompletionTracker {
         let completed = rows.filter { previous[$0.id] == "active" && $0.runtime == "idle" }
         previous = Dictionary(rows.map { ($0.id, $0.runtime) }, uniquingKeysWith: { _, last in last })
         return completed
+    }
+}
+
+/// Emits one event when a thread enters the approval-waiting state.
+/// Keep the previous state across reconnects so a still-pending request is not
+/// announced again just because the local IPC connection was recreated.
+struct ApprovalTracker {
+    private struct State {
+        var waiting = false
+        var awaitingRequestIdentity = false
+        var notifiedIDs: Set<String> = []
+    }
+    private var previous: [String: State] = [:]
+
+    mutating func update(_ rows: [ThreadActivity], connected: Bool) -> [ThreadActivity] {
+        guard connected else { return [] }
+        var requests: [ThreadActivity] = []
+        for activity in rows {
+            var state = previous[activity.id] ?? State()
+            if !activity.isWaitingForApproval {
+                state.waiting = false
+                state.awaitingRequestIdentity = false
+            } else if !activity.approvalRequestIDs.isEmpty {
+                let newIDs = activity.approvalRequestIDs.subtracting(state.notifiedIDs)
+                // Runtime flags can arrive before the request list. Attach those IDs
+                // to the notification already emitted for this approval episode.
+                if !newIDs.isEmpty && !state.awaitingRequestIdentity { requests.append(activity) }
+                state.notifiedIDs.formUnion(activity.approvalRequestIDs)
+                state.awaitingRequestIdentity = false
+                state.waiting = true
+            } else {
+                if !state.waiting {
+                    requests.append(activity)
+                    state.awaitingRequestIdentity = true
+                }
+                state.waiting = true
+            }
+            previous[activity.id] = state
+        }
+        return requests
     }
 }
 
@@ -62,9 +125,25 @@ final class ThreadActivityMonitor {
     private var lastPublished: [ThreadActivity] = []
     private var lastConnected = false
     private var completionTracker = CompletionTracker()
+    private var approvalTracker = ApprovalTracker()
     var onCompletion: ((ThreadActivity) -> Void)?
+    var onApprovalRequest: ((ThreadActivity) -> Void)?
 
     init(onUpdate: @escaping ([ThreadActivity], Bool) -> Void) { self.onUpdate = onUpdate }
+
+    /// Active turns expose pending approvals through requests, even when runtime flags are empty.
+    static func approvalRequestIDs(in requests: [[String: Any]]) -> Set<String> {
+        let methods: Set<String> = [
+            "item/commandExecution/requestApproval", "item/fileChange/requestApproval",
+            "item/permissions/requestApproval"
+        ]
+        return Set(requests.compactMap { request in
+            guard let method = request["method"] as? String, methods.contains(method),
+                  request["completed"] as? Bool != true,
+                  let id = request["id"] else { return nil }
+            return "\(method):\(id)"
+        })
+    }
 
     static func readStateChange(from message: [String: Any]) -> (id: String, unread: Bool)? {
         guard message["type"] as? String == "broadcast",
@@ -258,7 +337,10 @@ final class ThreadActivityMonitor {
            let state = change["conversationState"] as? [String: Any],
            let runtime = state["threadRuntimeStatus"] as? [String: Any], let status = runtime["type"] as? String {
             activities[id] = ThreadActivity(id: id, title: state["title"] as? String ?? L10n.text("Codex 채팅"),
-                runtime: status, unread: state["hasUnreadTurn"] as? Bool ?? false,
+                runtime: status,
+                activeFlags: runtime["activeFlags"] as? [String] ?? [],
+                approvalRequestIDs: Self.approvalRequestIDs(in: state["requests"] as? [[String: Any]] ?? []),
+                unread: state["hasUnreadTurn"] as? Bool ?? false,
                 updatedAt: state["updatedAt"] as? Double ?? 0)
             owners[id] = owner
             revisions[id] = revision
@@ -270,18 +352,75 @@ final class ThreadActivityMonitor {
                 publish(connected: true)
                 return
             }
+            var refreshApprovalRequests = false
             for patch in change["patches"] as? [[String: Any]] ?? [] {
                 guard let path = patch["path"] as? [Any], let key = path.first as? String else { continue }
                 let value = patch["value"]
+                if key == "requests" {
+                    if path.count == 1 {
+                        activities[id]?.approvalRequestIDs = Self.approvalRequestIDs(in: value as? [[String: Any]] ?? [])
+                    } else {
+                        // Fetch the authoritative list after indexed/nested patches rather than retaining request bodies.
+                        refreshApprovalRequests = true
+                    }
+                }
                 if key == "title", path.count == 1, let title = value as? String { activities[id]?.title = title }
                 if key == "hasUnreadTurn", path.count == 1 { activities[id]?.unread = value as? Bool ?? false }
                 if key == "updatedAt", path.count == 1, let timestamp = value as? Double { activities[id]?.updatedAt = timestamp }
+                if key == "activeFlags" {
+                    if path.count == 1 {
+                        activities[id]?.activeFlags = value as? [String] ?? []
+                    } else if path.count >= 2 {
+                        var flags = activities[id]?.activeFlags ?? []
+                        let operation = (patch["op"] as? String ?? patch["type"] as? String ?? "replace").lowercased()
+                        let index: Int? = {
+                            if let index = path[1] as? Int { return index }
+                            if let index = path[1] as? String { return index == "-" ? flags.count : Int(index) }
+                            return nil
+                        }()
+                        if operation == "remove" {
+                            if let index, flags.indices.contains(index) { flags.remove(at: index) }
+                        } else if let flag = value as? String, let index {
+                            if operation == "add", (0...flags.count).contains(index) { flags.insert(flag, at: index) }
+                            else if flags.indices.contains(index) { flags[index] = flag }
+                            else if index == flags.count { flags.append(flag) }
+                        }
+                        activities[id]?.activeFlags = flags
+                    }
+                }
                 if key == "threadRuntimeStatus" {
-                    if path.count == 1 { activities[id]?.runtime = (value as? [String: Any])?["type"] as? String ?? "unknown" }
-                    else if path.count == 2, path[1] as? String == "type" { activities[id]?.runtime = value as? String ?? "unknown" }
+                    if path.count == 1, let payload = value as? [String: Any] {
+                        activities[id]?.runtime = payload["type"] as? String ?? "unknown"
+                        activities[id]?.activeFlags = payload["activeFlags"] as? [String] ?? []
+                    } else if path.count == 2, path[1] as? String == "type" {
+                        activities[id]?.runtime = value as? String ?? "unknown"
+                    } else if path.count == 2, path[1] as? String == "activeFlags" {
+                        activities[id]?.activeFlags = value as? [String] ?? []
+                    } else if path.count >= 3, path[1] as? String == "activeFlags" {
+                        var flags = activities[id]?.activeFlags ?? []
+                        let operation = (patch["op"] as? String ?? patch["type"] as? String ?? "replace").lowercased()
+                        let index: Int? = {
+                            if let index = path[2] as? Int { return index }
+                            if let index = path[2] as? String { return index == "-" ? flags.count : Int(index) }
+                            return nil
+                        }()
+                        if operation == "remove" {
+                            if let index, flags.indices.contains(index) { flags.remove(at: index) }
+                        } else if let flag = value as? String, let index {
+                            if operation == "add", (0...flags.count).contains(index) { flags.insert(flag, at: index) }
+                            else if flags.indices.contains(index) { flags[index] = flag }
+                            else if index == flags.count { flags.append(flag) }
+                        }
+                        activities[id]?.activeFlags = flags
+                    }
                 }
             }
             revisions[id] = revision
+            if refreshApprovalRequests {
+                try follow(id, enabled: false)
+                try follow(id, enabled: true)
+                return
+            }
         }
         publish(connected: true)
     }
@@ -291,6 +430,13 @@ final class ThreadActivityMonitor {
         if !completed.isEmpty {
             RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) {
                 for activity in completed { self.onCompletion?(activity) }
+            }
+            CFRunLoopWakeUp(CFRunLoopGetMain())
+        }
+        let approvalRequests = approvalTracker.update(Array(activities.values), connected: connected)
+        if !approvalRequests.isEmpty {
+            RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) {
+                for activity in approvalRequests { self.onApprovalRequest?(activity) }
             }
             CFRunLoopWakeUp(CFRunLoopGetMain())
         }

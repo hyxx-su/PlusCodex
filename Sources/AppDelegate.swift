@@ -18,14 +18,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var separatorItem: NSMenuItem?
     private var builtItems: StatusMenuBuilder.Items?
     private var readReceipts = ThreadActivityReadReceipts()
-    private lazy var notifications = AppNotifications()
+    private let notificationSettings = NotificationSettings()
+    private lazy var notifications = AppNotifications(settings: notificationSettings)
     private let updater = AppUpdater()
     private var checkingForUpdates = false
     private let networkMonitor = NWPathMonitor()
     private var offline = false
     private var stateScreenHeight: CGFloat?
     private let providerSettings = ProviderSettings()
-    private lazy var settingsWindow = AISettingsWindow(settings: providerSettings)
+    private lazy var settingsWindow = AISettingsWindow(settings: providerSettings,
+                                                       notificationSettings: notificationSettings)
     private var extraProviders: [ProviderStatusController] = []
     private var settingsItem: NSMenuItem?
     private lazy var statusWindow: StatusWindow = {
@@ -35,6 +37,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NotificationCenter.default.addObserver(self, selector: #selector(languageDidChange),
+                                               name: .plusCodexLanguageDidChange, object: nil)
         let duplicates = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "local.codexquota.menubar")
         if duplicates.contains(where: { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }) {
             NSApp.terminate(nil)
@@ -94,6 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.updateActivityView()
         }
         activityMonitor?.onCompletion = { [weak self] activity in self?.notifications.completed(activity) }
+        activityMonitor?.onApprovalRequest = { [weak self] activity in self?.notifications.approvalRequested(activity) }
         activityMonitor?.start()
         timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
             self?.refresh()
@@ -143,7 +148,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let primary = quota?.primary ?? quota?.secondary
         let valid = failure == nil
         let percent = offline ? ""
-            : valid ? primary.map { "\($0.remaining)%" } ?? (quota == nil ? "…" : "—") : "--%"
+            : valid ? primary.map { "\($0.displayPercent(showRemaining: providerSettings.showRemaining(.codex)))%" } ?? (quota == nil ? "…" : "—") : "--%"
         if let button = item?.button {
             button.image = CodexStatusIcon.image(size: 18, offline: offline)
             button.imagePosition = offline ? .imageOnly : .imageLeading
@@ -170,13 +175,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !stateScreen { stateScreenHeight = nil }
         settingsItem?.isHidden = stateScreen
         if let panel = dashboardItem?.view as? QuotaMenuView, panel.intro == intro,
-           panel.checkingForUpdates == checkingForUpdates, panel.offline == offline {
+           panel.checkingForUpdates == checkingForUpdates, panel.offline == offline,
+           panel.showRemaining == providerSettings.showRemaining(.codex) {
             panel.update(quota: quota, account: account, updatedAt: updatedAt, failure: failure)
             return
         }
         let panel = QuotaMenuView(quota: quota, account: account, updatedAt: updatedAt,
                                   failure: failure, intro: intro, checkingForUpdates: stateScreen && checkingForUpdates,
-                                  offline: stateScreen && offline, preservedHeight: stateScreenHeight)
+                                  offline: stateScreen && offline, preservedHeight: stateScreenHeight,
+                                  showRemaining: providerSettings.showRemaining(.codex))
         if let dashboardItem, let built = builtItems {
             dashboardItem.view = panel
             StatusMenuBuilder.apply(intro: stateScreen, activity: built.activity,
@@ -207,6 +214,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func openSettings() {
         extraProviders.forEach { $0.synchronize() }
         settingsWindow.present()
+    }
+
+    @objc private func languageDidChange() {
+        refreshItem?.title = L10n.text("지금 새로고침")
+        quitItem?.title = L10n.text("PlusCodex 종료")
+        settingsItem?.title = L10n.text("설정")
+        extraProviders.forEach { $0.reloadLocalization() }
+        settingsWindow.reloadLocalization()
+        statusWindow.reloadLocalization()
+        updateActivityView()
+        render()
     }
 
     private func synchronizeProviders() {
@@ -254,8 +272,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        // The menu bar icon and its menu cover recovery; no diagnostic window needed.
-        openSettings()
+        // Notification clicks also reopen the app. Settings must only open from the menu,
+        // otherwise they steal focus before the notification delegate opens the Codex thread.
         refresh()
         return false
     }

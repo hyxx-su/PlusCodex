@@ -3,11 +3,19 @@ import UserNotifications
 
 final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
     private let center = UNUserNotificationCenter.current()
+    private let notificationSettings: NotificationSettings
     private var scheduled: [String: Double] = [:]
     private var accountKey: String?
     private var pendingUpdateBuilds = Set<String>()
 
+    init(settings: NotificationSettings = NotificationSettings()) {
+        notificationSettings = settings
+        super.init()
+        settings.onChange = { [weak self] in self?.notificationSettingsDidChange() }
+    }
+
     func updateAvailable(version: String, build: String) {
+        guard notificationSettings.isEnabled(.update) else { return }
         center.getNotificationSettings { [weak self] settings in
             guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
             DispatchQueue.main.async {
@@ -40,6 +48,7 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
     }()
 
     func checkThresholds(_ quota: Quota, account: CodexAccount?) {
+        guard notificationSettings.isEnabled(.quota) else { return }
         center.getNotificationSettings { [weak self] settings in
             guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
             DispatchQueue.main.async {
@@ -75,12 +84,14 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
 
     func start() {
         center.delegate = self
+        guard notificationSettings.anyEnabled else { return }
         center.requestAuthorization(options: [.alert, .sound]) { _, error in
             if let error { NSLog("PlusCodex notification authorization: %@", error.localizedDescription) }
         }
     }
 
     func completed(_ activity: ThreadActivity) {
+        guard notificationSettings.isEnabled(.completion) else { return }
         let content = UNMutableNotificationContent()
         content.title = L10n.text("Codex 작업 완료")
         content.body = activity.title
@@ -90,7 +101,25 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
                                      content: content, trigger: nil))
     }
 
+    func approvalRequested(_ activity: ThreadActivity) {
+        guard notificationSettings.isEnabled(.approval) else { return }
+        let content = UNMutableNotificationContent()
+        content.title = L10n.text("Codex 승인 필요")
+        content.body = activity.title.isEmpty
+            ? L10n.text("Codex 작업을 계속하려면 승인이 필요합니다.")
+            : L10n.text("%@ 작업에서 승인이 필요합니다.", activity.title)
+        content.sound = .default
+        content.userInfo = ["threadID": activity.id]
+        submit(UNNotificationRequest(identifier: "approval-\(activity.id)-\(UUID().uuidString)",
+                                     content: content, trigger: nil))
+    }
+
     func scheduleResets(_ quota: Quota, account: CodexAccount?) {
+        guard notificationSettings.isEnabled(.reset) else {
+            center.removePendingNotificationRequests(withIdentifiers: ["reset-primary", "reset-secondary"])
+            scheduled.removeAll()
+            return
+        }
         // Called on the main run loop after a successful authenticated snapshot.
         let key = account?.email
         if accountKey != key {
@@ -124,6 +153,12 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
                 }
             }
         }
+    }
+
+    private func notificationSettingsDidChange() {
+        guard !notificationSettings.isEnabled(.reset) else { return }
+        center.removePendingNotificationRequests(withIdentifiers: ["reset-primary", "reset-secondary"])
+        scheduled.removeAll()
     }
 
     private func submit(_ request: UNNotificationRequest) {

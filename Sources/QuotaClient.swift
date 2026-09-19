@@ -8,6 +8,9 @@ struct QuotaWindow: Decodable {
     var customLabel: String? = nil
     var resetDescription: String? = nil
     var remaining: Int { Int(max(0, min(100, 100 - usedPercent)).rounded(.down)) }
+    func displayPercent(showRemaining: Bool) -> Int {
+        showRemaining ? remaining : Int(max(0, min(100, usedPercent)).rounded(.down))
+    }
     var label: String {
         if let customLabel { return L10n.quotaLabel(customLabel) }
         guard let minutes = windowDurationMins else { return L10n.text("사용 한도") }

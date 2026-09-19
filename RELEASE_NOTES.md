@@ -1,18 +1,22 @@
-# PlusCodex v1.0.6
+# PlusCodex v1.0.7
 
-- README 상단에 한국어 / English 링크를 추가하고 영문 README를 제공합니다.
-- 설정에 언어 선택을 추가했습니다. 기본값은 한국어이며 English로 변경할 수 있습니다.
-- 언어 변경은 PlusCodex를 종료한 뒤 다시 실행하면 적용됩니다. macOS나 다른 앱의 언어는 변경하지 않습니다.
-- 메뉴·설정·로딩·오프라인 안내·사용량 한도·알림·앱 자체 오류 문구를 영어로 제공합니다. 업데이트 창도 앱의 언어 설정을 따릅니다.
-- 채팅 제목·이메일·서버 응답 및 릴리즈 노트 원문은 자동 번역하지 않습니다.
+- 일반·AI 표시·알림 설정의 섹션과 간격을 통일하고 언어 선택 팝업을 개선했습니다.
+- 설정 검색 결과에서 해당 항목으로 이동하며, 설정을 다시 열면 검색어가 초기화됩니다.
+- 모든 AI의 사용량을 남은 양 또는 사용한 양으로 표시할 수 있습니다.
+- 작업 완료·사용량 부족·초기화·업데이트·승인 요청 알림을 개별 설정할 수 있습니다.
+- Codex 파일·명령·권한 승인 요청 감지와 중복 알림 처리를 개선했습니다.
+- 알림 클릭 시 설정 창이 자동으로 열리던 동작을 제거했습니다. 작업 알림은 해당 Codex 작업으로 연결됩니다.
+- 설정 하단에 버전·제작자 링크를 추가하고 한국어·영어 문구와 DMG 숨김 파일 배치를 개선했습니다.
 
 ## English
 
-- Added Korean / English links and an English README.
-- Added a language selector in Settings. Korean is the default; English is available.
-- Quit and reopen PlusCodex to apply the selected language. Your macOS language is not changed.
-- Localized menus, settings, loading/offline messages, usage labels, notifications, and app-generated errors. The update dialog follows the app language.
-- Chat titles, email addresses, server-provided text, and release notes are not automatically translated.
+- Refined settings sections, spacing, search navigation, and the language picker.
+- Settings search resets when reopened. Updated Korean and English text.
+- Added a shared option to show used or remaining usage for all AI providers.
+- Added individual controls for completion, low usage, reset, update, and approval notifications.
+- Improved detection and deduplication of Codex command, file, and permission approval requests.
+- Removed automatic settings opening when clicking a notification. Task notifications link to the corresponding Codex task.
+- Added version and author links and improved hidden-file placement in the DMG.
 
 ## 설치 및 업데이트
 
@@ -27,5 +31,5 @@ OpenAI의 공식 앱이 아닌 비공식 보조 앱입니다.
 
 ## 검증 범위 / Validation
 
-요청에 따라 자동 테스트 및 UI 테스트는 실행하지 않았습니다. 배포 빌드와 패키지 서명 검증만 수행합니다.
-Automated and UI tests were not run for this release. Validation is limited to the release build and package signatures.
+알림 배너와 작업 이동 동작은 macOS 알림 설정 및 Codex 내부 연동 규격의 영향을 받습니다.
+Notification presentation and task navigation depend on macOS settings and the Codex desktop integration protocol.

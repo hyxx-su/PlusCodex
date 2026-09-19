@@ -1,5 +1,9 @@
 import Foundation
 
+extension Notification.Name {
+    static let plusCodexLanguageDidChange = Notification.Name("PlusCodexLanguageDidChange")
+}
+
 enum AppLanguage: String, CaseIterable {
     case korean = "ko", english = "en"
     var locale: Locale { Locale(identifier: rawValue == "ko" ? "ko_KR" : "en_US") }
@@ -14,7 +18,9 @@ final class LanguageSettings {
         AppLanguage(rawValue: defaults.string(forKey: "appLanguage") ?? "") ?? .korean
     }
     func select(_ language: AppLanguage) {
+        guard selected != language else { return }
         defaults.set(language.rawValue, forKey: "appLanguage")
+        NotificationCenter.default.post(name: .plusCodexLanguageDidChange, object: language)
     }
     func configureFrameworkLanguage() {
         // App domain only: never changes the user's macOS language preference.
@@ -23,7 +29,9 @@ final class LanguageSettings {
 }
 
 enum L10n {
-    static let language = LanguageSettings().selected
+    /// Read the current preference on demand so language changes are visible
+    /// without restarting the process or rebuilding the app bundle.
+    static var language: AppLanguage { LanguageSettings().selected }
     static var locale: Locale { language.locale }
 
     static func text(_ key: String, _ arguments: CVarArg...) -> String {

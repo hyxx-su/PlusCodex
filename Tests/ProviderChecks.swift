@@ -52,8 +52,11 @@ import AppKit
         precondition(panel.accessibilityLabel()!.contains("Sonnet 주간"))
         precondition(panel.accessibilityLabel()!.contains("5시간"))
         let window = AISettingsWindow(settings: settings)
-        let checks = window.window!.contentView!.subviews.compactMap { $0 as? NSSwitch }
-            .filter { $0.identifier?.rawValue != "launchAtLogin" }
+        func descendants(_ view: NSView) -> [NSView] {
+            view.subviews + view.subviews.flatMap(descendants)
+        }
+        let checks = descendants(window.window!.contentView!).compactMap { $0 as? NSSwitch }
+            .filter { AIProvider(rawValue: $0.identifier?.rawValue ?? "") != nil }
         precondition(checks.count == 3 && checks.allSatisfy { $0.state == .on })
         if let path = ProcessInfo.processInfo.environment["PLUSCODEX_PREVIEW"] {
             window.window!.appearance = NSAppearance(named: .aqua)

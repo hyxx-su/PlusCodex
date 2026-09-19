@@ -3,6 +3,8 @@ import AppKit
 final class StatusWindow: NSWindowController {
     private let status = NSTextField(wrappingLabelWithString: L10n.text("사용량 조회 준비 중…"))
     private let retry = NSButton(title: L10n.text("지금 새로고침"), target: nil, action: nil)
+    private let heading = NSTextField(labelWithString: "")
+    private let help = NSTextField(wrappingLabelWithString: "")
     var onRefresh: (() -> Void)?
     var statusText: String { status.stringValue }
 
@@ -12,13 +14,13 @@ final class StatusWindow: NSWindowController {
         window.title = L10n.text("PlusCodex 실행 상태")
         window.isReleasedWhenClosed = false
         super.init(window: window)
-        let heading = NSTextField(labelWithString: L10n.text("PlusCodex가 실행 중입니다"))
+        heading.stringValue = L10n.text("PlusCodex가 실행 중입니다")
         heading.font = .systemFont(ofSize: 20, weight: .semibold)
         heading.frame = NSRect(x: 24, y: 222, width: 412, height: 30)
         status.font = .systemFont(ofSize: 13)
         status.isSelectable = true
         status.frame = NSRect(x: 24, y: 114, width: 412, height: 96)
-        let help = NSTextField(wrappingLabelWithString: L10n.text("메뉴바 아이콘이 보이지 않으면 다른 앱의 메뉴나 노치에 가려졌는지 확인하세요. 이 창을 닫아도 PlusCodex는 계속 실행됩니다."))
+        help.stringValue = L10n.text("메뉴바 아이콘이 보이지 않으면 다른 앱의 메뉴나 노치에 가려졌는지 확인하세요. 이 창을 닫아도 PlusCodex는 계속 실행됩니다.")
         help.textColor = .secondaryLabelColor
         help.font = .systemFont(ofSize: 12)
         help.frame = NSRect(x: 24, y: 54, width: 412, height: 52)
@@ -49,6 +51,13 @@ final class StatusWindow: NSWindowController {
         } else {
             status.stringValue = fetching ? L10n.text("사용량 조회 중…\n네트워크와 Codex 응답을 기다리고 있습니다.") : L10n.text("사용량 조회 준비 중…")
         }
+    }
+
+    func reloadLocalization() {
+        window?.title = L10n.text("PlusCodex 실행 상태")
+        heading.stringValue = L10n.text("PlusCodex가 실행 중입니다")
+        help.stringValue = L10n.text("메뉴바 아이콘이 보이지 않으면 다른 앱의 메뉴나 노치에 가려졌는지 확인하세요. 이 창을 닫아도 PlusCodex는 계속 실행됩니다.")
+        retry.title = L10n.text("지금 새로고침")
     }
 
     @objc private func refresh() { onRefresh?() }
