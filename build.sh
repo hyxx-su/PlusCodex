@@ -6,7 +6,8 @@ bash prepare-sparkle.sh
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 ditto build/sparkle/Sparkle.framework "$APP/Contents/Frameworks/Sparkle.framework"
 xcrun swiftc -swift-version 5 -O -target arm64-apple-macos14.0 \
-    -F build/sparkle -framework Sparkle -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
+    -F build/sparkle -framework Sparkle -framework AVFoundation \
+    -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
     Sources/*.swift -o "$APP/Contents/MacOS/PlusCodex"
 ICONSET="$PWD/build/PlusCodex.iconset"
 mkdir -p "$ICONSET"

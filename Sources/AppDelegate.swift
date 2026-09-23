@@ -98,7 +98,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.updateActivityView()
         }
         activityMonitor?.onCompletion = { [weak self] activity in self?.notifications.completed(activity) }
-        activityMonitor?.onApprovalRequest = { [weak self] activity in self?.notifications.approvalRequested(activity) }
+        activityMonitor?.onFailure = { [weak self] activity in self?.notifications.failed(activity) }
+        activityMonitor?.onAttention = { [weak self] event in self?.notifications.attentionNeeded(event) }
         activityMonitor?.start()
         timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
             self?.refresh()

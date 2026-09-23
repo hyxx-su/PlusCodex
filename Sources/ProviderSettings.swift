@@ -29,8 +29,8 @@ final class ProviderSettings {
         onChange?()
     }
     func enabled(_ provider: AIProvider) -> Bool {
-        // Missing preferences also covers upgrading an existing Codex-only installation.
-        defaults.object(forKey: "provider.\(provider.rawValue).enabled") as? Bool ?? true
+        // An unset provider starts enabled only for Codex; explicit choices persist.
+        defaults.object(forKey: "provider.\(provider.rawValue).enabled") as? Bool ?? (provider == .codex)
     }
     func setEnabled(_ enabled: Bool, for provider: AIProvider) {
         guard self.enabled(provider) != enabled else { return }

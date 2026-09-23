@@ -3,12 +3,42 @@ import AppKit
 import Darwin
 import SQLite3
 
+enum ThreadAttentionKind: Hashable {
+    case approval
+    case answer
+    case mcp
+    case appApproval
+}
+
+struct PendingThreadRequest: Hashable {
+    let identity: String
+    let kind: ThreadAttentionKind
+}
+
+struct ThreadTurnState: Equatable {
+    let key: String
+    let id: String
+    var status: String
+    let startedAtMs: Double
+
+    init?(key: String, value: Any) {
+        guard let value = value as? [String: Any],
+              let id = value["turnId"] as? String,
+              let status = value["status"] as? String else { return nil }
+        self.key = key
+        self.id = id
+        self.status = status
+        startedAtMs = (value["turnStartedAtMs"] as? NSNumber)?.doubleValue ?? 0
+    }
+}
+
 struct ThreadActivity: Equatable {
     let id: String
     var title: String
     var runtime: String
     var activeFlags: [String] = []
-    var approvalRequestIDs: Set<String> = []
+    var pendingRequests: Set<PendingThreadRequest> = []
+    var latestTurn: ThreadTurnState?
     var unread: Bool
     var updatedAt: Double
 
@@ -31,9 +61,9 @@ struct ThreadActivity: Equatable {
     var isWaitingForApproval: Bool {
         Self.isApprovalWaitingRuntime(runtime)
             || activeFlags.contains(where: Self.isApprovalWaitingRuntime)
-            || !approvalRequestIDs.isEmpty
+            || pendingRequests.contains(where: { $0.kind == .approval || $0.kind == .appApproval })
     }
-    var isRunning: Bool { runtime == "active" || isWaitingForApproval }
+    var isRunning: Bool { runtime == "active" || isWaitingForApproval || !pendingRequests.isEmpty }
     var isVisible: Bool { isRunning || (runtime == "idle" && unread) }
     var url: URL? {
         guard UUID(uuidString: id) != nil else { return nil }
@@ -41,55 +71,109 @@ struct ThreadActivity: Equatable {
     }
 }
 
-/// Only explicit active-to-idle transitions count; disappearing rows are not completion.
-struct CompletionTracker {
-    private var previous: [String: String] = [:]
+struct ThreadTurnResult {
+    enum Kind { case completed, failed }
+    let activity: ThreadActivity
+    let kind: Kind
+}
 
-    mutating func update(_ rows: [ThreadActivity], connected: Bool) -> [ThreadActivity] {
+/// A terminal turn status distinguishes failures from successful completion.
+/// For older snapshots without turn history, keep the existing active-to-idle fallback.
+struct CompletionTracker {
+    private var previous: [String: ThreadActivity] = [:]
+    private var notifiedTurnIDs: [String: Set<String>] = [:]
+
+    mutating func update(_ rows: [ThreadActivity], connected: Bool) -> [ThreadTurnResult] {
         guard connected else { previous.removeAll(); return [] }
-        let completed = rows.filter { previous[$0.id] == "active" && $0.runtime == "idle" }
-        previous = Dictionary(rows.map { ($0.id, $0.runtime) }, uniquingKeysWith: { _, last in last })
-        return completed
+        var results: [ThreadTurnResult] = []
+        for activity in rows {
+            let prior = previous[activity.id]
+            let becameIdle = prior?.runtime == "active" && activity.runtime == "idle"
+            if let turn = activity.latestTurn {
+                let observedRunningTurn = prior?.latestTurn?.id == turn.id
+                    && prior?.latestTurn?.status == "inProgress"
+                if (observedRunningTurn || becameIdle)
+                    && !notifiedTurnIDs[activity.id, default: []].contains(turn.id) {
+                    switch turn.status {
+                    case "completed":
+                        results.append(ThreadTurnResult(activity: activity, kind: .completed))
+                        notifiedTurnIDs[activity.id, default: []].insert(turn.id)
+                    case "failed":
+                        results.append(ThreadTurnResult(activity: activity, kind: .failed))
+                        notifiedTurnIDs[activity.id, default: []].insert(turn.id)
+                    case "interrupted":
+                        notifiedTurnIDs[activity.id, default: []].insert(turn.id)
+                    default: break
+                    }
+                }
+            } else if becameIdle {
+                results.append(ThreadTurnResult(activity: activity, kind: .completed))
+            }
+            previous[activity.id] = activity
+        }
+        previous = previous.filter { id, _ in rows.contains(where: { $0.id == id }) }
+        return results
     }
 }
 
-/// Emits one event when a thread enters the approval-waiting state.
-/// Keep the previous state across reconnects so a still-pending request is not
-/// announced again just because the local IPC connection was recreated.
-struct ApprovalTracker {
+struct ThreadAttentionEvent {
+    let activity: ThreadActivity
+    let kind: ThreadAttentionKind
+}
+
+/// Request IDs prevent repeat alerts, including after an IPC reconnect. Give an
+/// approval flag a brief chance to acquire its request identity before falling
+/// back to a generic approval notification.
+struct AttentionTracker {
     private struct State {
-        var waiting = false
-        var awaitingRequestIdentity = false
+        var waitingForApproval = false
+        var fallbackDeadline: TimeInterval?
+        var unidentifiedFallback = false
         var notifiedIDs: Set<String> = []
     }
     private var previous: [String: State] = [:]
+    var hasPendingFallback: Bool { previous.values.contains { $0.fallbackDeadline != nil } }
 
-    mutating func update(_ rows: [ThreadActivity], connected: Bool) -> [ThreadActivity] {
+    mutating func update(_ rows: [ThreadActivity], connected: Bool,
+                         now: TimeInterval = Date.timeIntervalSinceReferenceDate) -> [ThreadAttentionEvent] {
         guard connected else { return [] }
-        var requests: [ThreadActivity] = []
+        var events: [ThreadAttentionEvent] = []
         for activity in rows {
             var state = previous[activity.id] ?? State()
-            if !activity.isWaitingForApproval {
-                state.waiting = false
-                state.awaitingRequestIdentity = false
-            } else if !activity.approvalRequestIDs.isEmpty {
-                let newIDs = activity.approvalRequestIDs.subtracting(state.notifiedIDs)
-                // Runtime flags can arrive before the request list. Attach those IDs
-                // to the notification already emitted for this approval episode.
-                if !newIDs.isEmpty && !state.awaitingRequestIdentity { requests.append(activity) }
-                state.notifiedIDs.formUnion(activity.approvalRequestIDs)
-                state.awaitingRequestIdentity = false
-                state.waiting = true
-            } else {
-                if !state.waiting {
-                    requests.append(activity)
-                    state.awaitingRequestIdentity = true
+            if !activity.pendingRequests.isEmpty {
+                let newRequests = activity.pendingRequests
+                    .filter { !state.notifiedIDs.contains($0.identity) }
+                    .sorted { $0.identity < $1.identity }
+                var matchedFallback = false
+                for request in newRequests {
+                    if state.unidentifiedFallback && !matchedFallback {
+                        matchedFallback = true
+                    } else {
+                        events.append(ThreadAttentionEvent(activity: activity, kind: request.kind))
+                    }
+                    state.notifiedIDs.insert(request.identity)
                 }
-                state.waiting = true
+                state.unidentifiedFallback = false
+                state.fallbackDeadline = nil
+                state.waitingForApproval = activity.isWaitingForApproval
+            } else if activity.isWaitingForApproval {
+                if !state.waitingForApproval {
+                    state.fallbackDeadline = now + 0.5
+                }
+                if let deadline = state.fallbackDeadline, now >= deadline {
+                    events.append(ThreadAttentionEvent(activity: activity, kind: .approval))
+                    state.fallbackDeadline = nil
+                    state.unidentifiedFallback = true
+                }
+                state.waitingForApproval = true
+            } else {
+                state.waitingForApproval = false
+                state.fallbackDeadline = nil
+                state.unidentifiedFallback = false
             }
             previous[activity.id] = state
         }
-        return requests
+        return events
     }
 }
 
@@ -125,24 +209,85 @@ final class ThreadActivityMonitor {
     private var lastPublished: [ThreadActivity] = []
     private var lastConnected = false
     private var completionTracker = CompletionTracker()
-    private var approvalTracker = ApprovalTracker()
+    private var attentionTracker = AttentionTracker()
     var onCompletion: ((ThreadActivity) -> Void)?
-    var onApprovalRequest: ((ThreadActivity) -> Void)?
+    var onFailure: ((ThreadActivity) -> Void)?
+    var onAttention: ((ThreadAttentionEvent) -> Void)?
 
     init(onUpdate: @escaping ([ThreadActivity], Bool) -> Void) { self.onUpdate = onUpdate }
 
-    /// Active turns expose pending approvals through requests, even when runtime flags are empty.
-    static func approvalRequestIDs(in requests: [[String: Any]]) -> Set<String> {
-        let methods: Set<String> = [
-            "item/commandExecution/requestApproval", "item/fileChange/requestApproval",
-            "item/permissions/requestApproval"
-        ]
-        return Set(requests.compactMap { request in
-            guard let method = request["method"] as? String, methods.contains(method),
+    /// Retain only request identities and kinds; request bodies stay in Codex.
+    static func pendingRequests(in requests: [[String: Any]]) -> Set<PendingThreadRequest> {
+        Set(requests.compactMap { request in
+            guard let method = request["method"] as? String,
                   request["completed"] as? Bool != true,
                   let id = request["id"] else { return nil }
-            return "\(method):\(id)"
+            let kind: ThreadAttentionKind
+            switch method {
+            case "item/commandExecution/requestApproval", "item/fileChange/requestApproval",
+                 "item/permissions/requestApproval": kind = .approval
+            case "mcpServer/elicitation/request": kind = .mcp
+            case "tool/requestUserInput", "item/tool/requestUserInput":
+                kind = isAppApproval(request) ? .appApproval : .answer
+            default: return nil
+            }
+            return PendingThreadRequest(identity: "\(method):\(id)", kind: kind)
         })
+    }
+
+    private static func isAppApproval(_ request: [String: Any]) -> Bool {
+        // Connector approval and ordinary questions share requestUserInput.
+        // Prefer app metadata, then recognize the approval-specific choices.
+        let params = request["params"] as? [String: Any] ?? [:]
+        if ["appContext", "connectorId", "pluginId", "mcpToolCall", "appName"].contains(where: {
+            request[$0] != nil || params[$0] != nil
+        }) { return true }
+        let questions = params["questions"] as? [[String: Any]]
+            ?? request["questions"] as? [[String: Any]] ?? []
+        let labels = Set(questions.flatMap { $0["options"] as? [[String: Any]] ?? [] }
+            .compactMap { $0["label"] as? String }
+            .map { $0.replacingOccurrences(of: " ", with: "").lowercased() })
+        let accepts: Set<String> = ["accept", "allow", "allowonce", "approve", "한번만허용", "허용", "승인"]
+        let declines: Set<String> = ["decline", "deny", "reject", "거부"]
+        return !labels.isDisjoint(with: accepts) && !labels.isDisjoint(with: declines)
+    }
+
+    static func latestTurn(in state: [String: Any]) -> ThreadTurnState? {
+        guard let history = state["turnHistory"] as? [String: Any],
+              let payload = history["history"] as? [String: Any],
+              let entities = payload["entitiesByKey"] as? [String: Any] else { return nil }
+        return latestTurn(inEntities: entities)
+    }
+
+    private static func latestTurn(inEntities entities: [String: Any]) -> ThreadTurnState? {
+        entities.compactMap { ThreadTurnState(key: $0.key, value: $0.value) }
+            .max { lhs, rhs in
+                lhs.startedAtMs == rhs.startedAtMs
+                    ? lhs.key < rhs.key : lhs.startedAtMs < rhs.startedAtMs
+            }
+    }
+
+    static func applyTurnPatch(_ patch: [String: Any], to activity: inout ThreadActivity) {
+        guard let path = patch["path"] as? [Any],
+              path.first as? String == "turnHistory" else { return }
+        let value = patch["value"]
+        if path.count == 1 {
+            activity.latestTurn = value.flatMap { latestTurn(in: ["turnHistory": $0]) }
+        } else if path.count == 3,
+                  path[1] as? String == "history", path[2] as? String == "entitiesByKey",
+                  let entities = value as? [String: Any] {
+            activity.latestTurn = latestTurn(inEntities: entities)
+        } else if path.count >= 4,
+                  path[1] as? String == "history", path[2] as? String == "entitiesByKey",
+                  let key = path[3] as? String {
+            if path.count == 4, let value, let turn = ThreadTurnState(key: key, value: value),
+               turn.startedAtMs >= (activity.latestTurn?.startedAtMs ?? 0) {
+                activity.latestTurn = turn
+            } else if path.count == 5, activity.latestTurn?.key == key,
+                      path[4] as? String == "status", let status = value as? String {
+                activity.latestTurn?.status = status
+            }
+        }
     }
 
     static func readStateChange(from message: [String: Any]) -> (id: String, unread: Bool)? {
@@ -174,7 +319,10 @@ final class ThreadActivityMonitor {
                     var descriptor = pollfd(fd: socketFD, events: Int16(POLLIN), revents: 0)
                     let result = poll(&descriptor, 1, 1000)
                     if result < 0 { throw ActivityError.connection }
-                    if result == 0 { continue }
+                    if result == 0 {
+                        if attentionTracker.hasPendingFallback { publish(connected: true) }
+                        continue
+                    }
                     var bytes = [UInt8](repeating: 0, count: 65536)
                     let count = Darwin.read(socketFD, &bytes, bytes.count)
                     guard count > 0 else { throw ActivityError.connection }
@@ -339,7 +487,8 @@ final class ThreadActivityMonitor {
             activities[id] = ThreadActivity(id: id, title: state["title"] as? String ?? L10n.text("Codex 채팅"),
                 runtime: status,
                 activeFlags: runtime["activeFlags"] as? [String] ?? [],
-                approvalRequestIDs: Self.approvalRequestIDs(in: state["requests"] as? [[String: Any]] ?? []),
+                pendingRequests: Self.pendingRequests(in: state["requests"] as? [[String: Any]] ?? []),
+                latestTurn: Self.latestTurn(in: state),
                 unread: state["hasUnreadTurn"] as? Bool ?? false,
                 updatedAt: state["updatedAt"] as? Double ?? 0)
             owners[id] = owner
@@ -352,17 +501,21 @@ final class ThreadActivityMonitor {
                 publish(connected: true)
                 return
             }
-            var refreshApprovalRequests = false
+            var refreshPendingRequests = false
             for patch in change["patches"] as? [[String: Any]] ?? [] {
                 guard let path = patch["path"] as? [Any], let key = path.first as? String else { continue }
                 let value = patch["value"]
                 if key == "requests" {
                     if path.count == 1 {
-                        activities[id]?.approvalRequestIDs = Self.approvalRequestIDs(in: value as? [[String: Any]] ?? [])
+                        activities[id]?.pendingRequests = Self.pendingRequests(in: value as? [[String: Any]] ?? [])
                     } else {
                         // Fetch the authoritative list after indexed/nested patches rather than retaining request bodies.
-                        refreshApprovalRequests = true
+                        refreshPendingRequests = true
                     }
+                }
+                if key == "turnHistory", var activity = activities[id] {
+                    Self.applyTurnPatch(patch, to: &activity)
+                    activities[id] = activity
                 }
                 if key == "title", path.count == 1, let title = value as? String { activities[id]?.title = title }
                 if key == "hasUnreadTurn", path.count == 1 { activities[id]?.unread = value as? Bool ?? false }
@@ -416,7 +569,7 @@ final class ThreadActivityMonitor {
                 }
             }
             revisions[id] = revision
-            if refreshApprovalRequests {
+            if refreshPendingRequests {
                 try follow(id, enabled: false)
                 try follow(id, enabled: true)
                 return
@@ -426,17 +579,22 @@ final class ThreadActivityMonitor {
     }
 
     private func publish(connected: Bool) {
-        let completed = completionTracker.update(Array(activities.values), connected: connected)
-        if !completed.isEmpty {
+        let results = completionTracker.update(Array(activities.values), connected: connected)
+        if !results.isEmpty {
             RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) {
-                for activity in completed { self.onCompletion?(activity) }
+                for result in results {
+                    switch result.kind {
+                    case .completed: self.onCompletion?(result.activity)
+                    case .failed: self.onFailure?(result.activity)
+                    }
+                }
             }
             CFRunLoopWakeUp(CFRunLoopGetMain())
         }
-        let approvalRequests = approvalTracker.update(Array(activities.values), connected: connected)
-        if !approvalRequests.isEmpty {
+        let attentionEvents = attentionTracker.update(Array(activities.values), connected: connected)
+        if !attentionEvents.isEmpty {
             RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) {
-                for activity in approvalRequests { self.onApprovalRequest?(activity) }
+                for event in attentionEvents { self.onAttention?(event) }
             }
             CFRunLoopWakeUp(CFRunLoopGetMain())
         }

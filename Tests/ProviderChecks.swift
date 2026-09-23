@@ -7,15 +7,20 @@ import AppKit
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = ProviderSettings(defaults: defaults)
-        precondition(AIProvider.allCases.allSatisfy(settings.enabled))
+        precondition(settings.enabled(.codex) && !settings.enabled(.claude) && !settings.enabled(.grok))
         var changes = 0
         settings.onChange = { changes += 1 }
-        settings.setEnabled(false, for: .claude)
-        settings.setEnabled(false, for: .claude)
-        precondition(changes == 1 && settings.enabled(.codex) && settings.enabled(.grok))
-        precondition(!ProviderSettings(defaults: defaults).enabled(.claude))
         settings.setEnabled(true, for: .claude)
+        settings.setEnabled(true, for: .claude)
+        precondition(changes == 1 && settings.enabled(.codex) && !settings.enabled(.grok))
+        precondition(ProviderSettings(defaults: defaults).enabled(.claude))
+        settings.setEnabled(false, for: .claude)
         precondition(changes == 2)
+        precondition(!ProviderSettings(defaults: defaults).enabled(.claude))
+        settings.setEnabled(true, for: .grok)
+        precondition(changes == 3 && ProviderSettings(defaults: defaults).enabled(.grok))
+        settings.setEnabled(false, for: .grok)
+        precondition(changes == 4)
 
         precondition(ExternalUsageClient.number(true) == nil)
         precondition(ExternalUsageClient.number("nan") == nil)
@@ -57,7 +62,10 @@ import AppKit
         }
         let checks = descendants(window.window!.contentView!).compactMap { $0 as? NSSwitch }
             .filter { AIProvider(rawValue: $0.identifier?.rawValue ?? "") != nil }
-        precondition(checks.count == 3 && checks.allSatisfy { $0.state == .on })
+        precondition(checks.count == 3)
+        precondition(checks.first { $0.identifier?.rawValue == "codex" }?.state == .on)
+        precondition(checks.first { $0.identifier?.rawValue == "claude" }?.state == .off)
+        precondition(checks.first { $0.identifier?.rawValue == "grok" }?.state == .off)
         if let path = ProcessInfo.processInfo.environment["PLUSCODEX_PREVIEW"] {
             window.window!.appearance = NSAppearance(named: .aqua)
             let view = window.window!.contentView!

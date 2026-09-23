@@ -6,7 +6,7 @@ SOURCES=()
 for file in Sources/*.swift; do
     [[ "$file" == Sources/main.swift ]] || SOURCES+=("$file")
 done
-for name in QuotaTests QuotaAlertChecks QuotaLayoutChecks NotificationChecks MenuBuilderChecks IntroChecks UpdateLoadingChecks UpdaterChecks ProviderChecks ClaudeFallbackChecks SettingsChecks BackgroundKeychainChecks PresentationChecks; do
+for name in QuotaTests QuotaAlertChecks QuotaLayoutChecks NotificationChecks NotificationSoundChecks MenuBuilderChecks IntroChecks UpdateLoadingChecks UpdaterChecks ProviderChecks ClaudeFallbackChecks SettingsChecks BackgroundKeychainChecks PresentationChecks; do
     TEST_APP="$PWD/build/$name.app"
     mkdir -p "$TEST_APP/Contents/MacOS" "$TEST_APP/Contents/Resources"
     cp Info.plist "$TEST_APP/Contents/Info.plist"
@@ -16,7 +16,7 @@ for name in QuotaTests QuotaAlertChecks QuotaLayoutChecks NotificationChecks Men
     /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable $name" "$TEST_APP/Contents/Info.plist"
     cp Resources/Codex.svg "$TEST_APP/Contents/Resources/"
     cp Resources/Claude.svg Resources/Grok.svg "$TEST_APP/Contents/Resources/"
-    xcrun swiftc -swift-version 5 -F build/sparkle -framework Sparkle \
+    xcrun swiftc -swift-version 5 -F build/sparkle -framework Sparkle -framework AVFoundation \
         -Xlinker -rpath -Xlinker "$PWD/build/sparkle" \
         "${SOURCES[@]}" "Tests/$name.swift" -o "$TEST_APP/Contents/MacOS/$name"
     codesign --force --sign - "$TEST_APP"

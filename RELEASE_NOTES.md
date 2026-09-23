@@ -1,27 +1,20 @@
-# PlusCodex v1.0.7
+# PlusCodex v1.0.8
 
-- 일반·AI 표시·알림 설정의 섹션과 간격을 통일하고 언어 선택 팝업을 개선했습니다.
-- 설정 검색 결과에서 해당 항목으로 이동하며, 설정을 다시 열면 검색어가 초기화됩니다.
-- 모든 AI의 사용량을 남은 양 또는 사용한 양으로 표시할 수 있습니다.
-- 작업 완료·사용량 부족·초기화·업데이트·승인 요청 알림을 개별 설정할 수 있습니다.
-- Codex 파일·명령·권한 승인 요청 감지와 중복 알림 처리를 개선했습니다.
-- 알림 클릭 시 설정 창이 자동으로 열리던 동작을 제거했습니다. 작업 알림은 해당 Codex 작업으로 연결됩니다.
-- 설정 하단에 버전·제작자 링크를 추가하고 한국어·영어 문구와 DMG 숨김 파일 배치를 개선했습니다.
+- 알림음 파일을 저장·선택·삭제하고 MP3, M4A, WAV 등 지원 음원을 사용할 수 있습니다.
+- 사용자 지정 알림음의 음량과 재생 시간을 설정하고 실제 알림으로 테스트할 수 있습니다. 재생 시간은 음원 길이에 따라 최대 10초까지 선택할 수 있습니다.
+- 답변 요청, MCP 확인 요청, 연결된 앱 승인 요청, 작업 실패 알림을 추가하고 각 알림을 개별 설정할 수 있습니다.
+- 알림 설정의 스크롤·간격·선택 메뉴를 정리하고, Claude Code와 Grok은 새 설치 시 기본적으로 꺼두었습니다. 기존 선택은 유지됩니다.
 
 ## English
 
-- Refined settings sections, spacing, search navigation, and the language picker.
-- Settings search resets when reopened. Updated Korean and English text.
-- Added a shared option to show used or remaining usage for all AI providers.
-- Added individual controls for completion, low usage, reset, update, and approval notifications.
-- Improved detection and deduplication of Codex command, file, and permission approval requests.
-- Removed automatic settings opening when clicking a notification. Task notifications link to the corresponding Codex task.
-- Added version and author links and improved hidden-file placement in the DMG.
+- Save, choose, and remove custom notification sounds, including MP3, M4A, and WAV files.
+- Set volume and playback duration for custom sounds and test them with a notification. Available durations depend on the file length and are capped at 10 seconds.
+- Added separate notifications for answer requests, MCP confirmations, connected-app approvals, and failed Codex tasks.
+- Refined notification settings scrolling, spacing, and pickers. Claude Code and Grok start disabled for new installs; existing choices remain unchanged.
 
 ## 설치 및 업데이트
 
 기존 정식 버전 사용자는 앱의 업데이트 기능으로 설치할 수 있습니다. 다운로드·서명 검증·설치는 기존 Sparkle 방식으로 진행하며 필요하면 재실행을 안내합니다.
-이번 버전을 설치하기 전까지는 기존 버전의 업데이트 화면·설치 방식이 적용됩니다.
 처음 설치한다면 DMG에서 PlusCodex를 Applications로 옮겨 실행하세요.
 Apple Silicon Mac, macOS 14 이상을 지원합니다. 베타 빌드의 자동 업데이트는 비활성화되어 있으므로 베타 사용자는 정식 DMG를 수동 설치하세요.
 Claude/Grok은 해당 CLI 설치 및 로그인이 필요합니다. 기존 로그인·알림·자동 실행 설정은 유지됩니다.
@@ -31,5 +24,5 @@ OpenAI의 공식 앱이 아닌 비공식 보조 앱입니다.
 
 ## 검증 범위 / Validation
 
-알림 배너와 작업 이동 동작은 macOS 알림 설정 및 Codex 내부 연동 규격의 영향을 받습니다.
-Notification presentation and task navigation depend on macOS settings and the Codex desktop integration protocol.
+알림 배너와 사용자 지정 소리의 실제 재생 시간은 macOS 알림 권한·집중 모드·알림 스타일의 영향을 받습니다. Codex 요청 감지는 데스크톱 앱의 내부 연동 규격에 의존합니다.
+Notification banners and custom-sound playback depend on macOS permissions, Focus, and alert style. Codex request detection depends on the desktop integration protocol.

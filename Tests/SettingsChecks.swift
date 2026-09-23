@@ -27,12 +27,26 @@ import ServiceManagement
         }
         let toggles = descendants(window.window!.contentView!).compactMap { $0 as? NSSwitch }
         let providerToggles = toggles.filter { AIProvider(rawValue: $0.identifier?.rawValue ?? "") != nil }
-        precondition(providerToggles.count == 3 && providerToggles.allSatisfy { $0.state == .on })
+        precondition(providerToggles.count == 3)
+        let notificationToggles = toggles.filter {
+            guard let raw = $0.identifier?.rawValue, raw.hasPrefix("notification-") else { return false }
+            return NotificationKind(rawValue: String(raw.dropFirst("notification-".count))) != nil
+        }
+        precondition(notificationToggles.count == NotificationKind.allCases.count)
+        let scrolls = descendants(window.window!.contentView!).compactMap { $0 as? NSScrollView }
+        precondition(scrolls.contains { ($0.documentView?.frame.height ?? 0) > $0.frame.height },
+                     "Additional notification options must remain scrollable")
+        precondition(providerToggles.first { $0.identifier?.rawValue == "codex" }?.state == .on)
+        precondition(providerToggles.first { $0.identifier?.rawValue == "claude" }?.state == .off)
+        precondition(providerToggles.first { $0.identifier?.rawValue == "grok" }?.state == .off)
         precondition(toggles.first { $0.identifier?.rawValue == "launchAtLogin" }?.state == .off)
         precondition(window.window!.title == "설정")
         precondition(window.window!.contentView!.frame.size == NSSize(width: 680, height: 600))
         precondition(providerToggles.allSatisfy { $0.frame.width <= 54 })
         let claude = toggles.first { $0.identifier?.rawValue == "claude" }!
+        claude.state = .on
+        _ = claude.sendAction(claude.action, to: claude.target)
+        precondition(settings.enabled(.claude))
         claude.state = .off
         _ = claude.sendAction(claude.action, to: claude.target)
         precondition(!settings.enabled(.claude))
