@@ -43,6 +43,39 @@ import ServiceManagement
         precondition(window.window!.title == "설정")
         precondition(window.window!.contentView!.frame.size == NSSize(width: 680, height: 600))
         precondition(providerToggles.allSatisfy { $0.frame.width <= 54 })
+        func verifyNotificationControls(in controller: AISettingsWindow, expectedCount: Int) {
+            let root = controller.window!.contentView!
+            let notificationNavigation = descendants(root).compactMap { $0 as? NSButton }
+                .first { $0.tag == 2 && $0.accessibilityLabel() == "알림" }!
+            notificationNavigation.performClick(nil)
+            root.layoutSubtreeIfNeeded()
+            let scroll = descendants(root).compactMap { $0 as? NSScrollView }
+                .first { ($0.documentView?.frame.height ?? 0) > $0.frame.height }!
+            let controls = descendants(scroll.documentView!).filter { view in
+                guard !view.isHidden else { return false }
+                return ["notification-permission", "notification-completion"].contains(view.identifier?.rawValue ?? "")
+                    || ["알림 소리", "재생 시간", "음량", "알림 테스트"].contains(view.accessibilityLabel() ?? "")
+                        && (view is NSButton || view is NSSlider)
+            }
+            precondition(controls.count == expectedCount)
+            for control in controls {
+                let point = control.convert(NSPoint(x: control.bounds.midX, y: control.bounds.midY), to: nil)
+                let hit = root.superview?.hitTest(point)
+                precondition(hit === control || hit?.isDescendant(of: control) == true,
+                             "\(control.accessibilityLabel() ?? "알림 컨트롤") click intercepted by \(String(describing: hit))")
+            }
+        }
+        verifyNotificationControls(in: window, expectedCount: 4)
+        let soundDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PlusCodex-control-hit-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: soundDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: soundDirectory) }
+        try Data("fixture".utf8).write(to: soundDirectory.appendingPathComponent("selected.caf"))
+        defaults.set("selected.caf", forKey: "notifications.sound.customName")
+        let customSoundSettings = NotificationSettings(defaults: defaults, soundDirectory: soundDirectory)
+        let expandedWindow = AISettingsWindow(settings: settings,
+                                              notificationSettings: customSoundSettings, login: login)
+        verifyNotificationControls(in: expandedWindow, expectedCount: 6)
         let claude = toggles.first { $0.identifier?.rawValue == "claude" }!
         claude.state = .on
         _ = claude.sendAction(claude.action, to: claude.target)
@@ -73,6 +106,6 @@ import ServiceManagement
                 precondition(view.subviews.contains { $0 is QuotaLoadingView } == (offline || checking))
             }
         }
-        print("PASS: login default once, opt-out persistence, approval state, native switches, Claude/Grok loading, update callback and stable full overlays")
+        print("PASS: login, native switches, notification hit targets, Claude/Grok loading and stable overlays")
     }
 }

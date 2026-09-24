@@ -11,6 +11,7 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate, SPUStandardUserDriverDeleg
     private(set) var isChecking = false
     private var timeout: Timer?
     private var started = false
+    private(set) var notificationOpenPending = false
     private lazy var controller = SPUStandardUpdaterController(
         startingUpdater: false, updaterDelegate: self, userDriverDelegate: self)
 
@@ -22,8 +23,12 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate, SPUStandardUserDriverDeleg
             // preferences. Checks remain automatic; installation requires a choice.
             try controller.updater.start()
             started = true
-            // Run immediately on launch, independent of Sparkle's periodic schedule.
-            controller.updater.checkForUpdatesInBackground()
+            if notificationOpenPending {
+                openUpdateFromNotification()
+            } else {
+                // Run immediately on launch, independent of Sparkle's periodic schedule.
+                controller.updater.checkForUpdatesInBackground()
+            }
         } catch {
             finishChecking()
             NSLog("PlusCodex updater configuration: %@", error.localizedDescription)
@@ -40,6 +45,22 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate, SPUStandardUserDriverDeleg
         controller.updater.checkForUpdatesInBackground()
     }
 
+    func openUpdateFromNotification() {
+        notificationOpenPending = true
+        // A click may launch the app while Sparkle is still starting or
+        // already downloading its feed. Present once a user check is allowed.
+        guard started, updateAwaitingChoice || controller.updater.canCheckForUpdates else { return }
+        notificationOpenPending = false
+        onWillPresentUpdate?()
+        // Sparkle focuses an existing update prompt, or performs a user-initiated
+        // check if the notification was clicked after that session ended.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.started else { return }
+            NSApp.activate(ignoringOtherApps: true)
+            self.controller.checkForUpdates(nil)
+        }
+    }
+
     var supportsGentleScheduledUpdateReminders: Bool { true }
 
     func standardUserDriverShouldHandleShowingScheduledUpdate(_ update: SUAppcastItem,
@@ -51,17 +72,14 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate, SPUStandardUserDriverDeleg
     func standardUserDriverWillHandleShowingUpdate(_ handleShowingUpdate: Bool,
                                                    forUpdate update: SUAppcastItem, state: SPUUserUpdateState) {
         updateAwaitingChoice = true
-        if !handleShowingUpdate { presentUpdateInFocus() }
+        let wasOpenedFromNotification = notificationOpenPending
+        notificationOpenPending = false
+        if !handleShowingUpdate || wasOpenedFromNotification { presentUpdateInFocus() }
     }
 
     private func presentUpdateInFocus() {
-        onWillPresentUpdate?()
-        // Leave menu tracking and Sparkle's delegate callback before re-entering its UI.
-        DispatchQueue.main.async { [weak self] in
-            guard let self, self.updateAwaitingChoice else { return }
-            NSApp.activate(ignoringOtherApps: true)
-            self.controller.checkForUpdates(nil)
-        }
+        guard updateAwaitingChoice else { return }
+        openUpdateFromNotification()
     }
 
     func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) {
@@ -95,6 +113,9 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate, SPUStandardUserDriverDeleg
     }
     func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error?) {
         finishChecking()
+        if notificationOpenPending {
+            DispatchQueue.main.async { [weak self] in self?.openUpdateFromNotification() }
+        }
     }
 
     private func finishChecking() {

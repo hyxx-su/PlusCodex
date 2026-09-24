@@ -10,7 +10,7 @@ v1.0.6부터 창의 언어는 앱 설정을 따릅니다. 언어 변경은 재�
 `SUAllowsAutomaticUpdates=false`로 기존 설치본에 남은 자동 다운로드 설정도 적용되지 않도록 합니다.
 강제로 사용자의 작업을 종료하지 않습니다. 별도 수동 확인 버튼은 제공하지 않습니다.
 새 버전을 발견하면 macOS 알림을 보내며, 등록이 성공한 빌드는 앱을 다시 실행해도 중복 알리지 않습니다.
-알림을 누르면 최신 GitHub 릴리즈가 열립니다. 알림 권한을 꺼도 자동 확인과 앱 내 설치 안내는 유지됩니다.
+알림을 누르면 앱의 Sparkle 업데이트 창이 열립니다. 알림 권한을 꺼도 자동 확인과 앱 내 설치 안내는 유지됩니다.
 v1.0.5로 올라오는 과정 자체에는 이전 버전의 업데이트 동작이 적용됩니다.
 
 업데이트 확인 로딩은 실제 Sparkle 조회 상태를 사용합니다. 실패·최신 버전·새 버전 확인 시 종료되며,
@@ -26,11 +26,11 @@ v1.0.5로 올라오는 과정 자체에는 이전 버전의 업데이트 동작�
 
 ## 다음 버전
 
-1. `Info.plist`의 `CFBundleShortVersionString`을 사용자용 버전(예: `1.0.1`)으로 바꾸고,
-   `CFBundleVersion`은 현재 `10`보다 큰 정수로 올립니다.
+1. `Info.plist`의 `CFBundleShortVersionString`을 다음 사용자용 버전으로 바꾸고,
+   `CFBundleVersion`은 현재 `11`보다 큰 정수로 올립니다.
 2. `RELEASE_NOTES.md`를 수정하고 `bash test.sh`를 실행합니다.
 3. `bash package-release.sh /absolute/path/new-release-directory`를 실행합니다.
-4. 생성된 DMG·ZIP·서명된 `appcast.xml` 세 파일을 같은 GitHub Release `v1.0.1`에 업로드합니다.
+4. 생성된 DMG·ZIP·서명된 `appcast.xml` 세 파일을 같은 버전의 GitHub Release에 업로드합니다.
    모두 업로드할 때까지 초안으로 유지하고, 완성된 릴리즈를 Latest로 게시합니다.
 5. 이전 버전을 실행하거나 메뉴를 열어 자동 확인·설치 안내·사용자 선택 후 다운로드·설치·재실행을 실제 확인합니다.
 

@@ -1,4 +1,5 @@
 import Foundation
+import UserNotifications
 
 @main struct NotificationChecks {
     static func main() {
@@ -109,6 +110,38 @@ import Foundation
 
         precondition(AppNotifications.foregroundPresentationOptions.contains(.banner))
         precondition(AppNotifications.foregroundPresentationOptions.contains(.sound))
+        let resetContent = UNMutableNotificationContent()
+        resetContent.userInfo = ["resetAt": 1_800_000_000.0, "resetAccount": "first@example.com",
+                                 "resetLabel": "5시간", "resetSound": "default|5.0|1.0"]
+        let pendingReset = UNNotificationRequest(identifier: AppNotifications.resetIdentifier(
+            name: "primary", timestamp: 1_800_000_000), content: resetContent,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 60, repeats: false))
+        precondition(AppNotifications.resetIdentifier(name: "primary", timestamp: 1_800_000_000)
+            != AppNotifications.resetIdentifier(name: "primary", timestamp: 1_800_018_000),
+            "Different reset cycles must have independent pending IDs")
+        precondition(AppNotifications.isPreviousCycleDue(pendingAt: 1_800_000_000,
+            latestAt: 1_800_018_000, now: 1_800_000_001, windowDuration: 5 * 60 * 60),
+            "A still-pending due notification must survive the next-cycle booking")
+        precondition(!AppNotifications.isPreviousCycleDue(pendingAt: 1_800_000_000,
+            latestAt: 1_800_000_900, now: 1_800_000_001, windowDuration: 5 * 60 * 60),
+            "A corrected deadline must cancel the obsolete request")
+        precondition(AppNotifications.isPreviousCycleDue(pendingAt: 1_800_000_000,
+            latestAt: 1_800_604_800, now: 1_800_000_001, windowDuration: 7 * 24 * 60 * 60),
+            "A weekly reset must preserve the previous due notification")
+        precondition(AppNotifications.isPreviousCycleDue(pendingAt: 1_800_000_000,
+            latestAt: 1_802_419_200, now: 1_800_000_001, windowDuration: 30 * 24 * 60 * 60),
+            "Calendar months shorter than 30 days must still be recognised")
+        precondition(AppNotifications.resetRequestMatches(pendingReset, timestamp: 1_800_000_000,
+            account: "first@example.com", label: "5시간", sound: "default|5.0|1.0"))
+        precondition(!AppNotifications.resetRequestMatches(pendingReset, timestamp: 1_800_000_060,
+            account: "first@example.com", label: "5시간", sound: "default|5.0|1.0"),
+            "A changed reset time must replace the pending notification")
+        precondition(!AppNotifications.resetRequestMatches(pendingReset, timestamp: 1_800_000_000,
+            account: "second@example.com", label: "5시간", sound: "default|5.0|1.0"),
+            "An account switch must replace the pending notification")
+        precondition(!AppNotifications.resetRequestMatches(pendingReset, timestamp: 1_800_000_000,
+            account: "first@example.com", label: "5시간", sound: "custom|5.0|1.0"),
+            "A sound change must update the pending notification")
         print("PASS: completion, failure, interruption, request kinds, deduplication and foreground banners")
     }
 }

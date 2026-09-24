@@ -6,6 +6,9 @@ import Sparkle
         _ = NSApplication.shared
         let wrapper = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: nil, userDriverDelegate: nil)
         let updater = AppUpdater()
+        updater.openUpdateFromNotification()
+        precondition(updater.notificationOpenPending,
+            "A notification click during launch must wait for Sparkle to start")
         var transitions: [Bool] = []
         updater.onCheckingChanged = { transitions.append($0) }
         try updater.updater(wrapper.updater, mayPerform: .updatesInBackground)

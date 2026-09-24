@@ -3,7 +3,7 @@ import ServiceManagement
 import UniformTypeIdentifiers
 import UserNotifications
 
-private final class LanguageOptionButton: NSButton {
+private final class SearchOptionButton: NSButton {
     var isSelectedOption = false { didSet { updateBackground() } }
     private var isPointerInside = false { didSet { updateBackground() } }
     private weak var titleLabel: NSTextField?
@@ -95,7 +95,9 @@ private final class PressFeedbackButton: NSButton {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         let hitView = super.hitTest(point)
-        return hitView === loadingIndicator ? self : hitView
+        // Two nil optionals compare identical; only redirect hits from a real spinner.
+        guard let loadingIndicator, hitView === loadingIndicator else { return hitView }
+        return self
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -275,19 +277,33 @@ private final class LanguagePickerButton: NSButton {
     }
 }
 
-private final class LanguagePopoverPanel: NSPanel {
+private final class SettingsSearchPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+}
+
+private final class SettingsSearchDocumentView: NSView {
+    override var isFlipped: Bool { true }
+}
+
+private enum SettingsSearchKind {
+    case language
+    case wakeModel
 }
 
 final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegate {
     private let settings: ProviderSettings
     private let notificationSettings: NotificationSettings
+    private let wakeSettings: CodexWakeSettings
     private let login: LoginLaunchController
     private let language: LanguageSettings
     private let languagePicker = LanguagePickerButton(frame: .zero)
-    private lazy var languagePopover: LanguagePopoverPanel = {
-        let panel = LanguagePopoverPanel(contentRect: .zero,
+    private let wakeToggle = NSSwitch()
+    private let wakeModelPicker = LanguagePickerButton(frame: .zero)
+    private let wakeMessageField = NSTextField(frame: .zero)
+    var onWakeSettingsChanged: (() -> Void)?
+    private lazy var searchPopover: SettingsSearchPanel = {
+        let panel = SettingsSearchPanel(contentRect: .zero,
                             styleMask: [.borderless],
                             backing: .buffered,
                             defer: false)
@@ -302,12 +318,19 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         panel.collectionBehavior = [.transient, .ignoresCycle]
         return panel
     }()
-    private var languagePopoverEventMonitor: Any?
-    private var languagePopoverContentSize = NSSize.zero
+    private var searchPopoverEventMonitor: Any?
+    private var searchPopoverContentSize = NSSize.zero
+    private var activeSearchKind: SettingsSearchKind = .language
+    private weak var searchPopoverAnchor: NSButton?
+    private weak var searchScrollView: NSScrollView?
+    private weak var searchDocument: SettingsSearchDocumentView?
+    private var wakeModels: [CodexWakeModel] = []
+    private var pickerModelGeneration = 0
     private var notificationSoundPopover: NotificationSoundPopover?
     private var notificationStyleGuidancePopover: NSPopover?
-    private weak var languageSearchField: NSTextField?
-    private weak var languageEmptyState: NSTextField?
+    private weak var pickerSearchField: NSTextField?
+    private weak var pickerEmptyState: NSTextField?
+    private var pickerEmptyMessage = "결과를 찾을 수 없습니다"
     private weak var navigationSearchField: NSTextField?
     private weak var navigationSearchContainer: NSView?
     private weak var navigationClearButton: NSButton?
@@ -343,8 +366,8 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
     private var isSendingSoundTestNotification: Bool { activeSoundTestRequestID != nil }
     private var lastSoundTestRequestID: String?
     private var notificationToggles: [NotificationKind: NSSwitch] = [:]
-    private var languageOptions: [LanguageOptionButton] = []
-    private var languageCheckmarks: [NSImageView] = []
+    private var pickerOptions: [SearchOptionButton] = []
+    private var pickerCheckmarks: [NSImageView] = []
     private var localizedFields: [(field: NSTextField, key: String)] = []
     private var navigationKeys: [String] = []
     private var pages: [NSView] = []
@@ -361,10 +384,12 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
     private let notificationStatus = NSTextField(labelWithString: L10n.text("앱의 알림을 받습니다."))
 
     init(settings: ProviderSettings, notificationSettings: NotificationSettings = NotificationSettings(),
+         wakeSettings: CodexWakeSettings = CodexWakeSettings(),
          login: LoginLaunchController = LoginLaunchController(),
          language: LanguageSettings = LanguageSettings()) {
         self.settings = settings
         self.notificationSettings = notificationSettings
+        self.wakeSettings = wakeSettings
         self.login = login
         self.language = language
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 600),
@@ -556,7 +581,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         let searchDefinitions: [(categoryIndex: Int, parentKey: String,
                                  iconName: String, children: [String])] = [
             (0, "일반", "gearshape", [
-                "언어", "로그인 시 PlusCodex 자동 실행"
+                "언어", "로그인 시 PlusCodex 자동 실행", "Codex 깨우기", "자동으로 깨우기", "깨우기 모델", "깨우기 메시지"
             ]),
             (1, "AI 표시", "sparkles", [
                 "AI 서비스", "사용량 표시", "사용한 양으로 표시하기"
@@ -666,7 +691,6 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         languagePicker.action = #selector(showLanguagePicker(_:))
         generalCard.addSubview(languagePicker)
         updateLanguagePickerFrame()
-        configureLanguagePopover()
 
         label("로그인 시 PlusCodex 자동 실행", in: generalCard,
               x: 16, y: 38, width: 350, size: 13, bold: true)
@@ -681,6 +705,72 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         loginToggle.target = self
         loginToggle.action = #selector(toggleLogin(_:))
         loginToggle.setAccessibilityLabel(L10n.text("로그인 시 PlusCodex 자동 실행"))
+
+        // The second General card follows the same 24pt section break and
+        // 78pt row rhythm as the AI settings page.
+        label("Codex 깨우기", in: general, x: 13, y: 141, width: 437, size: 14, bold: true)
+        let wakeCard = NSView(frame: NSRect(x: 13, y: -101, width: 437, height: 234))
+        wakeCard.wantsLayer = true
+        wakeCard.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        wakeCard.layer?.cornerRadius = 12
+        wakeCard.layer?.borderWidth = 1
+        wakeCard.layer?.borderColor = NSColor.separatorColor.cgColor
+        wakeCard.layer?.masksToBounds = true
+        general.addSubview(wakeCard)
+        cardSeparator(wakeCard, y: 156)
+        cardSeparator(wakeCard, y: 78)
+        label("자동으로 깨우기", in: wakeCard, x: 16, y: 194,
+              width: 250, size: 13, bold: true)
+        let wakeDescription = NSTextField(labelWithString: L10n.text("사용량이 초기화될 때마다 Codex를 자동으로 깨웁니다."))
+        status(wakeDescription, in: wakeCard, y: 176, width: 280)
+        wakeDescription.font = .systemFont(ofSize: 11)
+        wakeDescription.toolTip = L10n.text("Codex 사용량이 소모됩니다. 깨우기 채팅이 사용 중이면 나중에 다시 시도합니다.")
+        localizedFields.append((field: wakeDescription,
+                                key: "사용량이 초기화될 때마다 Codex를 자동으로 깨웁니다."))
+        placeSwitch(wakeToggle, in: wakeCard, centerY: 197)
+        wakeToggle.identifier = NSUserInterfaceItemIdentifier("codexWakeEnabled")
+        wakeToggle.target = self
+        wakeToggle.action = #selector(toggleCodexWake(_:))
+        wakeToggle.setAccessibilityLabel(L10n.text("자동으로 깨우기"))
+
+        label("깨우기 모델", in: wakeCard, x: 16, y: 116,
+              width: 250, size: 13, bold: true)
+        let modelDescription = NSTextField(labelWithString: L10n.text("Codex를 깨울 때 사용할 모델을 선택합니다."))
+        status(modelDescription, in: wakeCard, y: 98, width: 210)
+        modelDescription.font = .systemFont(ofSize: 11)
+        localizedFields.append((field: modelDescription,
+                                key: "Codex를 깨울 때 사용할 모델을 선택합니다."))
+        wakeModelPicker.contentTintColor = .labelColor
+        wakeModelPicker.wantsLayer = true
+        wakeModelPicker.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        wakeModelPicker.layer?.cornerRadius = 13
+        wakeModelPicker.layer?.borderWidth = 1
+        wakeModelPicker.layer?.borderColor = NSColor.separatorColor.cgColor
+        wakeModelPicker.frame = NSRect(x: 343, y: 105, width: 78, height: 26)
+        wakeModelPicker.identifier = NSUserInterfaceItemIdentifier("codexWakeModel")
+        wakeModelPicker.target = self
+        wakeModelPicker.action = #selector(showWakeModelPicker(_:))
+        wakeModelPicker.setAccessibilityLabel(L10n.text("깨우기 모델"))
+        wakeCard.addSubview(wakeModelPicker)
+        configureWakeModelPicker()
+
+        label("깨우기 메시지", in: wakeCard, x: 16, y: 38,
+              width: 190, size: 13, bold: true)
+        let messageDescription = NSTextField(labelWithString: L10n.text("Codex에 보낼 메시지를 입력합니다."))
+        status(messageDescription, in: wakeCard, y: 20, width: 190)
+        messageDescription.font = .systemFont(ofSize: 11)
+        localizedFields.append((field: messageDescription,
+                                key: "Codex에 보낼 메시지를 입력합니다."))
+        wakeMessageField.frame = NSRect(x: 216, y: 27, width: 205, height: 26)
+        wakeMessageField.font = .systemFont(ofSize: 12)
+        wakeMessageField.bezelStyle = .roundedBezel
+        wakeMessageField.stringValue = wakeSettings.message
+        wakeMessageField.identifier = NSUserInterfaceItemIdentifier("codexWakeMessage")
+        wakeMessageField.setAccessibilityLabel(L10n.text("깨우기 메시지"))
+        wakeMessageField.delegate = self
+        wakeMessageField.target = self
+        wakeMessageField.action = #selector(saveWakeMessage(_:))
+        wakeCard.addSubview(wakeMessageField)
 
         let ai = pages[1]
         label("AI 서비스", in: ai, x: 13, y: 347, width: 437, size: 14, bold: true)
@@ -998,14 +1088,15 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
     required init?(coder: NSCoder) { nil }
     deinit {
         NotificationCenter.default.removeObserver(self)
-        if let monitor = languagePopoverEventMonitor {
+        if let monitor = searchPopoverEventMonitor {
             NSEvent.removeMonitor(monitor)
         }
         notificationSoundPopover?.close()
     }
 
     func windowWillClose(_ notification: Notification) {
-        closeLanguagePopover()
+        saveWakeMessage(wakeMessageField)
+        closeSearchPopover()
         notificationSoundPopover?.close()
         notificationStyleGuidancePopover?.close()
         cancelSoundTestNotification()
@@ -1034,13 +1125,11 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
             button.setAccessibilityLabel(L10n.text(navigationKeys[index]))
         }
         languagePicker.setAccessibilityLabel(L10n.text("언어"))
-        languageSearchField?.placeholderString = L10n.text("언어 검색")
-        languageSearchField?.setAccessibilityLabel(L10n.text("언어 검색"))
-        for (index, option) in languageOptions.enumerated() {
-            option.setDisplayTitle(index == 0 ? L10n.text("한국어") : L10n.text("English"))
-        }
-        languageEmptyState?.stringValue = L10n.text("결과를 찾을 수 없습니다")
-        if let search = languageSearchField { filterLanguages(search) }
+        wakeToggle.setAccessibilityLabel(L10n.text("자동으로 깨우기"))
+        wakeModelPicker.setAccessibilityLabel(L10n.text("깨우기 모델"))
+        wakeMessageField.setAccessibilityLabel(L10n.text("깨우기 메시지"))
+        closeSearchPopover()
+        configureWakeModelPicker()
         notificationStatus.stringValue = L10n.text("앱의 알림을 받습니다.")
         notificationPermissionToggle?.setAccessibilityLabel(L10n.text("알림 설정"))
         notificationSoundPicker?.setAccessibilityLabel(L10n.text("알림 소리"))
@@ -1085,13 +1174,10 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
     @objc private func selectPage(_ sender: NSButton) { showPage(sender.tag) }
     @objc private func selectNavigationSearchResult(_ sender: NSButton) {
         showPage(sender.tag)
-        guard let row = navigationSearchRows.first(where: { $0.button === sender }),
-              row.titleKey == "언어" else { return }
-
-        // General settings are shown in one compact page. Make the language
-        // control the focused target so selecting the child result lands on
-        // the actual language setting instead of only changing the category.
-        window?.makeFirstResponder(languagePicker)
+        guard let row = navigationSearchRows.first(where: { $0.button === sender }) else { return }
+        if row.titleKey == "언어" { window?.makeFirstResponder(languagePicker) }
+        if row.titleKey == "깨우기 모델" { window?.makeFirstResponder(wakeModelPicker) }
+        if row.titleKey == "깨우기 메시지" { window?.makeFirstResponder(wakeMessageField) }
     }
     private func restoreNavigationMenu() {
         for button in navigation {
@@ -1199,13 +1285,9 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         usageDisplayToggle.state = remainingValues.allSatisfy({ !$0 }) ? .on : .off
         languagePicker.displayTitle = language.selected == .korean ? L10n.text("한국어") : "English"
         updateLanguagePickerFrame()
-        for (index, option) in languageOptions.enumerated() {
-            let selected = option.tag == (language.selected == .korean ? 0 : 1)
-            option.isSelectedOption = selected
-            if index < languageCheckmarks.count {
-                languageCheckmarks[index].isHidden = !selected
-            }
-        }
+        wakeToggle.state = wakeSettings.enabled ? .on : .off
+        configureWakeModelPicker()
+        updatePickerSelection()
         for provider in AIProvider.allCases {
             toggles[provider]?.state = settings.enabled(provider) ? .on : .off
             statuses[provider]?.alphaValue = settings.enabled(provider) ? 1 : 0.5
@@ -1233,11 +1315,26 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
     func update(_ provider: AIProvider, status: String) {
         statuses[provider]?.stringValue = status
     }
-    private func configureLanguagePopover() {
+    private func configureWakeModelPicker() {
+        wakeModelPicker.displayTitle = "\(wakeSettings.displayName) · Light"
+        guard let parent = wakeModelPicker.superview else { return }
+        let width = min(200, wakeModelPicker.preferredWidth)
+        wakeModelPicker.frame = NSRect(x: parent.bounds.width - 16 - width,
+                                       y: wakeModelPicker.frame.minY,
+                                       width: width, height: 26)
+    }
+    /// Language and wake-model controls share the same anchored, searchable
+    /// panel, including its search field, option rows, hover and checkmark.
+    private func configureSearchPopover(emptyMessage: String = "결과를 찾을 수 없습니다",
+                                        query: String = "") {
+        pickerEmptyMessage = emptyMessage
         let contentWidth: CGFloat = 240
         let rowHeight: CGFloat = 30
         let maxVisibleRows = 8
-        let totalRowCount = max(1, AppLanguage.allCases.count)
+        let titles = activeSearchKind == .language
+            ? [L10n.text("한국어"), "English"]
+            : wakeModels.map { "\($0.displayName) · Light" }
+        let totalRowCount = max(1, titles.count)
         let visibleRowCount = min(totalRowCount, maxVisibleRows)
         let listHeight = rowHeight * CGFloat(visibleRowCount)
         let headerHeight: CGFloat = 45
@@ -1260,7 +1357,9 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
 
         let search = NSTextField(frame: NSRect(x: 35, y: contentHeight - 38,
                                                width: contentWidth - 50, height: 24))
-        search.placeholderString = L10n.text("언어 검색")
+        let searchKey = activeSearchKind == .language ? "언어 검색" : "모델 검색"
+        search.placeholderString = L10n.text(searchKey)
+        search.stringValue = query
         search.font = .systemFont(ofSize: 12.5)
         search.isBezeled = false
         search.isEditable = true
@@ -1269,10 +1368,10 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         search.focusRingType = .none
         search.delegate = self
         search.target = self
-        search.action = #selector(filterLanguages(_:))
-        search.setAccessibilityLabel(L10n.text("언어 검색"))
+        search.action = #selector(filterSearchOptions(_:))
+        search.setAccessibilityLabel(L10n.text(searchKey))
         content.addSubview(search)
-        languageSearchField = search
+        pickerSearchField = search
 
         let separator = NSBox(frame: NSRect(x: 10, y: contentHeight - headerHeight,
                                             width: contentWidth - 20, height: 1))
@@ -1283,19 +1382,24 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
                                                 width: contentWidth - 8, height: listHeight))
         scroll.drawsBackground = false
         scroll.borderType = .noBorder
-        scroll.hasVerticalScroller = totalRowCount > maxVisibleRows
+        scroll.hasVerticalScroller = titles.count > maxVisibleRows
         scroll.autohidesScrollers = true
         scroll.scrollerStyle = .overlay
         scroll.usesPredominantAxisScrolling = true
+        scroll.verticalScrollElasticity = .none
 
-        let documentHeight = max(rowHeight * 2, rowHeight * CGFloat(AppLanguage.allCases.count))
-        // Match the document view to the scroll viewport so option rows keep
-        // equal white margins on both sides of the panel.
+        let documentHeight = max(listHeight, rowHeight * CGFloat(titles.count))
         let documentWidth = contentWidth - 8
-        let document = NSView(frame: NSRect(x: 0, y: 0, width: documentWidth, height: documentHeight))
+        let document = SettingsSearchDocumentView(frame: NSRect(x: 0, y: 0,
+                                                                 width: documentWidth,
+                                                                 height: documentHeight))
         document.postsFrameChangedNotifications = false
-        for (index, title) in [L10n.text("한국어"), "English"].enumerated() {
-            let option = LanguageOptionButton(title: title, target: self, action: #selector(selectLanguage(_:)))
+        pickerOptions.removeAll()
+        pickerCheckmarks.removeAll()
+        for (index, title) in titles.enumerated() {
+            let action = activeSearchKind == .language
+                ? #selector(selectLanguage(_:)) : #selector(selectWakeModel(_:))
+            let option = SearchOptionButton(title: title, target: self, action: action)
             option.tag = index
             option.alignment = .left
             option.isBordered = false
@@ -1305,12 +1409,12 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
             let rowInset: CGFloat = 8
             let optionWidth = documentWidth - rowInset * 2
             option.frame = NSRect(x: rowInset,
-                                  y: documentHeight - rowHeight * CGFloat(index + 1),
+                                  y: rowHeight * CGFloat(index),
                                   width: optionWidth, height: rowHeight)
             option.setDisplayTitle(title)
             option.configureTitleLabel(width: optionWidth)
             document.addSubview(option)
-            languageOptions.append(option)
+            pickerOptions.append(option)
 
             let checkmark = NSImageView(frame: NSRect(x: optionWidth - 21, y: 8, width: 14, height: 14))
             checkmark.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)?
@@ -1320,98 +1424,191 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
             checkmark.isHidden = true
             checkmark.setAccessibilityElement(false)
             option.addSubview(checkmark)
-            languageCheckmarks.append(checkmark)
+            pickerCheckmarks.append(checkmark)
         }
-        let emptyState = NSTextField(labelWithString: L10n.text("결과를 찾을 수 없습니다"))
+        let emptyState = NSTextField(labelWithString: L10n.text(emptyMessage))
         emptyState.alignment = .center
         emptyState.font = .systemFont(ofSize: 12)
         emptyState.textColor = .secondaryLabelColor
-        emptyState.frame = NSRect(x: 0, y: 18, width: documentWidth, height: 24)
-        emptyState.isHidden = true
+        emptyState.frame = NSRect(x: 0, y: (listHeight - 24) / 2,
+                                  width: documentWidth, height: 24)
+        emptyState.isHidden = !titles.isEmpty
         document.addSubview(emptyState)
-        languageEmptyState = emptyState
+        pickerEmptyState = emptyState
         scroll.documentView = document
         content.addSubview(scroll)
+        searchScrollView = scroll
+        searchDocument = document
         content.layer?.masksToBounds = true
         let contentSize = content.frame.size
-        languagePopoverContentSize = contentSize
-        languagePopover.contentView = content
-        languagePopover.setContentSize(contentSize)
+        searchPopoverContentSize = contentSize
+        searchPopover.contentView = content
+        searchPopover.setContentSize(contentSize)
         content.frame = NSRect(origin: .zero, size: contentSize)
+        updatePickerSelection()
+        if !query.isEmpty { filterSearchOptions(search) }
     }
     @objc private func showLanguagePicker(_ sender: NSButton) {
-        if languagePopover.isVisible {
-            closeLanguagePopover()
+        if searchPopover.isVisible && activeSearchKind == .language {
+            closeSearchPopover()
             return
         }
+        closeSearchPopover()
         notificationSoundPopover?.close()
-        languageSearchField?.stringValue = ""
-        if let search = languageSearchField { filterLanguages(search) }
-        synchronize()
-        guard let window = sender.window else { return }
-        let buttonRect = sender.convert(sender.bounds, to: nil)
-        let buttonScreenRect = window.convertToScreen(buttonRect)
-        let panelGap: CGFloat = 4
-        let panelFrame = NSRect(x: buttonScreenRect.maxX - languagePopoverContentSize.width,
-                                y: buttonScreenRect.minY - languagePopoverContentSize.height - panelGap,
-                                width: languagePopoverContentSize.width,
-                                height: languagePopoverContentSize.height)
-        languagePopover.setFrame(panelFrame, display: true)
-        NSApp.activate(ignoringOtherApps: true)
-        languagePopover.orderFrontRegardless()
-        languagePopover.makeKey()
-        installLanguagePopoverEventMonitor()
-        if let search = languageSearchField {
-            languagePopover.makeFirstResponder(search)
+        activeSearchKind = .language
+        configureSearchPopover()
+        showSearchPopover(from: sender)
+    }
+    @objc private func showWakeModelPicker(_ sender: NSButton) {
+        if searchPopover.isVisible && activeSearchKind == .wakeModel {
+            closeSearchPopover()
+            return
+        }
+        closeSearchPopover()
+        notificationSoundPopover?.close()
+        activeSearchKind = .wakeModel
+        wakeModels = []
+        configureSearchPopover(emptyMessage: "모델을 불러오는 중…")
+        showSearchPopover(from: sender)
+        let generation = pickerModelGeneration
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let result = Result { try CodexWakeClient.availableModels() }
+            DispatchQueue.main.async {
+                guard let self, self.pickerModelGeneration == generation,
+                      self.activeSearchKind == .wakeModel,
+                      self.searchPopover.isVisible else { return }
+                let query = self.pickerSearchField?.stringValue ?? ""
+                switch result {
+                case .success(let models):
+                    self.wakeModels = models
+                    if let model = models.first(where: { $0.id == self.wakeSettings.modelID })
+                        ?? models.first(where: { $0.id == "gpt-6-luna" }) {
+                        self.wakeSettings.select(model)
+                        self.configureWakeModelPicker()
+                    }
+                    self.configureSearchPopover(emptyMessage: "사용 가능한 모델이 없습니다.",
+                                                query: query)
+                case .failure:
+                    self.configureSearchPopover(emptyMessage: "모델을 불러오지 못했습니다.",
+                                                query: query)
+                }
+                self.positionSearchPopover()
+                if let search = self.pickerSearchField {
+                    self.searchPopover.makeFirstResponder(search)
+                }
+            }
         }
     }
-    private func installLanguagePopoverEventMonitor() {
-        if let monitor = languagePopoverEventMonitor {
+    private func showSearchPopover(from sender: NSButton) {
+        searchPopoverAnchor = sender
+        positionSearchPopover()
+        NSApp.activate(ignoringOtherApps: true)
+        searchPopover.orderFrontRegardless()
+        searchPopover.makeKey()
+        installSearchPopoverEventMonitor()
+        if let search = pickerSearchField { searchPopover.makeFirstResponder(search) }
+    }
+    private func positionSearchPopover() {
+        guard let sender = searchPopoverAnchor, let window = sender.window else { return }
+        let buttonScreenRect = window.convertToScreen(sender.convert(sender.bounds, to: nil))
+        let panelGap: CGFloat = 4
+        var y = buttonScreenRect.minY - searchPopoverContentSize.height - panelGap
+        if let screen = window.screen, y < screen.visibleFrame.minY {
+            y = buttonScreenRect.maxY + panelGap
+        }
+        searchPopover.setFrame(NSRect(x: buttonScreenRect.maxX - searchPopoverContentSize.width,
+                                      y: y, width: searchPopoverContentSize.width,
+                                      height: searchPopoverContentSize.height), display: true)
+    }
+    private func installSearchPopoverEventMonitor() {
+        if let monitor = searchPopoverEventMonitor {
             NSEvent.removeMonitor(monitor)
         }
-        languagePopoverEventMonitor = NSEvent.addLocalMonitorForEvents(
+        searchPopoverEventMonitor = NSEvent.addLocalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-                guard let self, self.languagePopover.isVisible else { return event }
+                guard let self, self.searchPopover.isVisible else { return event }
                 let location = NSEvent.mouseLocation
-                let buttonRect = self.languagePicker.window.map {
-                    $0.convertToScreen(self.languagePicker.convert(self.languagePicker.bounds, to: nil))
+                let buttonRect = self.searchPopoverAnchor.flatMap { button -> NSRect? in
+                    guard let window = button.window else { return nil }
+                    return window.convertToScreen(button.convert(button.bounds, to: nil))
                 }
-                if !self.languagePopover.frame.contains(location),
+                if !self.searchPopover.frame.contains(location),
                    !(buttonRect?.contains(location) ?? false) {
-                    self.closeLanguagePopover()
+                    self.closeSearchPopover()
                 }
                 return event
             }
     }
-    private func closeLanguagePopover() {
-        if let monitor = languagePopoverEventMonitor {
+    private func closeSearchPopover() {
+        pickerModelGeneration += 1
+        if let monitor = searchPopoverEventMonitor {
             NSEvent.removeMonitor(monitor)
-            languagePopoverEventMonitor = nil
+            searchPopoverEventMonitor = nil
         }
-        languagePopover.orderOut(nil)
+        searchPopover.orderOut(nil)
     }
-    @objc private func filterLanguages(_ sender: NSTextField) {
+    private func updatePickerSelection() {
+        for (index, option) in pickerOptions.enumerated() {
+            let selected = activeSearchKind == .language
+                ? index == (language.selected == .korean ? 0 : 1)
+                : wakeModels.indices.contains(index) && wakeModels[index].id == wakeSettings.modelID
+            option.isSelectedOption = selected
+            pickerCheckmarks[index].isHidden = !selected
+        }
+    }
+    @objc private func filterSearchOptions(_ sender: NSTextField) {
         let query = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         var visibleCount = 0
-        for option in languageOptions {
-            let visible = query.isEmpty || option.displayTitle.lowercased().contains(query)
+        for option in pickerOptions {
+            let visible = query.isEmpty || option.displayTitle.localizedCaseInsensitiveContains(query)
             option.isHidden = !visible
-            if visible { visibleCount += 1 }
+            if visible {
+                option.frame.origin.y = CGFloat(visibleCount) * 30
+                visibleCount += 1
+            }
         }
-        languageEmptyState?.isHidden = visibleCount > 0
+        pickerEmptyState?.stringValue = L10n.text(query.isEmpty
+            ? pickerEmptyMessage : "결과를 찾을 수 없습니다")
+        pickerEmptyState?.isHidden = visibleCount > 0
+        if let document = searchDocument, let scroll = searchScrollView {
+            document.setFrameSize(NSSize(width: document.frame.width,
+                                         height: max(scroll.frame.height, CGFloat(visibleCount) * 30)))
+            scroll.hasVerticalScroller = visibleCount > 8
+            scroll.contentView.scroll(to: .zero)
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
     }
     func controlTextDidChange(_ notification: Notification) {
         guard let field = notification.object as? NSTextField else { return }
-        if field === languageSearchField {
-            filterLanguages(field)
+        if field === pickerSearchField {
+            filterSearchOptions(field)
         } else if field === navigationSearchField {
             filterNavigation(field)
         }
     }
+    func controlTextDidEndEditing(_ notification: Notification) {
+        guard let field = notification.object as? NSTextField, field === wakeMessageField else { return }
+        saveWakeMessage(field)
+    }
+    @objc private func saveWakeMessage(_ sender: NSTextField) {
+        if !wakeSettings.setMessage(sender.stringValue) { NSSound.beep() }
+        sender.stringValue = wakeSettings.message
+    }
     @objc private func selectLanguage(_ sender: NSButton) {
         language.select(sender.tag == 0 ? .korean : .english)
-        closeLanguagePopover()
+        closeSearchPopover()
         synchronize()
+    }
+    @objc private func selectWakeModel(_ sender: NSButton) {
+        guard wakeModels.indices.contains(sender.tag) else { return }
+        wakeSettings.select(wakeModels[sender.tag])
+        closeSearchPopover()
+        synchronize()
+    }
+    @objc private func toggleCodexWake(_ sender: NSSwitch) {
+        wakeSettings.setEnabled(sender.state == .on)
+        synchronize()
+        onWakeSettingsChanged?()
     }
     @objc private func toggleUsageDisplay(_ sender: NSSwitch) {
         let showRemaining = sender.state != .on
@@ -1660,7 +1857,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
             notificationSoundPopover?.close()
             return
         }
-        closeLanguagePopover()
+        closeSearchPopover()
         let popover: NotificationSoundPopover
         if let existing = notificationSoundPopover {
             popover = existing

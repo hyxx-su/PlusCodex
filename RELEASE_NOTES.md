@@ -1,16 +1,16 @@
-# PlusCodex v1.0.8
+# PlusCodex v1.0.9
 
-- 알림음 파일을 저장·선택·삭제하고 MP3, M4A, WAV 등 지원 음원을 사용할 수 있습니다.
-- 사용자 지정 알림음의 음량과 재생 시간을 설정하고 실제 알림으로 테스트할 수 있습니다. 재생 시간은 음원 길이에 따라 최대 10초까지 선택할 수 있습니다.
-- 답변 요청, MCP 확인 요청, 연결된 앱 승인 요청, 작업 실패 알림을 추가하고 각 알림을 개별 설정할 수 있습니다.
-- 알림 설정의 스크롤·간격·선택 메뉴를 정리하고, Claude Code와 Grok은 새 설치 시 기본적으로 꺼두었습니다. 기존 선택은 유지됩니다.
+- Codex 5시간 사용량 초기화 시 자동으로 메시지를 보내 깨우는 기능을 추가했습니다. 기본값은 꺼짐이며, 모델·메시지를 설정할 수 있습니다. 기본 메시지는 `Wake up`이고 같은 채팅을 재사용합니다.
+- 사용량 초기화 예정 시각이 변경되면 알림 예약과 자동 깨우기 일정을 최신 시각에 맞춰 갱신합니다. 앱 재실행·잠자기 복귀 후에도 예약을 다시 확인합니다.
+- 업데이트 알림을 클릭하면 GitHub 릴리즈 대신 앱의 업데이트 창을 엽니다.
+- 알림 설정에서 일부 스위치와 선택 버튼이 클릭되지 않던 문제를 수정했습니다.
 
 ## English
 
-- Save, choose, and remove custom notification sounds, including MP3, M4A, and WAV files.
-- Set volume and playback duration for custom sounds and test them with a notification. Available durations depend on the file length and are capped at 10 seconds.
-- Added separate notifications for answer requests, MCP confirmations, connected-app approvals, and failed Codex tasks.
-- Refined notification settings scrolling, spacing, and pickers. Claude Code and Grok start disabled for new installs; existing choices remain unchanged.
+- Added an optional Codex wake message at the five-hour usage reset. Choose a model and message; the default message is `Wake up`, and subsequent messages reuse the same chat.
+- Resynchronize reset notifications and wake timing when the reported reset time changes, including after app relaunch or waking from sleep.
+- Clicking an update notification now opens the in-app update window instead of the GitHub release page.
+- Fixed notification settings switches and pickers that sometimes did not respond to clicks.
 
 ## 설치 및 업데이트
 
@@ -24,5 +24,5 @@ OpenAI의 공식 앱이 아닌 비공식 보조 앱입니다.
 
 ## 검증 범위 / Validation
 
-알림 배너와 사용자 지정 소리의 실제 재생 시간은 macOS 알림 권한·집중 모드·알림 스타일의 영향을 받습니다. Codex 요청 감지는 데스크톱 앱의 내부 연동 규격에 의존합니다.
-Notification banners and custom-sound playback depend on macOS permissions, Focus, and alert style. Codex request detection depends on the desktop integration protocol.
+알림 배너와 사용자 지정 소리의 실제 재생 시간은 macOS 알림 권한·집중 모드·알림 스타일의 영향을 받습니다. 자동 깨우기는 Codex 로그인과 사용량 조회, 앱 실행 상태에 따라 동작하며 Codex 사용량을 소모합니다.
+Notification banners and custom-sound playback depend on macOS permissions, Focus, and alert style. Auto wake requires a Codex login, a fresh usage check, and a running PlusCodex app; it consumes Codex usage.

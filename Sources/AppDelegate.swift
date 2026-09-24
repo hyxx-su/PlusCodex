@@ -26,8 +26,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var offline = false
     private var stateScreenHeight: CGFloat?
     private let providerSettings = ProviderSettings()
-    private lazy var settingsWindow = AISettingsWindow(settings: providerSettings,
-                                                       notificationSettings: notificationSettings)
+    private let wakeSettings = CodexWakeSettings()
+    private lazy var wakeScheduler = CodexWakeScheduler(settings: wakeSettings)
+    private lazy var settingsWindow: AISettingsWindow = {
+        let controller = AISettingsWindow(settings: providerSettings,
+                                          notificationSettings: notificationSettings,
+                                          wakeSettings: wakeSettings)
+        controller.onWakeSettingsChanged = { [weak self] in
+            guard let self else { return }
+            self.wakeScheduler.tick(quota: self.quota, offline: self.offline)
+        }
+        return controller
+    }()
     private var extraProviders: [ProviderStatusController] = []
     private var settingsItem: NSMenuItem?
     private lazy var statusWindow: StatusWindow = {
@@ -80,16 +90,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             CFRunLoopWakeUp(CFRunLoopGetMain())
         }
-        notifications.start()
-        do { try LoginLaunchController().applyInitialDefault() }
-        catch { NSLog("PlusCodex login item: %@", error.localizedDescription) }
         updater.onUpdateAvailable = { [weak self] version, build in
             self?.notifications.updateAvailable(version: version, build: build)
+        }
+        notifications.onUpdateNotificationOpened = { [weak self] in
+            self?.updater.openUpdateFromNotification()
         }
         updater.onWillPresentUpdate = { [weak self] in
             self?.builtItems?.menu.cancelTracking()
             self?.extraProviders.forEach { $0.dismissMenu() }
         }
+        notifications.start()
+        do { try LoginLaunchController().applyInitialDefault() }
+        catch { NSLog("PlusCodex login item: %@", error.localizedDescription) }
         updater.start()
         refresh()
         activityMonitor = ThreadActivityMonitor { [weak self] activities, _ in
@@ -104,9 +117,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
             self?.refresh()
             self?.extraProviders.forEach { $0.synchronize() }
+            if let self { self.wakeScheduler.tick(quota: self.quota, offline: self.offline) }
         }
         if let timer { RunLoop.main.add(timer, forMode: .common) }
-        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(refresh), name: NSWorkspace.didWakeNotification, object: nil)
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(wokeFromSleep),
+                                                         name: NSWorkspace.didWakeNotification, object: nil)
+    }
+
+    @objc private func wokeFromSleep() {
+        refresh()
+        wakeScheduler.tick(quota: quota, offline: offline)
     }
 
     @objc private func refresh() {
@@ -131,9 +151,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     self.notifications.checkThresholds(snapshot.quota, account: snapshot.account)
                     self.quota = snapshot.quota
                     self.account = snapshot.account
-                    self.updatedAt = Date()
+                    let refreshedAt = Date()
+                    self.updatedAt = refreshedAt
                     self.failure = nil
                     self.settingsWindow.update(.codex, status: snapshot.account?.email ?? L10n.text("연결됨 · 사용량 조회 완료"))
+                    self.wakeScheduler.tick(quota: self.quota, offline: self.offline,
+                                            quotaFetchedAt: refreshedAt, now: refreshedAt)
                 case .failure(let error):
                     self.failure = error.localizedDescription
                     self.settingsWindow.update(.codex, status: error.localizedDescription)
