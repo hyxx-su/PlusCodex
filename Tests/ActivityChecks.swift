@@ -41,6 +41,17 @@ struct ActivityChecks {
         completed.runtime = "idle"
         precondition(receipts.visibleRows([completed]).count == 1, "Opening running tasks must not hide their completion")
 
+        var externallyCompleted = ThreadActivity(id: id, title: "외부에서 완료 확인", runtime: "idle",
+                                                  unread: true, updatedAt: 20)
+        receipts.markCompleted(externallyCompleted)
+        precondition(receipts.visibleRows([externallyCompleted]).count == 1)
+        receipts.acknowledgeExternally(externallyCompleted)
+        precondition(receipts.visibleRows([externallyCompleted]).isEmpty,
+                     "Codex에서 읽은 완료 작업은 메뉴바에서 사라져야 합니다")
+        externallyCompleted.updatedAt = 21
+        precondition(receipts.visibleRows([externallyCompleted]).count == 1,
+                     "새로 갱신된 완료 작업은 다시 표시되어야 합니다")
+
         _ = NSApplication.shared
         let empty = ThreadActivityView(activities: [])
         precondition(empty.frame.height == 0 && empty.subviews.isEmpty)

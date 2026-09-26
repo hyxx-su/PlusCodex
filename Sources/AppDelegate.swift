@@ -89,9 +89,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         networkMonitor.start(queue: DispatchQueue(label: "PlusCodex.network"))
         updater.onCheckingChanged = { [weak self] checking in
             RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) {
-                self?.checkingForUpdates = checking
-                if let self { self.extraProviders.forEach { $0.presentation(offline: self.offline, checking: checking) } }
-                self?.render()
+                guard let self else { return }
+                let wasChecking = self.checkingForUpdates
+                self.checkingForUpdates = checking
+                self.extraProviders.forEach { $0.presentation(offline: self.offline, checking: checking) }
+                if !self.menuTracking || wasChecking != checking {
+                    self.render(allowingTrackedUpdateTransition: self.menuTracking)
+                }
             }
             CFRunLoopWakeUp(CFRunLoopGetMain())
         }
@@ -114,7 +118,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.activities = activities
             self.updateActivityView()
         }
-        activityMonitor?.onCompletion = { [weak self] activity in self?.notifications.completed(activity) }
+        activityMonitor?.onCompletion = { [weak self] activity in
+            guard let self else { return }
+            self.readReceipts.markCompleted(activity)
+            self.notifications.completed(activity)
+            self.updateActivityView()
+        }
+        activityMonitor?.onRead = { [weak self] activity in
+            guard let self else { return }
+            self.readReceipts.acknowledgeExternally(activity)
+            self.updateActivityView()
+        }
         activityMonitor?.onFailure = { [weak self] activity in self?.notifications.failed(activity) }
         activityMonitor?.onAttention = { [weak self] event in self?.notifications.attentionNeeded(event) }
         activityMonitor?.start()
@@ -225,9 +239,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func render() {
+    private func render(allowingTrackedUpdateTransition: Bool = false) {
         // Replacing or hiding menu items while AppKit is tracking the popup can dismiss it.
-        guard !menuTracking else { return }
+        guard !menuTracking || allowingTrackedUpdateTransition else { return }
         statusWindow.update(quota: quota, fetching: fetching, failure: failure)
         let primary = quota?.primary ?? quota?.secondary
         let valid = failure == nil
@@ -378,6 +392,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             context.addItem(disable)
             context.popUpFollowingSystemAppearance(from: button)
         } else {
+            // Prepare the existing full-size checking screen before AppKit starts menu tracking.
+            if !offline { updater.checkOnMenuOpen() }
+            checkingForUpdates = updater.isChecking
+            render()
             builtItems?.menu.popUpFollowingSystemAppearance(from: button)
         }
     }
@@ -387,6 +405,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
+        checkingForUpdates = updater.isChecking
+        render()
         menuTracking = true
         refresh()
     }

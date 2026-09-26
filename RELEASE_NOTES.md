@@ -1,3 +1,13 @@
+# PlusCodex v1.1.1
+
+- Codex에서 완료 작업을 읽음 처리하면 메뉴바의 완료 작업 항목도 함께 사라지도록 읽음 상태 동기화를 보완했습니다. 새 작업이 생기면 다시 표시됩니다.
+- 완료 이벤트와 읽음 이벤트가 동시에 도착하는 경우에도 메뉴바 작업 목록이 잘못 되살아나지 않도록 처리 순서를 안정화했습니다.
+
+## English
+
+- Improved read-state synchronization so a completed task disappears from the menu bar after it is read in Codex, and appears again when the thread receives new work.
+- Stabilized event ordering so a menu-bar task is not incorrectly restored when completion and read events arrive together.
+
 # PlusCodex v1.1.0
 
 - Codex 앱 업데이트로 내장 CLI 실행 파일의 경로가 변경되어 PlusCodex가 Codex를 찾지 못하고 사용량 조회와 자동 깨우기에 연결하지 못하던 문제를 수정했습니다. 현재·이전 앱 내부 경로와 별도로 설치된 CLI를 순서대로 확인합니다.

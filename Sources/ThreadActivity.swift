@@ -82,6 +82,7 @@ struct ThreadTurnResult {
 struct CompletionTracker {
     private var previous: [String: ThreadActivity] = [:]
     private var notifiedTurnIDs: [String: Set<String>] = [:]
+    private let sessionStartedAtMs = Date().timeIntervalSince1970 * 1000
 
     mutating func update(_ rows: [ThreadActivity], connected: Bool) -> [ThreadTurnResult] {
         guard connected else { previous.removeAll(); return [] }
@@ -92,7 +93,10 @@ struct CompletionTracker {
             if let turn = activity.latestTurn {
                 let observedRunningTurn = prior?.latestTurn?.id == turn.id
                     && prior?.latestTurn?.status == "inProgress"
-                if (observedRunningTurn || becameIdle)
+                let firstObservedRecentTerminalTurn = prior?.latestTurn?.id != turn.id
+                    && turn.startedAtMs >= sessionStartedAtMs
+                    && ["completed", "failed", "interrupted"].contains(turn.status)
+                if (observedRunningTurn || becameIdle || firstObservedRecentTerminalTurn)
                     && !notifiedTurnIDs[activity.id, default: []].contains(turn.id) {
                     switch turn.status {
                     case "completed":
@@ -177,31 +181,72 @@ struct AttentionTracker {
     }
 }
 
-/// Session-local acknowledgement of completed results opened from this menu.
+/// Keep completed rows visible even when Codex's unread flag disagrees with what
+/// the user has actually opened. Opening a completed row acknowledges it.
 struct ThreadActivityReadReceipts {
     private var opened: [String: Double] = [:]
+    private var pendingCompletions: [String: ThreadActivity] = [:]
+
+    mutating func markCompleted(_ activity: ThreadActivity) {
+        var completed = activity
+        completed.runtime = "idle"
+        completed.activeFlags = []
+        completed.pendingRequests = []
+        pendingCompletions[activity.id] = completed
+        opened.removeValue(forKey: activity.id)
+    }
 
     mutating func acknowledge(_ activity: ThreadActivity) {
         guard !activity.isRunning else { return }
+        pendingCompletions.removeValue(forKey: activity.id)
         opened[activity.id] = activity.updatedAt
     }
 
+    /// Acknowledge a completed row when Codex reports that it was read outside
+    /// the PlusCodex menu. Keep the timestamp guard so a stale unread snapshot
+    /// cannot immediately restore the row after the read-state event.
+    mutating func acknowledgeExternally(_ activity: ThreadActivity) {
+        acknowledge(activity)
+    }
+
     mutating func visibleRows(_ rows: [ThreadActivity]) -> [ThreadActivity] {
-        for row in rows where row.isRunning || row.updatedAt > (opened[row.id] ?? .infinity) {
-            opened.removeValue(forKey: row.id)
+        for row in rows {
+            if row.isRunning || row.updatedAt > (opened[row.id] ?? .infinity) {
+                opened.removeValue(forKey: row.id)
+            }
+            guard row.isRunning, let pending = pendingCompletions[row.id] else { continue }
+            let pendingTurnID = pending.latestTurn?.id
+            if pendingTurnID == nil || row.latestTurn?.id != pendingTurnID {
+                pendingCompletions.removeValue(forKey: row.id)
+            }
         }
-        return rows.filter { $0.isVisible && (opened[$0.id] == nil || $0.isRunning) }
+
+        var merged = Dictionary(rows.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
+        for (id, activity) in pendingCompletions where merged[id] == nil {
+            merged[id] = activity
+        }
+        return merged.values
+            .filter { $0.isVisible || pendingCompletions[$0.id] != nil }
+            .filter { opened[$0.id] == nil || $0.isRunning }
+            .sorted {
+                if $0.isRunning != $1.isRunning { return $0.isRunning }
+                if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
+                return $0.id < $1.id
+            }
     }
 }
 
 /// Read-only adapter for the installed desktop app's versioned local IPC protocol.
 /// No tokens, message bodies, or read-state changes are persisted by this app.
 final class ThreadActivityMonitor {
+    private static let maximumBufferedFrameSize = 32 * 1024 * 1024
+    private static let maximumDiscardedFrameSize = 256 * 1024 * 1024
     private let queue = DispatchQueue(label: "local.codexquota.activity", qos: .utility)
     private let onUpdate: ([ThreadActivity], Bool) -> Void
     private var socketFD: Int32 = -1
     private var clientID = ""
     private var pending = Data()
+    private var discardedFrameBytesRemaining = 0
     private var followed = Set<String>()
     private var activities: [String: ThreadActivity] = [:]
     private var owners: [String: String] = [:]
@@ -210,9 +255,11 @@ final class ThreadActivityMonitor {
     private var lastConnected = false
     private var completionTracker = CompletionTracker()
     private var attentionTracker = AttentionTracker()
+    private var pendingReadActivities: [String: ThreadActivity] = [:]
     var onCompletion: ((ThreadActivity) -> Void)?
     var onFailure: ((ThreadActivity) -> Void)?
     var onAttention: ((ThreadAttentionEvent) -> Void)?
+    var onRead: ((ThreadActivity) -> Void)?
 
     init(onUpdate: @escaping ([ThreadActivity], Bool) -> Void) { self.onUpdate = onUpdate }
 
@@ -327,9 +374,26 @@ final class ThreadActivityMonitor {
                     let count = Darwin.read(socketFD, &bytes, bytes.count)
                     guard count > 0 else { throw ActivityError.connection }
                     pending.append(contentsOf: bytes.prefix(count))
-                    while pending.count >= 4 {
+                    while true {
+                        if discardedFrameBytesRemaining > 0 {
+                            let discarded = min(discardedFrameBytesRemaining, pending.count)
+                            pending.removeFirst(discarded)
+                            discardedFrameBytesRemaining -= discarded
+                            if discardedFrameBytesRemaining > 0 { break }
+                            continue
+                        }
+                        guard pending.count >= 4 else { break }
                         let length = pending.prefix(4).enumerated().reduce(0) { $0 | (Int($1.element) << ($1.offset * 8)) }
-                        guard length > 0, length <= 32 * 1024 * 1024 else { throw ActivityError.protocolMismatch }
+                        guard length > 0 else { throw ActivityError.protocolMismatch }
+                        if length > Self.maximumBufferedFrameSize {
+                            guard length <= Self.maximumDiscardedFrameSize else {
+                                throw ActivityError.protocolMismatch
+                            }
+                            pending.removeFirst(4)
+                            discardedFrameBytesRemaining = length
+                            NSLog("PlusCodex activity monitor skipped oversized IPC frame (%lld bytes)", Int64(length))
+                            continue
+                        }
                         guard pending.count >= length + 4 else { break }
                         let frame = Data(pending.dropFirst(4).prefix(length))
                         pending.removeFirst(length + 4)
@@ -343,10 +407,12 @@ final class ThreadActivityMonitor {
                 socketFD = -1
                 clientID = ""
                 pending.removeAll()
+                discardedFrameBytesRemaining = 0
                 followed.removeAll()
                 activities.removeAll()
                 owners.removeAll()
                 revisions.removeAll()
+                pendingReadActivities.removeAll()
                 publish(connected: false)
                 Thread.sleep(forTimeInterval: 5)
             }
@@ -466,7 +532,11 @@ final class ThreadActivityMonitor {
         }
         guard params["hostId"] as? String == "local" else { return }
         if let change = Self.readStateChange(from: message) {
+            let wasUnread = activities[change.id]?.unread == true
             activities[change.id]?.unread = change.unread
+            if wasUnread, !change.unread, let activity = activities[change.id] {
+                pendingReadActivities[change.id] = activity
+            }
             publish(connected: true)
             return
         }
@@ -484,13 +554,16 @@ final class ThreadActivityMonitor {
         if change["type"] as? String == "snapshot",
            let state = change["conversationState"] as? [String: Any],
            let runtime = state["threadRuntimeStatus"] as? [String: Any], let status = runtime["type"] as? String {
-            activities[id] = ThreadActivity(id: id, title: state["title"] as? String ?? L10n.text("Codex 채팅"),
+            let wasUnread = activities[id]?.unread == true
+            let activity = ThreadActivity(id: id, title: state["title"] as? String ?? L10n.text("Codex 채팅"),
                 runtime: status,
                 activeFlags: runtime["activeFlags"] as? [String] ?? [],
                 pendingRequests: Self.pendingRequests(in: state["requests"] as? [[String: Any]] ?? []),
                 latestTurn: Self.latestTurn(in: state),
                 unread: state["hasUnreadTurn"] as? Bool ?? false,
                 updatedAt: state["updatedAt"] as? Double ?? 0)
+            activities[id] = activity
+            if wasUnread, !activity.unread { pendingReadActivities[id] = activity }
             owners[id] = owner
             revisions[id] = revision
         } else if change["type"] as? String == "patches", owners[id] == owner {
@@ -518,7 +591,14 @@ final class ThreadActivityMonitor {
                     activities[id] = activity
                 }
                 if key == "title", path.count == 1, let title = value as? String { activities[id]?.title = title }
-                if key == "hasUnreadTurn", path.count == 1 { activities[id]?.unread = value as? Bool ?? false }
+                if key == "hasUnreadTurn", path.count == 1 {
+                    let wasUnread = activities[id]?.unread == true
+                    let unread = value as? Bool ?? false
+                    activities[id]?.unread = unread
+                    if wasUnread, !unread, let activity = activities[id] {
+                        pendingReadActivities[id] = activity
+                    }
+                }
                 if key == "updatedAt", path.count == 1, let timestamp = value as? Double { activities[id]?.updatedAt = timestamp }
                 if key == "activeFlags" {
                     if path.count == 1 {
@@ -595,6 +675,14 @@ final class ThreadActivityMonitor {
         if !attentionEvents.isEmpty {
             RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) {
                 for event in attentionEvents { self.onAttention?(event) }
+            }
+            CFRunLoopWakeUp(CFRunLoopGetMain())
+        }
+        let readActivities = Array(pendingReadActivities.values)
+        pendingReadActivities.removeAll()
+        if !readActivities.isEmpty {
+            RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) {
+                for activity in readActivities { self.onRead?(activity) }
             }
             CFRunLoopWakeUp(CFRunLoopGetMain())
         }

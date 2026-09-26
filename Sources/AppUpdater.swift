@@ -40,8 +40,9 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate, SPUStandardUserDriverDeleg
             presentUpdateInFocus()
             return
         }
-        guard started, !controller.updater.sessionInProgress,
+        guard started, !isChecking, !controller.updater.sessionInProgress,
               controller.updater.canCheckForUpdates else { return }
+        beginChecking()
         controller.updater.checkForUpdatesInBackground()
     }
 
@@ -92,9 +93,15 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate, SPUStandardUserDriverDeleg
     }
 
     func updater(_ updater: SPUUpdater, mayPerform updateCheck: SPUUpdateCheck) throws {
+        beginChecking()
+    }
+
+    private func beginChecking() {
         timeout?.invalidate()
-        isChecking = true
-        onCheckingChanged?(true)
+        if !isChecking {
+            isChecking = true
+            onCheckingChanged?(true)
+        }
         // A slow/offline update server must never block access to usage or quit.
         let timer = Timer(timeInterval: 15, repeats: false) { [weak self] _ in self?.finishChecking() }
         timeout = timer
