@@ -20,6 +20,21 @@ struct QuotaTests {
         assert(QuotaWindow(usedPercent: 36.8, windowDurationMins: nil, resetsAt: nil).remaining == 63)
         let absent = try decode(#"{"rateLimits":null}"#)
         assert(absent.codex == nil)
+        assert(QuotaError.missingExecutable.isMissingExecutable)
+        assert(!QuotaError.unavailable("other error").isMissingExecutable)
+        let authHome = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let authDirectory = authHome.appendingPathComponent(".codex")
+        let authFile = authDirectory.appendingPathComponent("auth.json")
+        try FileManager.default.createDirectory(at: authDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: authHome) }
+        let missingRevision = CodexAuthRevision.current(home: authHome, environment: [:])
+        try Data("{}".utf8).write(to: authFile)
+        let firstRevision = CodexAuthRevision.current(home: authHome, environment: [:])
+        assert(firstRevision != missingRevision)
+        try Data("{\"account\":\"new\"}".utf8).write(to: authFile)
+        assert(CodexAuthRevision.current(home: authHome, environment: [:]) != firstRevision)
+        try FileManager.default.removeItem(at: authFile)
+        assert(CodexAuthRevision.current(home: authHome, environment: [:]) == missingRevision)
         print("PASS: remaining %, bucket selection, missing quota, bounds, labels")
     }
 }

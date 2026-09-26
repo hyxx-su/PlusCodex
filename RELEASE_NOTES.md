@@ -1,3 +1,23 @@
+# PlusCodex v1.1.0
+
+- Codex 앱 업데이트로 내장 CLI 실행 파일의 경로가 변경되어 PlusCodex가 Codex를 찾지 못하고 사용량 조회와 자동 깨우기에 연결하지 못하던 문제를 수정했습니다. 현재·이전 앱 내부 경로와 별도로 설치된 CLI를 순서대로 확인합니다.
+- Claude는 Desktop 또는 CLI에서 확인 가능한 구독 사용량을 조회합니다. Grok은 CLI 설치·로그인과 사용량 조회 성공을 확인한 뒤에만 메뉴바 표시를 켭니다.
+- Claude/Grok이 미설치이거나 구독 사용량을 확인할 수 없는 상태에서는 설정 스위치를 끕니다. 확인된 무료 계정이나 사용량을 제공하지 않는 계정도 표시하지 않습니다. 모든 서비스 항목이 숨겨지면 작은 PlusCodex 설정 아이콘을 남깁니다.
+- Codex 로그아웃·재로그인으로 로그인 정보가 바뀌면 이전 조회 결과를 버리고 새 계정의 사용량을 다시 조회합니다.
+- Claude 설정 안내 문구를 `클로드 코드 구독을 활성화하세요.`로 명확히 했습니다.
+- 메뉴바 팝업이 사용량 갱신 중 즉시 닫히거나 활동 행의 호버 상태가 남는 문제를 수정했습니다.
+- 사용자 지정 알림음 재생 시간을 음원 길이 내에서 1~15초로 선택하고, 음량을 최대 200%까지 설정할 수 있습니다. 슬라이더를 움직이는 동안 퍼센트가 즉시 표시됩니다. 음량 기본값은 100%이며, 높은 음량에서는 소리가 클리핑될 수 있습니다.
+
+## English
+
+- Fixed a connection failure after a Codex app update changed the bundled CLI executable path. PlusCodex now checks current and legacy app paths, then separately installed CLIs, for usage checks and automatic wake.
+- Claude can read available subscription usage from Desktop or the CLI. Grok appears in the menu bar only after its CLI, sign-in, and displayable usage have been verified.
+- Settings keep Claude and Grok off when they are not installed or subscription usage is unavailable, including confirmed free or non-reporting accounts. A small PlusCodex settings icon remains when all provider items are hidden.
+- When Codex sign-in changes, PlusCodex discards an in-flight result from the previous account and refreshes usage for the new sign-in.
+- Clarified the Claude settings guidance to “Activate a Claude Code subscription.”
+- Fixed the menu bar popup closing immediately during a usage refresh and the activity row remaining hovered.
+- Custom notification sounds can play for 1–15 seconds, up to the source's length, and volume can be set up to 200%. The percentage updates as you drag the slider. Volume defaults to 100%; higher volume may cause clipping.
+
 # PlusCodex v1.0.9
 
 - Codex 5시간 사용량 초기화 시 자동으로 메시지를 보내 깨우는 기능을 추가했습니다. 기본값은 꺼짐이며, 모델·메시지를 설정할 수 있습니다. 기본 메시지는 `Wake up`이고 같은 채팅을 재사용합니다.
@@ -17,7 +37,7 @@
 기존 정식 버전 사용자는 앱의 업데이트 기능으로 설치할 수 있습니다. 다운로드·서명 검증·설치는 기존 Sparkle 방식으로 진행하며 필요하면 재실행을 안내합니다.
 처음 설치한다면 DMG에서 PlusCodex를 Applications로 옮겨 실행하세요.
 Apple Silicon Mac, macOS 14 이상을 지원합니다. 베타 빌드의 자동 업데이트는 비활성화되어 있으므로 베타 사용자는 정식 DMG를 수동 설치하세요.
-Claude/Grok은 해당 CLI 설치 및 로그인이 필요합니다. 기존 로그인·알림·자동 실행 설정은 유지됩니다.
+Claude 사용량은 Desktop 또는 CLI의 유효한 정보로 조회합니다. Grok 사용량 표시는 Grok CLI 설치와 로그인 및 사용량 확인이 필요합니다. 기존 로그인·알림·자동 실행 설정은 유지됩니다.
 
 이 빌드는 ad-hoc 서명이며 Apple Developer ID 서명·공증은 없습니다.
 OpenAI의 공식 앱이 아닌 비공식 보조 앱입니다.

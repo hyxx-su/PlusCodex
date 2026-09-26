@@ -33,11 +33,35 @@ import AppKit
                     precondition(labels.allSatisfy { loader.bounds.contains($0.frame) })
                 }
             }
+            delegate.testHookSetMissingExecutable(true)
+            let missingPanel = delegate.testHookDashboardView!
+            precondition(abs(delegate.testHookMenu!.size.height - menuHeight) < 1)
+            precondition(delegate.testHookMenu!.items.filter { !$0.isHidden }.count == 1)
+            let missingLoader = missingPanel.subviews.compactMap { $0 as? QuotaLoadingView }.first!
+            precondition(missingLoader.subviews.compactMap { $0 as? NSTextField }.map(\.stringValue)
+                == ["Codex를 찾을 수 없음", "Codex 실행 파일을 찾을 수 없습니다."])
+            delegate.testHookSetPresentation(offline: true, checking: false)
+            let offlineLoader = delegate.testHookDashboardView!.subviews.compactMap { $0 as? QuotaLoadingView }.first!
+            precondition(offlineLoader.subviews.compactMap { $0 as? NSTextField }.first?.stringValue == "네트워크 연결 없음")
+            delegate.testHookSetPresentation(offline: false, checking: false)
+            delegate.testHookSetMissingExecutable(false)
+            precondition(delegate.testHookDashboardView!.subviews.allSatisfy { !($0 is QuotaLoadingView) })
+            precondition(delegate.testHookMenu!.items.filter { !$0.isHidden }.count == visible)
+            delegate.testHookSetPresentation(offline: true, checking: false)
+            let trackedView = delegate.testHookDashboardView!
+            let trackedMenu = delegate.testHookMenu!
+            delegate.menuWillOpen(trackedMenu)
+            delegate.testHookSetPresentation(offline: false, checking: true)
+            precondition(delegate.testHookDashboardView === trackedView,
+                         "Tracking must keep the Codex menu view stable")
+            delegate.menuDidClose(trackedMenu)
+            precondition(delegate.testHookDashboardView !== trackedView,
+                         "The latest state must appear after tracking ends")
         }
         precondition(CodexStatusIcon.image(size: 18, offline: true)?.isTemplate == false)
         precondition(CodexStatusIcon.image(size: 18, offline: false)?.isTemplate == true)
         precondition(CodexStatusIcon.image(size: 18, offline: true)?.size == NSSize(width: 18, height: 18))
         precondition(CodexStatusIcon.image(size: 18, offline: false)?.size == NSSize(width: 18, height: 18))
-        print("PASS: full menu overlay, stable total height, hidden actions, recovery, equal icon sizes")
+        print("PASS: offline and missing-Codex overlays, stable height, hidden actions, recovery, equal icon sizes")
     }
 }

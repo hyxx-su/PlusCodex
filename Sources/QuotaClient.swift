@@ -59,10 +59,36 @@ struct QuotaSnapshot {
     let account: CodexAccount?
 }
 
+/// Detects a Codex sign-in change without reading or retaining credentials.
+struct CodexAuthRevision: Equatable {
+    let modifiedAt: Date?
+    let size: UInt64?
+    let fileNumber: UInt64?
+
+    static func current(home: URL = FileManager.default.homeDirectoryForCurrentUser,
+                        environment: [String: String] = ProcessInfo.processInfo.environment) -> Self {
+        let directory = environment["CODEX_HOME"].map { URL(fileURLWithPath: $0) }
+            ?? home.appendingPathComponent(".codex")
+        let file = directory.appendingPathComponent("auth.json")
+        let attributes = try? FileManager.default.attributesOfItem(atPath: file.path)
+        return Self(modifiedAt: attributes?[.modificationDate] as? Date,
+                    size: (attributes?[.size] as? NSNumber)?.uint64Value,
+                    fileNumber: (attributes?[.systemFileNumber] as? NSNumber)?.uint64Value)
+    }
+}
+
 enum QuotaError: LocalizedError {
     case unavailable(String)
+    case missingExecutable
     var errorDescription: String? {
-        switch self { case .unavailable(let message): return message }
+        switch self {
+        case .unavailable(let message): return message
+        case .missingExecutable: return L10n.text("Codex 실행 파일을 찾을 수 없습니다.")
+        }
+    }
+    var isMissingExecutable: Bool {
+        if case .missingExecutable = self { return true }
+        return false
     }
 }
 
@@ -73,13 +99,8 @@ final class QuotaClient {
     }
 
     static func fetchSnapshot(onQuota: ((Quota) -> Void)? = nil) throws -> QuotaSnapshot {
-        let candidates = [
-            "/Applications/ChatGPT.app/Contents/Resources/codex",
-            "/Applications/Codex.app/Contents/Resources/codex",
-            "/opt/homebrew/bin/codex", "/usr/local/bin/codex"
-        ]
-        guard let binary = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
-            throw QuotaError.unavailable(L10n.text("Codex 실행 파일을 찾을 수 없습니다."))
+        guard let binary = CLIInstallation.executable(.codex) else {
+            throw QuotaError.missingExecutable
         }
         let process = Process()
         let input = Pipe(), output = Pipe()

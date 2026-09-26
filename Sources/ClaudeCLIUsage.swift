@@ -58,17 +58,17 @@ enum ClaudeCLIUsage {
     static func blockingMessage(_ text: String) -> String? {
         let value = clean(text).lowercased()
         if value.range(of: "do you trust|trust the files|safety check|choose.*text style|select.*theme", options: .regularExpression) != nil {
-            return L10n.text("Claude CLI 초기 설정·신뢰 확인이 필요합니다. 안내된 usage-probe 폴더에서 claude를 직접 실행해 확인하세요.")
+            return L10n.text("Claude CLI에서 확인이 필요합니다. 터미널에서 claude를 실행해 안내를 완료하세요.")
         }
         if value.range(of: "not logged in|please log in|please login|select login method|sign in to", options: .regularExpression) != nil {
-            return L10n.text("Claude CLI에서 로그인을 완료한 뒤 다시 조회하세요.")
+            return L10n.text("Claude CLI에 로그인한 뒤 다시 시도해 주세요.")
         }
         return nil
     }
 
     static func fetch() throws -> Quota {
         guard let binary = CLIInstallation.executable(.claude) else {
-            throw UsageFailure.message(L10n.text("Claude Code 실행 파일을 찾을 수 없습니다."))
+            throw UsageFailure.message(L10n.text("Claude Desktop에서 사용량을 확인하거나 CLI에 로그인해 주세요."))
         }
         try FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
         return try run(binary: binary, arguments: [], cwd: workingDirectory.path)

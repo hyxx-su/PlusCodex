@@ -8,6 +8,7 @@ enum UsageFailure: LocalizedError {
     case authentication
     case missingScope
     case credentialsUnavailable
+    case subscriptionUsageUnavailable
     case server
     var errorDescription: String? {
         switch self {
@@ -15,7 +16,8 @@ enum UsageFailure: LocalizedError {
         case .throttled: return L10n.text("조회 요청이 많습니다. 잠시 후 다시 확인합니다.")
         case .authentication: return L10n.text("사용량 API가 인증을 거부했습니다. 해당 AI CLI의 로그인 상태를 확인하세요.")
         case .missingScope: return L10n.text("사용량 조회 권한(user:profile)이 없습니다. Claude CLI에서 다시 로그인하세요.")
-        case .credentialsUnavailable: return L10n.text("Claude 인증 정보를 읽지 못했습니다. CLI 로그인과 키체인 접근을 확인하세요.")
+        case .credentialsUnavailable: return L10n.text("Claude Desktop 또는 CLI에서 로그인해 주세요.")
+        case .subscriptionUsageUnavailable: return L10n.text("이 계정에서 사용량 퍼센트를 제공하지 않습니다.")
         case .server: return L10n.text("사용량 서버에 일시적인 오류가 발생했습니다.")
         }
     }
@@ -107,14 +109,19 @@ enum ExternalUsageClient {
                                   resetsAt: reset, customLabel: "1개월")])
     }
 
-    static func recoveringClaude(oauth: () throws -> QuotaSnapshot, cli: () throws -> Quota) throws -> QuotaSnapshot {
+    static func recoveringClaude(oauth: () throws -> QuotaSnapshot, cli: () throws -> Quota,
+                                 desktop: () -> QuotaSnapshot? = { nil }) throws -> QuotaSnapshot {
+        var cliBlockedByScope: UsageFailure?
         do { return try oauth() }
         catch let error as UsageFailure {
             switch error {
             case .authentication, .credentialsUnavailable, .server: break
+            case .missingScope: cliBlockedByScope = error
             default: throw error
             }
         }
+        if let cached = desktop() { return cached }
+        if let cliBlockedByScope { throw cliBlockedByScope }
         let result = Result { try cli() }
         // Honor throttling; a second route must not bypass the server's cooldown.
         if case .failure(UsageFailure.throttled(let date)) = result { throw UsageFailure.throttled(date) }
@@ -124,10 +131,20 @@ enum ExternalUsageClient {
     }
 
     private static func claude() throws -> QuotaSnapshot {
-        try recoveringClaude(oauth: claudeOAuth, cli: ClaudeCLIUsage.fetch)
+        try recoveringClaude(oauth: claudeOAuth, cli: ClaudeCLIUsage.fetch,
+                             desktop: ClaudeDesktopUsage.fetch)
     }
 
-    private static func claudeOAuth() throws -> QuotaSnapshot {
+    /// Use the same read-only credential source for entitlement checks and usage requests.
+    /// Never infer a plan from Desktop's empty usage cache.
+    static func claudeSubscriptionType() -> String? {
+        guard let oauth = claudeOAuthCredentials(),
+              let token = oauth["accessToken"] as? String, !token.isEmpty else { return nil }
+        if let expiry = timestamp(oauth["expiresAt"]), expiry <= Date().timeIntervalSince1970 { return nil }
+        return oauth["subscriptionType"] as? String
+    }
+
+    private static func claudeOAuthCredentials() -> [String: Any]? {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let config = ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"].map { URL(fileURLWithPath: $0) }
             ?? home.appendingPathComponent(".claude")
@@ -149,6 +166,14 @@ enum ExternalUsageClient {
            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             oauth = root["claudeAiOauth"] as? [String: Any]
         }
+        return oauth
+    }
+
+    private static func claudeOAuth() throws -> QuotaSnapshot {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let config = ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"].map { URL(fileURLWithPath: $0) }
+            ?? home.appendingPathComponent(".claude")
+        let oauth = claudeOAuthCredentials()
         guard let token = oauth?["accessToken"] as? String, !token.isEmpty else {
             throw UsageFailure.credentialsUnavailable
         }
@@ -187,7 +212,7 @@ enum ExternalUsageClient {
         var data = try request("https://cli-chat-proxy.grok.com/v1/billing?format=credits", headers: headers)
         if parseGrok(data) == nil { data = try request("https://cli-chat-proxy.grok.com/v1/billing", headers: headers) }
         guard let quota = parseGrok(data) else {
-            throw UsageFailure.message(L10n.text("이 계정에서 사용량 퍼센트를 제공하지 않습니다."))
+            throw UsageFailure.subscriptionUsageUnavailable
         }
         let config = data["config"] as? [String: Any] ?? data
         return QuotaSnapshot(quota: quota, account: CodexAccount(email: session["email"] as? String,

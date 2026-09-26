@@ -125,12 +125,7 @@ private final class AppServerSession {
     private var stopped = false
 
     init() throws {
-        let candidates = [
-            "/Applications/ChatGPT.app/Contents/Resources/codex",
-            "/Applications/Codex.app/Contents/Resources/codex",
-            "/opt/homebrew/bin/codex", "/usr/local/bin/codex"
-        ]
-        guard let binary = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
+        guard let binary = CLIInstallation.executable(.codex) else {
             throw CodexWakeError.unavailable
         }
         process.executableURL = URL(fileURLWithPath: binary)

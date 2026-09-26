@@ -47,6 +47,20 @@ struct ActivityChecks {
         let populated = ThreadActivityView(activities: [activity])
         precondition(populated.frame.height == 42)
         precondition(populated.subviews.count == 1 && populated.subviews.first is NSScrollView)
+        let row = ThreadActivityButton(activity: activity,
+            frame: NSRect(x: 0, y: 0, width: 276, height: 34))
+        row.testHookSetHovered(true)
+        row.refreshHover()
+        precondition(!row.testHookHovered, "Menu highlight changes must clear stale hover")
+        row.testHookSetHovered(true)
+        row.updateTrackingAreas()
+        precondition(!row.testHookHovered, "Detached tracking areas must clear stale hover")
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 60),
+                              styleMask: .borderless, backing: .buffered, defer: false)
+        window.contentView?.addSubview(row)
+        row.testHookSetHovered(true)
+        row.removeFromSuperview()
+        precondition(!row.testHookHovered, "Detaching a menu row must clear stale hover")
         print("PASS: visibility, deep links, empty/list layout")
 
         if CommandLine.arguments.contains("--live") {

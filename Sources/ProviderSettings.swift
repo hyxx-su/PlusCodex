@@ -3,7 +3,7 @@ import Foundation
 enum AIProvider: String, CaseIterable {
     case codex, claude, grok
     var name: String {
-        switch self { case .codex: return "Codex"; case .claude: return "Claude Code"; case .grok: return "Grok" }
+        switch self { case .codex: return "Codex"; case .claude: return "Claude"; case .grok: return "Grok" }
     }
     var resource: String {
         switch self { case .codex: return "Codex"; case .claude: return "Claude"; case .grok: return "Grok" }
@@ -12,6 +12,9 @@ enum AIProvider: String, CaseIterable {
 
 final class ProviderSettings {
     private let defaults: UserDefaults
+    // A persisted Grok preference is not proof that the current account still
+    // provides a displayable quota. Revalidate once per app launch.
+    private(set) var grokUsageVerified = false
     var onChange: (() -> Void)?
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
     var claudeShowRemaining: Bool {
@@ -34,7 +37,14 @@ final class ProviderSettings {
     }
     func setEnabled(_ enabled: Bool, for provider: AIProvider) {
         guard self.enabled(provider) != enabled else { return }
+        if provider == .grok && !enabled { grokUsageVerified = false }
         defaults.set(enabled, forKey: "provider.\(provider.rawValue).enabled")
+        onChange?()
+    }
+
+    func setGrokUsageVerified(_ verified: Bool) {
+        guard grokUsageVerified != verified else { return }
+        grokUsageVerified = verified
         onChange?()
     }
 }

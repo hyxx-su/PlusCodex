@@ -7,35 +7,78 @@ final class QuotaLoadingView: NSView {
     private let logoSize: CGFloat
     private let checkingForUpdates: Bool
     private let offline: Bool
+    private let missingExecutable: Bool
+    private let failure: String?
     private let provider: AIProvider
     private var artworkLayer: CALayer?
     /// Deterministic layout state for headless assertions.
     private(set) var logoPoint: CGPoint = .zero
     private(set) var captionHidden = true
 
-    init(frame: NSRect, logoSize: CGFloat = 28, checkingForUpdates: Bool = false, offline: Bool = false, provider: AIProvider = .codex) {
+    init(frame: NSRect, logoSize: CGFloat = 28, checkingForUpdates: Bool = false, offline: Bool = false,
+         missingExecutable: Bool = false, failure: String? = nil, provider: AIProvider = .codex) {
         self.provider = provider
         self.logoSize = logoSize
         self.checkingForUpdates = checkingForUpdates
         self.offline = offline
+        self.missingExecutable = missingExecutable
+        self.failure = failure
         super.init(frame: frame)
-        captionHidden = !(checkingForUpdates || offline)
+        let genericFailure = failure != nil && !offline && !missingExecutable
+        captionHidden = !(checkingForUpdates || offline || missingExecutable || failure != nil)
         logoPoint = CGPoint(x: frame.midX, y: frame.midY - (captionHidden ? 0 : 32))
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
-        setAccessibilityLabel(offline ? L10n.text("네트워크 연결 없음") : checkingForUpdates ? L10n.text("업데이트 확인 중. 최신 버전인지 확인하고 있어요.") : L10n.text("사용량을 불러오는 중"))
+        let title = offline ? "네트워크 연결 없음" : missingExecutable ? "Codex를 찾을 수 없음"
+            : failure != nil ? "사용량 조회 실패"
+            : checkingForUpdates ? "업데이트 확인 중" : "사용량을 불러오는 중"
+        let detail = offline ? L10n.text("연결되면 다시 확인할게요.")
+            : missingExecutable ? L10n.text("Codex 실행 파일을 찾을 수 없습니다.")
+            : failure ?? L10n.text("최신 버전인지 확인하고 있어요.")
+        setAccessibilityLabel(L10n.text(title) + (captionHidden ? "" : ". " + detail))
+        let detailY = frame.midY + min(42, frame.height / 2 - 26)
+        let detailFont = NSFont.systemFont(ofSize: 11)
+        let detailHeight: CGFloat
+        if genericFailure {
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineBreakMode = .byWordWrapping
+            let measured = (detail as NSString).boundingRect(
+                with: NSSize(width: frame.width - 24, height: .greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: [.font: detailFont, .paragraphStyle: paragraph]).height
+            // AppKit's field cell needs a little more vertical room than NSString's
+            // measured glyph bounds; without it, the final wrapped line is clipped.
+            detailHeight = min(64, max(24, ceil(measured) + 8))
+        } else {
+            detailHeight = 24
+        }
         if !captionHidden {
-            for (text, size, weight, color, y) in [
-                (offline ? L10n.text("네트워크 연결 없음") : L10n.text("업데이트 확인 중"), CGFloat(17), NSFont.Weight.semibold, NSColor.labelColor, frame.midY + 12),
-                (offline ? L10n.text("연결되면 다시 확인할게요.") : L10n.text("최신 버전인지 확인하고 있어요."), CGFloat(11), NSFont.Weight.regular, NSColor.secondaryLabelColor, frame.midY + min(42, frame.height / 2 - 26))
+            for (text, size, weight, color, y, height) in [
+                (L10n.text(title), CGFloat(17), NSFont.Weight.semibold, NSColor.labelColor,
+                 frame.midY + 12, CGFloat(24)),
+                (detail, CGFloat(11), NSFont.Weight.regular, NSColor.secondaryLabelColor,
+                 detailY, detailHeight)
             ] {
                 let label = NSTextField(labelWithString: text)
                 label.font = .systemFont(ofSize: size, weight: weight)
                 label.textColor = color
                 label.alignment = .center
-                label.frame = NSRect(x: 12, y: y, width: frame.width - 24, height: 24)
+                label.maximumNumberOfLines = genericFailure ? 4 : 1
+                label.lineBreakMode = .byWordWrapping
+                if genericFailure && size == 11 {
+                    label.cell?.usesSingleLineMode = false
+                    label.cell?.isScrollable = false
+                    label.cell?.wraps = true
+                }
+                label.frame = NSRect(x: 12, y: y, width: frame.width - 24, height: height)
                 addSubview(label)
             }
+        }
+        if offline || missingExecutable || failure != nil {
+            let report = IssueReportButton(frame: NSRect(x: 12,
+                y: min(detailY + detailHeight + 6, frame.height - 28),
+                width: frame.width - 24, height: 20))
+            addSubview(report)
         }
     }
 
@@ -71,7 +114,7 @@ final class QuotaLoadingView: NSView {
         artwork.addSublayer(host)
         logoPoint = CGPoint(x: host.frame.midX, y: host.frame.midY)
 
-        if offline {
+        if offline || missingExecutable || failure != nil {
             let icon = CodexStatusIcon.image(size: 96, offline: true, provider: provider)
             var rect = CGRect(x: 0, y: 0, width: 96, height: 96)
             host.contents = icon?.cgImage(forProposedRect: &rect, context: nil, hints: nil)

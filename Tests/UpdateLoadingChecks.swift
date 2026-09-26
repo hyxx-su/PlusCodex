@@ -13,7 +13,8 @@ import AppKit
         precondition(loader.logoPoint.y < labels[0].frame.minY)
         let normal = QuotaMenuView(quota: nil, updatedAt: nil, failure: nil)
         precondition(normal.subviews.isEmpty, "Normal refresh must not show update loader")
-        if CommandLine.arguments.count > 1 {
+        if let index = CommandLine.arguments.firstIndex(of: "--screenshot"),
+           CommandLine.arguments.indices.contains(index + 1) {
             let window = NSWindow(contentRect: panel.bounds, styleMask: [.borderless], backing: .buffered, defer: false)
             window.appearance = NSAppearance(named: .darkAqua)
             window.backgroundColor = .windowBackgroundColor
@@ -21,7 +22,8 @@ import AppKit
             panel.layoutSubtreeIfNeeded()
             let rep = panel.bitmapImageRepForCachingDisplay(in: panel.bounds)!
             panel.cacheDisplay(in: panel.bounds, to: rep)
-            try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[1]))
+            try! rep.representation(using: .png, properties: [:])!
+                .write(to: URL(fileURLWithPath: CommandLine.arguments[index + 1]))
         }
         print("PASS: update checking captions, bounds, logo spacing, normal dashboard")
     }

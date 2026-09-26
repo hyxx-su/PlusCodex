@@ -82,8 +82,9 @@ final class NotificationSettings {
     }
 
     static let minimumSoundDuration: TimeInterval = 1
-    static let maximumSoundDuration: TimeInterval = 10
+    static let maximumSoundDuration: TimeInterval = 15
     static let defaultSoundDuration: TimeInterval = 5
+    static let maximumSoundVolume: Double = 2
     static let supportedSoundExtensions = ["mp3", "m4a", "aac", "aiff", "aif", "wav", "caf"]
 
     private let defaults: UserDefaults
@@ -123,7 +124,7 @@ final class NotificationSettings {
 
     var soundVolume: Double {
         let value = (defaults.object(forKey: "notifications.sound.volume") as? NSNumber)?.doubleValue ?? 1
-        return value.isFinite ? min(1, max(0, value)) : 1
+        return value.isFinite ? min(Self.maximumSoundVolume, max(0, value)) : 1
     }
 
     var previewURL: URL? { customSoundName.flatMap { soundFileURL(named: $0) } }
@@ -144,7 +145,9 @@ final class NotificationSettings {
     }
 
     func setSoundVolume(_ volume: Double) throws {
-        guard volume.isFinite, (0...1).contains(volume) else { throw SoundError.invalidDuration }
+        guard volume.isFinite, (0...Self.maximumSoundVolume).contains(volume) else {
+            throw SoundError.invalidDuration
+        }
         try setCustomSoundDuration(soundDuration, volume: volume)
     }
 
@@ -302,7 +305,8 @@ final class NotificationSettings {
     func setCustomSoundDuration(_ duration: TimeInterval, volume: Double? = nil) throws {
         guard duration.isFinite,
               duration >= Self.minimumSoundDuration,
-              duration <= TimeInterval(maximumSelectableSoundDuration) else {
+              duration <= TimeInterval(maximumSelectableSoundDuration),
+              volume.map({ $0.isFinite && (0...Self.maximumSoundVolume).contains($0) }) ?? true else {
             throw SoundError.invalidDuration
         }
         let normalizedDuration = duration.rounded()
@@ -461,7 +465,10 @@ final class NotificationSettings {
             if let channels = buffer.floatChannelData {
                 for channel in 0..<Int(buffer.format.channelCount) {
                     for frame in 0..<Int(buffer.frameLength) {
-                        channels[channel][frame] *= Float(volume)
+                        let amplified = channels[channel][frame] * Float(volume)
+                        // The notification CAF is 16-bit PCM; clamp boosted samples
+                        // instead of letting conversion overflow at >100% gain.
+                        channels[channel][frame] = min(1, max(-1, amplified))
                     }
                 }
             }

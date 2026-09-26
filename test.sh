@@ -6,7 +6,7 @@ SOURCES=()
 for file in Sources/*.swift; do
     [[ "$file" == Sources/main.swift ]] || SOURCES+=("$file")
 done
-for name in QuotaTests QuotaAlertChecks QuotaLayoutChecks NotificationChecks NotificationSoundChecks MenuBuilderChecks IntroChecks UpdateLoadingChecks UpdaterChecks ProviderChecks ClaudeFallbackChecks SettingsChecks BackgroundKeychainChecks PresentationChecks CodexWakeChecks; do
+for name in CLIInstallationChecks QuotaTests QuotaAlertChecks QuotaLayoutChecks IssueReportChecks NotificationChecks NotificationSoundChecks MenuBuilderChecks IntroChecks ActivityChecks UpdateLoadingChecks UpdaterChecks ProviderChecks ClaudeFallbackChecks SettingsChecks BackgroundKeychainChecks PresentationChecks CodexWakeChecks; do
     TEST_APP="$PWD/build/$name.app"
     mkdir -p "$TEST_APP/Contents/MacOS" "$TEST_APP/Contents/Resources"
     cp Info.plist "$TEST_APP/Contents/Info.plist"

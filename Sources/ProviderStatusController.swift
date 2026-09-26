@@ -4,6 +4,9 @@ import AppKit
 final class ProviderStatusController: NSObject, NSMenuDelegate {
     let provider: AIProvider
     private let settings: ProviderSettings
+    private let claudeAvailability: () -> ClaudeAvailability.State
+    private let grokAvailability: () -> GrokAvailability.State
+    private let fetchUsage: (AIProvider) throws -> QuotaSnapshot
     private var item: NSStatusItem?
     private let menu = NSMenu()
     private let dashboard = NSMenuItem()
@@ -15,13 +18,22 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
     private var overlayHeight: CGFloat?
     private var offline = false
     private var checking = false
+    private var menuTracking = false
+    private var previouslyEnabled = false
     var onSettings: (() -> Void)?
-    var onOpen: (() -> Void)?
     var onState: ((String) -> Void)?
+    var onVisibilityChange: (() -> Void)?
+    var hasVisibleStatusItem: Bool { item?.isVisible ?? false }
 
-    init(provider: AIProvider, settings: ProviderSettings) {
+    init(provider: AIProvider, settings: ProviderSettings,
+         claudeAvailability: @escaping () -> ClaudeAvailability.State = { ClaudeAvailability.current() },
+         grokAvailability: @escaping () -> GrokAvailability.State = { GrokAvailability.current() },
+         fetchUsage: @escaping (AIProvider) throws -> QuotaSnapshot = ExternalUsageClient.fetch) {
         self.provider = provider
         self.settings = settings
+        self.claudeAvailability = claudeAvailability
+        self.grokAvailability = grokAvailability
+        self.fetchUsage = fetchUsage
         super.init()
         menu.autoenablesItems = false
         menu.delegate = self
@@ -43,7 +55,43 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
     }
 
     func synchronize() {
-        if settings.enabled(provider), CLIInstallation.executable(provider) != nil {
+        let wasVisible = hasVisibleStatusItem
+        defer {
+            if wasVisible != hasVisibleStatusItem { onVisibilityChange?() }
+        }
+        let enabled = settings.enabled(provider)
+        // An explicit retry may clear an expired delay, but must not bypass
+        // a server-provided Retry-After window.
+        if enabled && !previouslyEnabled && nextFetch <= Date() { nextFetch = .distantPast }
+        previouslyEnabled = enabled
+        if provider == .claude {
+            let availability = claudeAvailability()
+            if availability != .availableOrUnknown {
+                if settings.enabled(provider) { settings.setEnabled(false, for: provider) }
+                if let item { NSStatusBar.system.removeStatusItem(item) }
+                item = nil
+                snapshot = nil
+                failure = nil
+                onState?(L10n.text(availability.guidance ?? "메뉴바에서 꺼짐"))
+                return
+            }
+        }
+        if provider == .grok, let guidance = grokAvailability().guidance {
+            if enabled { settings.setEnabled(false, for: provider) }
+            if let item { NSStatusBar.system.removeStatusItem(item) }
+            item = nil
+            snapshot = nil
+            failure = nil
+            onState?(L10n.text(guidance))
+            return
+        }
+        if settings.enabled(provider) {
+            if provider == .grok && !settings.grokUsageVerified {
+                if let item { NSStatusBar.system.removeStatusItem(item) }
+                item = nil
+                refresh()
+                return
+            }
             if item == nil {
                 let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
                 status.autosaveName = "PlusCodex.\(provider.rawValue)"
@@ -59,7 +107,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
             self.item = nil
             snapshot = nil
             failure = nil
-            onState?(settings.enabled(provider) ? L10n.text("미설치 · 메뉴바에서 숨김") : L10n.text("메뉴바에서 꺼짐"))
+            onState?(L10n.text("메뉴바에서 꺼짐"))
         }
     }
 
@@ -82,7 +130,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
     }
 
     func refresh() {
-        guard settings.enabled(provider), CLIInstallation.executable(provider) != nil, !fetching, !offline else { return }
+        guard settings.enabled(provider), !fetching, !offline else { return }
         guard Date() >= nextFetch else {
             if snapshot == nil && failure == nil { onState?(L10n.text("다음 사용량 조회 대기 중")) }
             return
@@ -91,19 +139,45 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
         onState?(L10n.text("사용량 확인 중"))
         render()
         let provider = self.provider
-        DispatchQueue.global(qos: .utility).async {
-            let result = Result { try ExternalUsageClient.fetch(provider) }
+        let fetchUsage = self.fetchUsage
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let result = Result { try fetchUsage(provider) }
             RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) { [weak self] in
                 guard let self else { return }
                 self.fetching = false
-                guard self.settings.enabled(provider), CLIInstallation.executable(provider) != nil else { return }
+                guard self.settings.enabled(provider) else { return }
                 switch result {
                 case .success(let snapshot):
+                    if provider == .grok {
+                        guard self.grokAvailability() == .readyToCheck else {
+                            self.settings.setEnabled(false, for: provider)
+                            self.onState?(L10n.text("Grok에 로그인하세요."))
+                            return
+                        }
+                        guard GrokAvailability.hasDisplayableUsage(snapshot) else {
+                            self.settings.setEnabled(false, for: provider)
+                            self.onState?(L10n.text("이 계정에서 사용량 퍼센트를 제공하지 않습니다."))
+                            return
+                        }
+                    }
                     self.snapshot = snapshot
                     self.failure = nil
                     self.nextFetch = Date().addingTimeInterval(provider == .claude ? 300 : 60)
-                    self.onState?(snapshot.account?.email ?? L10n.text("연결됨 · 사용량 조회 완료"))
+                    if provider == .grok { self.settings.setGrokUsageVerified(true) }
+                    self.onState?(snapshot.quota.windows.isEmpty && provider == .claude
+                        ? L10n.text("Claude Desktop 연결됨 · 사용량 수치 미제공")
+                        : snapshot.account?.email ?? L10n.text("연결됨 · 사용량 조회 완료"))
                 case .failure(let error):
+                    let noSubscriptionUsage = (error as? UsageFailure).map {
+                        if case .subscriptionUsageUnavailable = $0 { return true }
+                        return false
+                    } ?? false
+                    if provider == .grok && (!self.settings.grokUsageVerified || noSubscriptionUsage) {
+                        if case UsageFailure.throttled(let date) = error { self.nextFetch = date }
+                        self.settings.setEnabled(false, for: provider)
+                        self.onState?(error.localizedDescription)
+                        return
+                    }
                     self.failure = error.localizedDescription
                     // Never retain a previous account's percentage after auth errors.
                     self.snapshot = nil
@@ -118,14 +192,26 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
     }
 
     private func render() {
+        // Keep the existing menu view stable until AppKit ends popup tracking.
+        guard !menuTracking else { return }
+        // Claude Desktop can be connected without providing a usage percentage.
+        // Keep that state in Settings, but do not occupy the menu bar with an empty item.
+        if provider == .claude {
+            let wasVisible = hasVisibleStatusItem
+            item?.isVisible = failure != nil || offline || snapshot?.quota.windows.isEmpty == false
+            if wasVisible != hasVisibleStatusItem { onVisibilityChange?() }
+        }
         let showRemaining = settings.showRemaining(provider)
         let percent = snapshot?.quota.windows.first.map { " \($0.displayPercent(showRemaining: showRemaining))%" } ?? ""
-        item?.button?.image = CodexStatusIcon.image(size: 18, offline: offline, provider: provider)
-        item?.button?.imagePosition = offline || percent.isEmpty ? .imageOnly : .imageLeading
-        item?.button?.attributedTitle = NSAttributedString(string: offline ? "" : percent, attributes: [
+        let unavailable = offline || failure != nil
+        item?.button?.image = CodexStatusIcon.image(size: 18, offline: unavailable, provider: provider)
+        item?.button?.imagePosition = unavailable || percent.isEmpty ? .imageOnly : .imageLeading
+        item?.button?.attributedTitle = NSAttributedString(string: unavailable ? "" : percent, attributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium), .foregroundColor: NSColor.labelColor])
-        item?.button?.setAccessibilityLabel(provider.name + " " + (offline ? L10n.text("네트워크 연결 없음") : percent))
-        let overlay = offline || checking
+        item?.button?.setAccessibilityLabel(provider.name + " "
+            + (offline ? L10n.text("네트워크 연결 없음")
+               : failure != nil ? L10n.text("사용량 조회 실패") : percent))
+        let overlay = unavailable || checking
         if overlay, overlayHeight == nil, let view = dashboard.view {
             let probe = NSMenu()
             let row = NSMenuItem()
@@ -153,7 +239,14 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
             menu.popUpFollowingSystemAppearance(from: button)
         }
     }
-    func menuWillOpen(_ menu: NSMenu) { onOpen?(); refresh() }
+    func menuWillOpen(_ menu: NSMenu) {
+        menuTracking = true
+        refresh()
+    }
+    func menuDidClose(_ menu: NSMenu) {
+        menuTracking = false
+        render()
+    }
     func dismissMenu() { menu.cancelTracking() }
     @objc private func disable() {
         // Remove the status item only after AppKit finishes tracking its context menu.
@@ -164,9 +257,15 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
     @objc private func quit() { NSApp.terminate(nil) }
 
     var testHookMenu: NSMenu { menu }
+    var testHookHasStatusItem: Bool { item != nil }
+    var testHookStatusItemVisible: Bool { hasVisibleStatusItem }
     func testHookPresentation(quota: Quota?, fetching: Bool, checking: Bool, offline: Bool) {
         snapshot = quota.map { QuotaSnapshot(quota: $0, account: nil) }
         self.fetching = fetching; self.checking = checking; self.offline = offline
+        render()
+    }
+    func testHookSetFailure(_ value: String?) {
+        failure = value
         render()
     }
 }

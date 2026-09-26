@@ -38,6 +38,19 @@ final class ThreadActivityButton: NSButton {
             options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
         addTrackingArea(area)
         hoverTrackingArea = area
+        // A menu can reposition/recreate its tracking area without sending mouseExited.
+        refreshHover()
+    }
+
+    func refreshHover() {
+        let hovered = pointerIsInside()
+        if isHovered != hovered { isHovered = hovered; needsDisplay = true }
+    }
+
+    private func pointerIsInside() -> Bool {
+        guard let window else { return false }
+        let point = convert(window.convertPoint(fromScreen: NSEvent.mouseLocation), from: nil)
+        return bounds.contains(point) && visibleRect.contains(point)
     }
 
     override func mouseEntered(with event: NSEvent) {
@@ -56,6 +69,8 @@ final class ThreadActivityButton: NSButton {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        isHovered = false
+        needsDisplay = true
         shimmer.removeAllAnimations()
         shimmer.isHidden = !activity.isRunning || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         guard window != nil, !shimmer.isHidden else { return }
@@ -83,7 +98,7 @@ final class ThreadActivityButton: NSButton {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        if isHovered || isHighlighted {
+        if (isHovered || isHighlighted) && pointerIsInside() {
             NSColor.labelColor.withAlphaComponent(isHighlighted ? 0.12 : 0.06).setFill()
             NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 10, yRadius: 10).fill()
         }
@@ -123,6 +138,9 @@ final class ThreadActivityButton: NSButton {
         }
         if NSWorkspace.shared.open(url) { onOpened(activity) }
     }
+
+    var testHookHovered: Bool { isHovered }
+    func testHookSetHovered(_ value: Bool) { isHovered = value }
 }
 
 final class ThreadActivityView: NSView {
@@ -147,6 +165,14 @@ final class ThreadActivityView: NSView {
     }
 
     required init?(coder: NSCoder) { nil }
+
+    func refreshHover() {
+        for case let scroll as NSScrollView in subviews {
+            for case let button as ThreadActivityButton in scroll.documentView?.subviews ?? [] {
+                button.refreshHover()
+            }
+        }
+    }
 }
 
 private final class ActivityDocumentView: NSView {

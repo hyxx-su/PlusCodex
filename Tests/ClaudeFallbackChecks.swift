@@ -3,6 +3,11 @@ import Darwin
 
 @main struct ClaudeFallbackChecks {
     static func main() throws {
+        if CommandLine.arguments.contains("--desktop-probe") {
+            let snapshot = ClaudeDesktopUsage.fetch()
+            print("Desktop cache readable: \(snapshot != nil), usage windows: \(snapshot?.quota.windows.count ?? 0)")
+            return
+        }
         if CommandLine.arguments.contains("--fixture") {
             precondition(isatty(0) == 1 && isatty(1) == 1)
             guard readLine() == "/usage" else { exit(2) }
@@ -42,6 +47,37 @@ import Darwin
         }
         let fallback = try ExternalUsageClient.recoveringClaude(oauth: { throw UsageFailure.credentialsUnavailable }, cli: { quota })
         precondition(fallback.quota.windows.count == 3)
+        cliCalls = 0
+        let desktopFallback = try ExternalUsageClient.recoveringClaude(
+            oauth: { throw UsageFailure.credentialsUnavailable },
+            cli: { cliCalls += 1; throw UsageFailure.credentialsUnavailable },
+            desktop: { snapshot })
+        precondition(desktopFallback.quota.windows.count == 3 && cliCalls == 0)
+        let scopeFallback = try ExternalUsageClient.recoveringClaude(
+            oauth: { throw UsageFailure.missingScope },
+            cli: { preconditionFailure("A missing OAuth scope must not invoke the CLI") },
+            desktop: { snapshot })
+        precondition(scopeFallback.quota.windows.count == 3)
+
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func history(_ timestamp: Double, _ usage: [String: Double], org: String? = "current") -> Data {
+            let sample: [String: Any] = ["t": timestamp, "org": org.map { $0 as Any } ?? NSNull(), "u": usage]
+            return try! JSONSerialization.data(withJSONObject: ["version": 2, "samples": [sample]])
+        }
+        let current = history(now.timeIntervalSince1970 * 1000 - 300_000,
+                              ["fh": 25.5, "sd": 60, "so": 5])
+        let cached = ClaudeDesktopUsage.parse(current, now: now)!
+        precondition(cached.quota.windows.map(\.remaining) == [74, 40, 95])
+        precondition(cached.quota.windows.allSatisfy { $0.resetsAt == nil })
+        let free = ClaudeDesktopUsage.parse(history(now.timeIntervalSince1970 * 1000, [:]), now: now)!
+        precondition(free.quota.windows.isEmpty)
+        precondition(ClaudeDesktopUsage.parse(history(now.timeIntervalSince1970 * 1000 - 21 * 60_000,
+            ["fh": 25]), now: now) == nil)
+        precondition(ClaudeDesktopUsage.parse(history(now.timeIntervalSince1970 * 1000,
+            ["fh": 110]), now: now) == nil)
+        precondition(ClaudeDesktopUsage.parse(history(now.timeIntervalSince1970 * 1000,
+            ["unknown": 25]), now: now) == nil)
+        precondition(ClaudeDesktopUsage.parse(Data("{\"version\":3,\"samples\":[]}".utf8), now: now) == nil)
         oauthCalls = 0
         do {
             _ = try ExternalUsageClient.recoveringClaude(oauth: { oauthCalls += 1; throw UsageFailure.authentication },
@@ -65,6 +101,6 @@ import Darwin
             } catch is UsageFailure {}
             precondition(Date().timeIntervalSince(start) < timeout + 2)
         }
-        print("PASS: Claude OAuth recovery, no throttle bypass, CLI PTY input/output, parsing, trust stop, timeout cleanup")
+        print("PASS: Claude OAuth/Desktop/CLI fallback, free and stale desktop caches, no throttle bypass, CLI PTY parsing and timeout cleanup")
     }
 }

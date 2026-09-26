@@ -5,17 +5,19 @@ final class QuotaMenuView: NSView {
     private var quota: Quota?
     private var account: CodexAccount?
     private var updatedAt: Date?
-    private var failure: String?
+    private(set) var failure: String?
     let intro: Bool
     let checkingForUpdates: Bool
     let offline: Bool
+    let missingExecutable: Bool
     private let provider: AIProvider
     let showRemaining: Bool
     private var headerIcon: NSImage? { CodexStatusIcon.image(size: 18, offline: false, provider: provider) }
     override var isFlipped: Bool { true }
 
     init(quota: Quota?, account: CodexAccount? = nil, updatedAt: Date?, failure: String?, intro: Bool = false,
-         checkingForUpdates: Bool = false, offline: Bool = false, preservedHeight: CGFloat? = nil,
+         checkingForUpdates: Bool = false, offline: Bool = false, missingExecutable: Bool = false,
+         preservedHeight: CGFloat? = nil,
          provider: AIProvider = .codex, showRemaining: Bool = true) {
         self.provider = provider
         self.showRemaining = showRemaining
@@ -26,17 +28,23 @@ final class QuotaMenuView: NSView {
         self.intro = intro
         self.checkingForUpdates = checkingForUpdates
         self.offline = offline
-        super.init(frame: NSRect(x: 0, y: 0, width: 300,
-            height: preservedHeight ?? Self.panelHeight(quota: quota, intro: intro)))
+        self.missingExecutable = missingExecutable
+        let baseHeight = preservedHeight ?? Self.panelHeight(quota: quota, intro: intro)
+        let height = failure != nil && !offline && !missingExecutable ? max(280, baseHeight) : baseHeight
+        super.init(frame: NSRect(x: 0, y: 0, width: 300, height: height))
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
         // Only the first opening's intro panel carries the tiny logo loader;
         // after it expires the dashboard renders immediately, even without data.
-        if intro || checkingForUpdates || offline {
-            setAccessibilityLabel(checkingForUpdates ? L10n.text("업데이트 확인 중. 최신 버전인지 확인하고 있어요.") : L10n.text("사용량을 불러오는 중"))
-            if offline { setAccessibilityLabel(L10n.text("네트워크 연결 없음")) }
-            addSubview(QuotaLoadingView(frame: bounds, logoSize: checkingForUpdates || offline ? 40 : 28,
-                                       checkingForUpdates: checkingForUpdates, offline: offline, provider: provider))
+        if intro || checkingForUpdates || offline || missingExecutable || failure != nil {
+            let stateLabel = offline ? "네트워크 연결 없음" : missingExecutable ? "Codex를 찾을 수 없음"
+                : failure != nil ? "사용량 조회 실패"
+                : checkingForUpdates ? "업데이트 확인 중. 최신 버전인지 확인하고 있어요." : "사용량을 불러오는 중"
+            setAccessibilityLabel(L10n.text(stateLabel) + (failure.map { ". " + $0 } ?? ""))
+            addSubview(QuotaLoadingView(frame: bounds,
+                                       logoSize: checkingForUpdates || offline || missingExecutable || failure != nil ? 40 : 28,
+                                       checkingForUpdates: checkingForUpdates, offline: offline,
+                                       missingExecutable: missingExecutable, failure: failure, provider: provider))
         } else {
             let windows = quota?.windows ?? []
             setAccessibilityLabel(([L10n.text(showRemaining ? "%@ 남은 사용량" : "%@ 사용량", provider.name)] + windows.enumerated().map { index, window in
@@ -48,14 +56,14 @@ final class QuotaMenuView: NSView {
     required init?(coder: NSCoder) { nil }
 
     func update(quota: Quota?, account: CodexAccount?, updatedAt: Date?, failure: String?) {
-        let previousCount = self.quota?.windows.count
         self.quota = quota
         self.account = account
         self.updatedAt = updatedAt
         self.failure = failure
-        guard !intro && !checkingForUpdates && !offline else { return }
-        if previousCount != quota?.windows.count {
-            setFrameSize(NSSize(width: 300, height: Self.panelHeight(quota: quota, intro: false)))
+        guard !intro && !checkingForUpdates && !offline && !missingExecutable && failure == nil else { return }
+        let height = Self.panelHeight(quota: quota, intro: false)
+        if bounds.height != height {
+            setFrameSize(NSSize(width: 300, height: height))
             needsDisplay = true
         }
         let windows = quota?.windows ?? []
@@ -74,7 +82,7 @@ final class QuotaMenuView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        guard !intro && !checkingForUpdates && !offline else { return }
+        guard !intro && !checkingForUpdates && !offline && !missingExecutable && failure == nil else { return }
         if let headerIcon {
             let tintedIcon = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
                 headerIcon.draw(in: rect)
@@ -88,7 +96,9 @@ final class QuotaMenuView: NSView {
         }
         text(provider.name, x: 38, y: 12, size: provider == .claude ? 13 : 16, weight: .bold, width: 108)
         text(L10n.text(showRemaining ? "남은 사용량" : "사용량"), x: 16, y: 35, size: 10, color: .secondaryLabelColor)
-        text(account?.email ?? (quota == nil && failure == nil ? L10n.text("계정 정보 확인 중") : L10n.text("계정 정보 없음")), x: 152, y: 15, size: 10,
+        let accountLabel = account?.email ?? (provider == .claude && quota != nil ? L10n.text("Claude 연결됨")
+            : quota == nil && failure == nil ? L10n.text("계정 정보 확인 중") : L10n.text("계정 정보 없음"))
+        text(accountLabel, x: 152, y: 15, size: 10,
              color: .secondaryLabelColor, width: 132, height: 14, align: .right,
              lineBreak: .byTruncatingMiddle)
         text(account?.planType?.capitalized ?? "—", x: 116, y: 32, size: 10,
@@ -96,7 +106,9 @@ final class QuotaMenuView: NSView {
 
         let windows = quota?.windows ?? []
         if windows.isEmpty {
-            let message = failure ?? (quota == nil ? L10n.text("사용량을 확인하고 있어요.") : L10n.text("현재 계정에서 제공되는 한도 정보가 없습니다."))
+            let message = failure ?? (quota == nil ? L10n.text("사용량을 확인하고 있어요.")
+                : provider == .claude ? L10n.text("Claude Desktop에서 사용량 비율을 제공하지 않습니다.")
+                : L10n.text("현재 계정에서 제공되는 한도 정보가 없습니다."))
             text(message, x: 16, y: 70, size: 11, color: .secondaryLabelColor, width: 268, height: 42)
         } else {
             for (index, window) in windows.enumerated() {

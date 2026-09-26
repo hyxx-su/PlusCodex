@@ -21,7 +21,9 @@ import ServiceManagement
         status = .requiresApproval
         precondition(!login.requested && login.requiresApproval && login.message.contains("허용"))
         let settings = ProviderSettings(defaults: defaults)
-        let window = AISettingsWindow(settings: settings, login: login)
+        let window = AISettingsWindow(settings: settings, login: login,
+                                      claudeAvailability: { .availableOrUnknown },
+                                      grokAvailability: { .readyToCheck })
         func descendants(_ view: NSView) -> [NSView] {
             view.subviews + view.subviews.flatMap(descendants)
         }
@@ -74,8 +76,15 @@ import ServiceManagement
         defaults.set("selected.caf", forKey: "notifications.sound.customName")
         let customSoundSettings = NotificationSettings(defaults: defaults, soundDirectory: soundDirectory)
         let expandedWindow = AISettingsWindow(settings: settings,
-                                              notificationSettings: customSoundSettings, login: login)
+                                              notificationSettings: customSoundSettings, login: login,
+                                              claudeAvailability: { .availableOrUnknown },
+                                              grokAvailability: { .readyToCheck })
         verifyNotificationControls(in: expandedWindow, expectedCount: 6)
+        let volumeSlider = descendants(expandedWindow.window!.contentView!).compactMap { $0 as? NSSlider }
+            .first { $0.accessibilityLabel() == "음량" }!
+        precondition(volumeSlider.minValue == 0 && volumeSlider.maxValue == 200)
+        precondition(volumeSlider.doubleValue == 100)
+        precondition(volumeSlider.isContinuous, "Volume percentage must update during dragging")
         let claude = toggles.first { $0.identifier?.rawValue == "claude" }!
         claude.state = .on
         _ = claude.sendAction(claude.action, to: claude.target)
@@ -89,11 +98,12 @@ import ServiceManagement
             let settingsRow = controller.testHookMenu.items.first { $0.title == "설정" }
             precondition(settingsRow != nil && settingsRow?.image == nil)
             precondition(settingsRow?.keyEquivalent == ",")
-            var opens = 0
-            controller.onOpen = { opens += 1 }
+            let previousView = controller.testHookMenu.items[0].view
             controller.menuWillOpen(controller.testHookMenu)
-            precondition(opens == 1)
             controller.testHookPresentation(quota: nil, fetching: true, checking: false, offline: false)
+            precondition(controller.testHookMenu.items[0].view === previousView,
+                         "Tracking must keep the provider menu view stable")
+            controller.menuDidClose(controller.testHookMenu)
             precondition((controller.testHookMenu.items[0].view as? QuotaMenuView)?.intro == true)
             let quota = Quota(primary: QuotaWindow(usedPercent: 45, windowDurationMins: 300, resetsAt: nil), secondary: nil)
             controller.testHookPresentation(quota: quota, fetching: false, checking: false, offline: false)

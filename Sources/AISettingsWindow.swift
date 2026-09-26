@@ -293,6 +293,10 @@ private enum SettingsSearchKind {
 
 final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegate {
     private let settings: ProviderSettings
+    private let claudeAvailability: () -> ClaudeAvailability.State
+    private let openClaudeURL: (URL) -> Void
+    private let grokAvailability: () -> GrokAvailability.State
+    private let openGrokURL: (URL) -> Void
     private let notificationSettings: NotificationSettings
     private let wakeSettings: CodexWakeSettings
     private let login: LoginLaunchController
@@ -377,6 +381,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
                                         titleKey: String, isParent: Bool)] = []
     private var toggles: [AIProvider: NSSwitch] = [:]
     private var statuses: [AIProvider: NSTextField] = [:]
+    private var lastClaudeAvailability: ClaudeAvailability.State?
     private let loginToggle = NSSwitch()
     private let usageDisplayToggle = NSSwitch()
     private let usageDisplayDescription = NSTextField(labelWithString: "")
@@ -386,8 +391,16 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
     init(settings: ProviderSettings, notificationSettings: NotificationSettings = NotificationSettings(),
          wakeSettings: CodexWakeSettings = CodexWakeSettings(),
          login: LoginLaunchController = LoginLaunchController(),
-         language: LanguageSettings = LanguageSettings()) {
+         language: LanguageSettings = LanguageSettings(),
+         claudeAvailability: @escaping () -> ClaudeAvailability.State = { ClaudeAvailability.current() },
+         openClaudeURL: @escaping (URL) -> Void = { _ = NSWorkspace.shared.open($0) },
+         grokAvailability: @escaping () -> GrokAvailability.State = { GrokAvailability.current() },
+         openGrokURL: @escaping (URL) -> Void = { _ = NSWorkspace.shared.open($0) }) {
         self.settings = settings
+        self.claudeAvailability = claudeAvailability
+        self.openClaudeURL = openClaudeURL
+        self.grokAvailability = grokAvailability
+        self.openGrokURL = openGrokURL
         self.notificationSettings = notificationSettings
         self.wakeSettings = wakeSettings
         self.login = login
@@ -937,10 +950,10 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         localizedFields.append((field: volumeDescription,
                                 key: "사용자 지정 알림음의 음량을 조절합니다."))
         let volumeSlider = NSSlider(value: notificationSettings.soundVolume * 100,
-                                    minValue: 0, maxValue: 100,
+                                    minValue: 0, maxValue: NotificationSettings.maximumSoundVolume * 100,
                                     target: self, action: #selector(changeSoundVolume(_:)))
         volumeSlider.frame = NSRect(x: 280, y: 112, width: 90, height: 24)
-        volumeSlider.isContinuous = false
+        volumeSlider.isContinuous = true
         volumeSlider.setAccessibilityLabel(L10n.text("음량"))
         permissionCard.addSubview(volumeSlider)
         soundVolumeSlider = volumeSlider
@@ -1289,8 +1302,26 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         configureWakeModelPicker()
         updatePickerSelection()
         for provider in AIProvider.allCases {
-            toggles[provider]?.state = settings.enabled(provider) ? .on : .off
-            statuses[provider]?.alphaValue = settings.enabled(provider) ? 1 : 0.5
+            let claudeState = provider == .claude ? claudeAvailability() : .availableOrUnknown
+            let grokState = provider == .grok ? grokAvailability() : .readyToCheck
+            let enabled = settings.enabled(provider)
+                && claudeState == .availableOrUnknown
+                && grokState == .readyToCheck
+                && (provider != .grok || settings.grokUsageVerified)
+            toggles[provider]?.state = enabled ? .on : .off
+            statuses[provider]?.alphaValue = enabled ? 1 : 0.5
+            if provider == .claude, let guidance = claudeState.guidance {
+                statuses[provider]?.stringValue = L10n.text(guidance)
+            } else if provider == .claude && !enabled {
+                statuses[provider]?.stringValue = L10n.text("메뉴바에서 꺼짐")
+            } else if provider == .claude && lastClaudeAvailability != claudeState {
+                statuses[provider]?.stringValue = L10n.text("연결 확인 중")
+            } else if provider == .grok, let guidance = grokState.guidance {
+                statuses[provider]?.stringValue = L10n.text(guidance)
+            } else if provider == .grok && settings.enabled(provider) && !settings.grokUsageVerified {
+                statuses[provider]?.stringValue = L10n.text("사용량 확인 중")
+            }
+            if provider == .claude { lastClaudeAvailability = claudeState }
         }
         loginToggle.state = login.requested ? .on : .off
         for kind in NotificationKind.allCases {
@@ -1313,7 +1344,13 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
                                       height: height)
     }
     func update(_ provider: AIProvider, status: String) {
-        statuses[provider]?.stringValue = status
+        let guidance: String?
+        switch provider {
+        case .codex: guidance = nil
+        case .claude: guidance = claudeAvailability().guidance
+        case .grok: guidance = grokAvailability().guidance
+        }
+        statuses[provider]?.stringValue = guidance.map { L10n.text($0) } ?? status
     }
     private func configureWakeModelPicker() {
         wakeModelPicker.displayTitle = "\(wakeSettings.displayName) · Light"
@@ -2047,6 +2084,11 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         }
     }
     @objc private func changeSoundVolume(_ sender: NSSlider) {
+        soundVolumeLabel?.stringValue = "\(Int(sender.doubleValue.rounded()))%"
+        // Keep drag feedback immediate without re-encoding the notification sound
+        // on every pointer movement. AppKit sends the final action on mouse-up.
+        if let eventType = NSApp.currentEvent?.type,
+           eventType == .leftMouseDown || eventType == .leftMouseDragged { return }
         do {
             try notificationSettings.setSoundVolume(sender.doubleValue / 100)
         } catch {
@@ -2186,7 +2228,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         case .unreadable:
             alert.informativeText = L10n.text("선택한 파일을 읽을 수 없습니다.")
         case .invalidDuration:
-            alert.informativeText = L10n.text("재생 시간은 1~10초이며 음원 길이를 넘을 수 없습니다.")
+            alert.informativeText = L10n.text("재생 시간은 1~15초이며 음원 길이를 넘을 수 없습니다.")
         case .copyFailed:
             alert.informativeText = L10n.text("선택한 파일을 앱의 알림 소리로 저장할 수 없습니다.")
         case .deleteFailed:
@@ -2204,6 +2246,22 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
     }
     @objc private func toggled(_ sender: NSSwitch) {
         guard let raw = sender.identifier?.rawValue, let provider = AIProvider(rawValue: raw) else { return }
+        if provider == .claude && sender.state == .on,
+           let destination = claudeAvailability().actionURL {
+            sender.state = .off
+            settings.setEnabled(false, for: provider)
+            synchronize()
+            openClaudeURL(destination)
+            return
+        }
+        if provider == .grok && sender.state == .on,
+           let destination = grokAvailability().actionURL {
+            sender.state = .off
+            settings.setEnabled(false, for: provider)
+            synchronize()
+            openGrokURL(destination)
+            return
+        }
         settings.setEnabled(sender.state == .on, for: provider); synchronize()
     }
     @objc private func toggleLogin(_ sender: NSSwitch) {

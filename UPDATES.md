@@ -2,7 +2,7 @@
 
 ## 동작
 
-Sparkle 2.10.0이 실행 시, 메뉴를 열 때 및 주기적으로 공개 GitHub Release의 `appcast.xml`을 확인합니다.
+Sparkle 2.10.0이 앱 실행 시, 자동 검사 주기 및 네트워크 복구 시 공개 GitHub Release의 `appcast.xml`을 확인합니다.
 v1.0.5부터 새 버전이 있으면 ‘소프트웨어 업데이트’ 창을 앞으로 표시합니다.
 v1.0.6부터 창의 언어는 앱 설정을 따릅니다. 언어 변경은 재실행 후 적용됩니다.
 현재·새 버전과 릴리즈 노트를 확인하고 설치·건너뛰기·나중에 중 선택합니다.
@@ -27,7 +27,7 @@ v1.0.5로 올라오는 과정 자체에는 이전 버전의 업데이트 동작�
 ## 다음 버전
 
 1. `Info.plist`의 `CFBundleShortVersionString`을 다음 사용자용 버전으로 바꾸고,
-   `CFBundleVersion`은 현재 `11`보다 큰 정수로 올립니다.
+   `CFBundleVersion`은 현재 `12`보다 큰 정수로 올립니다.
 2. `RELEASE_NOTES.md`를 수정하고 `bash test.sh`를 실행합니다.
 3. `bash package-release.sh /absolute/path/new-release-directory`를 실행합니다.
 4. 생성된 DMG·ZIP·서명된 `appcast.xml` 세 파일을 같은 버전의 GitHub Release에 업로드합니다.
