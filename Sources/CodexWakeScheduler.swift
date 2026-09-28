@@ -1,8 +1,6 @@
 import Foundation
 
 enum CodexWakeSchedule {
-    static let confirmationGrace: TimeInterval = 2 * 60
-
     static func resetDate(now: Date, lastAttemptAt: Date?, quota: Quota?) -> Date? {
         guard let window = quota?.windows.first(where: { $0.windowDurationMins == 300 }),
               let seconds = window.resetsAt, seconds.isFinite else { return nil }
@@ -20,33 +18,20 @@ enum CodexWakeSchedule {
 
     static func shouldSubmit(now: Date, due: Date, targetReset: Date?,
                              currentReset: Date?, fetchedAt: Date?) -> Bool {
-        guard now >= due, let fetchedAt, fetchedAt >= due, fetchedAt <= now else { return false }
-        guard let targetReset else { return true }
-        if let currentReset, currentReset > targetReset,
-           !isNextCycle(currentReset, after: targetReset) {
-            // A forward correction is not evidence of a completed cycle.
-            return false
-        }
-        let confirmed = currentReset.map { isNextCycle($0, after: targetReset) } ?? false
-        // An unchanged reset timestamp is inconclusive, not proof that the
-        // account has not reset: the server may update it only after a turn.
-        return confirmed || now.timeIntervalSince(due) >= confirmationGrace
+        guard now >= due, let targetReset, now >= targetReset,
+              let currentReset, currentReset.timeIntervalSince1970.isFinite,
+              let fetchedAt, fetchedAt >= due, fetchedAt <= now else { return false }
+        // A future timestamp may already describe the next cycle. It must not
+        // cancel an overdue wake. The caller separately checks available quota.
+        return true
     }
 
     static func revisedReset(now: Date, targetReset: Date?, currentReset: Date?) -> Date? {
         guard let currentReset else { return nil }
         guard let targetReset else { return currentReset }
+        guard now < targetReset else { return nil }
         guard abs(currentReset.timeIntervalSince(targetReset)) > 1 else { return nil }
-        // A full five-hour jump after the due time denotes the next cycle;
-        // other changes correct the current cycle's deadline.
-        if now < targetReset || !isNextCycle(currentReset, after: targetReset) {
-            return currentReset
-        }
-        return nil
-    }
-
-    private static func isNextCycle(_ currentReset: Date, after targetReset: Date) -> Bool {
-        abs(currentReset.timeIntervalSince(targetReset) - CodexWakeSettings.interval) <= 10 * 60
+        return currentReset
     }
 }
 
@@ -62,70 +47,59 @@ final class CodexWakeScheduler {
     /// ticks may plan a wake, but must never submit using cached usage data.
     func tick(quota: Quota?, offline: Bool, quotaFetchedAt: Date? = nil, now: Date = Date()) {
         guard settings.enabled, !offline, !inFlight else { return }
-        if settings.nextAttemptAt == nil {
-            settings.scheduledResetAt = CodexWakeSchedule.resetDate(
-                now: now, lastAttemptAt: settings.lastAttemptAt, quota: quota)
-            settings.nextAttemptAt = CodexWakeSchedule.initialDate(
-                now: now, lastAttemptAt: settings.lastAttemptAt, quota: quota)
-        }
-        // Only a completed usage read may correct a persisted reset deadline.
-        // Timer ticks use cached quota solely to plan the initial attempt.
-        let currentReset: Date? = quotaFetchedAt.flatMap { fetchedAt in
-            guard fetchedAt <= now else { return nil }
-            return CodexWakeSchedule.resetDate(now: now, lastAttemptAt: settings.lastAttemptAt, quota: quota)
-        }
-        // After a prior wake, the persisted five-hour fallback is also a
-        // cycle deadline. A fresh reset date one full cycle beyond it means
-        // this cycle elapsed; it must not postpone the pending wake.
-        let targetReset = settings.scheduledResetAt
-            ?? (settings.lastAttemptAt != nil ? settings.nextAttemptAt : nil)
-        if let revised = CodexWakeSchedule.revisedReset(
-            now: now, targetReset: targetReset, currentReset: currentReset),
-           settings.nextAttemptAt != nil {
-            settings.scheduledResetAt = revised
-            let earliest = settings.lastAttemptAt?.addingTimeInterval(CodexWakeSettings.interval) ?? .distantPast
-            settings.nextAttemptAt = max(revised, earliest)
-        }
-        guard let due = settings.nextAttemptAt, now >= due else { return }
-        guard let fetchedAt = quotaFetchedAt, fetchedAt >= due, fetchedAt <= now else { return }
-        let confirmedTarget = settings.scheduledResetAt
-            ?? (settings.lastAttemptAt != nil ? settings.nextAttemptAt : nil)
-        guard CodexWakeSchedule.shouldSubmit(now: now, due: due,
-                                             targetReset: confirmedTarget,
-                                             currentReset: currentReset,
-                                             fetchedAt: fetchedAt) else { return }
+        guard let cycle = prepareAttempt(quota: quota, offline: offline,
+                                         quotaFetchedAt: quotaFetchedAt, now: now) else { return }
 
         let modelID = settings.modelID
         let effort = settings.effort
         let message = settings.message
         let previousThreadID = settings.threadID
+        let accountIdentity = settings.accountIdentity
         // Reserve the slot before launching a worker. If the app crashes while
         // the request is in flight, a relaunch must not submit a duplicate.
         settings.nextAttemptAt = now.addingTimeInterval(CodexWakeSettings.interval)
         inFlight = true
         DispatchQueue.global(qos: .utility).async { [weak self] in
+            var submissionStarted = false
             var submitted = false
             var shouldRetry = false
             do {
                 try CodexWakeClient.sendHello(modelID: modelID, effort: effort, message: message,
                                               previousThreadID: previousThreadID,
-                                              shouldProceed: { self?.settings.enabled == true },
-                                              onThreadPrepared: { self?.settings.recordThreadID($0) },
+                                              shouldProceed: {
+                                                  self?.settings.enabled == true && self?.settings.accountIdentity == accountIdentity
+                                              },
+                                              onThreadPrepared: {
+                                                  if self?.settings.accountIdentity == accountIdentity {
+                                                      self?.settings.recordThreadID($0)
+                                                  }
+                                              },
                                               onTurnSubmission: {
                                                   submitted = true
                                                   DispatchQueue.main.sync {
-                                                      self?.settings.recordAttempt(at: Date())
+                                                      if self?.settings.accountIdentity == accountIdentity {
+                                                          self?.settings.recordAttempt(at: Date(), cycleResetAt: cycle)
+                                                      }
                                                   }
                                               },
-                                              onModelResolved: { self?.settings.select($0) })
+                                              onTurnStartRequested: { submissionStarted = true },
+                                              onModelResolved: {
+                                                  if self?.settings.accountIdentity == accountIdentity {
+                                                      self?.settings.select($0)
+                                                  }
+                                              })
             } catch CodexWakeError.cancelled {
                 // The user switched the feature off before the turn was sent.
             } catch {
                 NSLog("PlusCodex wake message failed: %@", error.localizedDescription)
-                shouldRetry = !submitted
+                let definiteRejection = (error as? CodexWakeError)?.isDefiniteServerRejection == true
+                // A timeout or disconnect after sending is ambiguous: retrying
+                // could duplicate a turn the server already accepted.
+                shouldRetry = !submitted && (!submissionStarted || definiteRejection)
             }
             DispatchQueue.main.async {
-                if shouldRetry, self?.settings.enabled == true {
+                if shouldRetry, self?.settings.enabled == true,
+                   self?.settings.accountIdentity == accountIdentity {
                     // A known pre-submission failure used no model quota; retry
                     // later without repeatedly starting Codex every minute.
                     self?.settings.nextAttemptAt = Date().addingTimeInterval(15 * 60)
@@ -133,5 +107,36 @@ final class CodexWakeScheduler {
                 self?.inFlight = false
             }
         }
+    }
+
+    /// Planning is synchronous and transport-free. The cycle deadline and the
+    /// retry/reservation date are independent, persisted values.
+    func prepareAttempt(quota: Quota?, offline: Bool, quotaFetchedAt: Date?, now: Date) -> Date? {
+        guard settings.enabled, !offline, let fetchedAt = quotaFetchedAt, fetchedAt <= now,
+              let window = quota?.windows.first(where: { $0.windowDurationMins == 300 }),
+              let seconds = window.resetsAt, seconds.isFinite else { return nil }
+        let currentReset = Date(timeIntervalSince1970: seconds)
+        // Older versions stored the next cycle only as a five-hour fallback
+        // after success. Recover that pending cycle before reading a newer one.
+        if settings.scheduledResetAt == nil, settings.completedResetAt == nil,
+           settings.lastAttemptAt != nil, let legacyDue = settings.nextAttemptAt {
+            settings.scheduledResetAt = legacyDue
+        }
+        if settings.scheduledResetAt == nil {
+            guard currentReset > (settings.completedResetAt ?? .distantPast),
+                  currentReset > (settings.lastAttemptAt ?? .distantPast),
+                  currentReset.timeIntervalSince(now) > -CodexWakeSettings.interval else { return nil }
+            settings.scheduledResetAt = currentReset
+        } else if let revised = CodexWakeSchedule.revisedReset(
+            now: now, targetReset: settings.scheduledResetAt, currentReset: currentReset) {
+            settings.scheduledResetAt = revised
+        }
+        guard let cycle = settings.scheduledResetAt else { return nil }
+        let due = max(cycle, settings.nextAttemptAt ?? .distantPast,
+                      settings.lastAttemptAt?.addingTimeInterval(CodexWakeSettings.interval) ?? .distantPast)
+        guard window.usedPercent.isFinite, window.usedPercent >= 0, window.usedPercent < 100,
+              CodexWakeSchedule.shouldSubmit(now: now, due: due, targetReset: cycle,
+                                             currentReset: currentReset, fetchedAt: fetchedAt) else { return nil }
+        return cycle
     }
 }

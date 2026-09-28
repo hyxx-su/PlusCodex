@@ -56,6 +56,8 @@ final class CodexWakeSettings {
         static let lastAttemptAt = "codexWake.lastAttemptAt"
         static let nextAttemptAt = "codexWake.nextAttemptAt"
         static let scheduledResetAt = "codexWake.scheduledResetAt"
+        static let account = "codexWake.account"
+        static let completedResetAt = "codexWake.completedResetAt"
     }
 
     private let defaults: UserDefaults
@@ -84,6 +86,8 @@ final class CodexWakeSettings {
     var effort: String { "low" }
     var threadID: String? { defaults.string(forKey: Key.threadID) }
     var lastAttemptAt: Date? { defaults.object(forKey: Key.lastAttemptAt) as? Date }
+    var completedResetAt: Date? { defaults.object(forKey: Key.completedResetAt) as? Date }
+    var accountIdentity: String? { defaults.string(forKey: Key.account) }
     var nextAttemptAt: Date? {
         get { defaults.object(forKey: Key.nextAttemptAt) as? Date }
         set { defaults.set(newValue, forKey: Key.nextAttemptAt) }
@@ -118,9 +122,20 @@ final class CodexWakeSettings {
         defaults.set(effort, forKey: Key.effort)
     }
 
-    func recordAttempt(at date: Date) {
+    func selectAccount(_ identity: String) {
+        if let previous = defaults.string(forKey: Key.account), previous != identity {
+            for key in [Key.lastAttemptAt, Key.completedResetAt, Key.nextAttemptAt,
+                        Key.scheduledResetAt, Key.threadID] {
+                defaults.removeObject(forKey: key)
+            }
+        }
+        defaults.set(identity, forKey: Key.account)
+    }
+
+    func recordAttempt(at date: Date, cycleResetAt: Date? = nil) {
         defaults.set(date, forKey: Key.lastAttemptAt)
-        nextAttemptAt = date.addingTimeInterval(Self.interval)
+        if let cycleResetAt { defaults.set(cycleResetAt, forKey: Key.completedResetAt) }
+        nextAttemptAt = cycleResetAt == nil ? date.addingTimeInterval(Self.interval) : nil
         scheduledResetAt = nil
     }
 

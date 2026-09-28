@@ -15,6 +15,29 @@ struct ActivityChecks {
             "version": 3, "params": ["hostId": "local", "conversationId": id, "hasUnreadTurn": false]]
         let read = ThreadActivityMonitor.readStateChange(from: readEvent)
         precondition(read?.id == id && read?.unread == false)
+        let otherID = UUID().uuidString
+        let followed: Set<String> = [id, otherID]
+        let reset: [String: Any] = ["type": "broadcast", "method": "ipc-connection-reset",
+                                    "version": 1, "params": [:]]
+        precondition(ThreadActivityMonitor.refollowIDs(for: reset, followed: followed,
+                                                       clientID: "local-client") == followed.sorted())
+        let requested: [String: Any] = ["type": "broadcast", "method": "thread-stream-following-status-requested",
+                                        "version": 1, "sourceClientId": "owner",
+                                        "params": ["hostId": "local", "conversationId": id]]
+        precondition(ThreadActivityMonitor.refollowIDs(for: requested, followed: followed,
+                                                       clientID: "local-client") == [id])
+        var invalidRequest = requested
+        invalidRequest["sourceClientId"] = "local-client"
+        precondition(ThreadActivityMonitor.refollowIDs(for: invalidRequest, followed: followed,
+                                                       clientID: "local-client").isEmpty)
+        invalidRequest = requested
+        invalidRequest["version"] = 2
+        precondition(ThreadActivityMonitor.refollowIDs(for: invalidRequest, followed: followed,
+                                                       clientID: "local-client").isEmpty)
+        invalidRequest = requested
+        invalidRequest["params"] = ["hostId": "remote", "conversationId": id]
+        precondition(ThreadActivityMonitor.refollowIDs(for: invalidRequest, followed: followed,
+                                                       clientID: "local-client").isEmpty)
         activity.unread = read!.unread
         precondition(!activity.isVisible, "Completed tasks disappear when read")
         activity.runtime = "active"
@@ -54,10 +77,22 @@ struct ActivityChecks {
 
         _ = NSApplication.shared
         let empty = ThreadActivityView(activities: [])
-        precondition(empty.frame.height == 0 && empty.subviews.isEmpty)
+        precondition(empty.frame.height == 0 && empty.subviews.first is NSScrollView)
         let populated = ThreadActivityView(activities: [activity])
         precondition(populated.frame.height == 42)
         precondition(populated.subviews.count == 1 && populated.subviews.first is NSScrollView)
+        let scroll = populated.subviews.first as! NSScrollView
+        let originalRow = scroll.documentView!.subviews.first!
+        activity.runtime = "idle"
+        activity.unread = true
+        populated.update(activities: [activity], preserveHeight: true)
+        precondition(scroll.documentView!.subviews.first === originalRow,
+                     "Completion must update the existing row")
+        precondition((originalRow as! ThreadActivityButton).accessibilityLabel()?.contains("완료") == true)
+        populated.update(activities: [], preserveHeight: true)
+        precondition(populated.frame.height == 0 && scroll.documentView!.subviews.isEmpty)
+        populated.update(activities: [activity], preserveHeight: true)
+        precondition(scroll.documentView!.subviews.count == 1 && populated.frame.height == 42)
         let row = ThreadActivityButton(activity: activity,
             frame: NSRect(x: 0, y: 0, width: 276, height: 34))
         row.testHookSetHovered(true)

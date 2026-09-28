@@ -1,11 +1,110 @@
 import AppKit
 import QuartzCore
 
+private final class ThreadNotificationButton: NSButton {
+    override var isFlipped: Bool { true }
+    var rowColor: NSColor = .labelColor {
+        didSet {
+            contentTintColor = rowColor
+            needsDisplay = true
+        }
+    }
+
+    init(isOn: Bool, title: String) {
+        super.init(frame: NSRect(x: 0, y: 0, width: 22, height: 22))
+        setButtonType(.toggle)
+        isBordered = false
+        focusRingType = .none
+        state = isOn ? .on : .off
+        imagePosition = .imageOnly
+        setAccessibilityElement(true)
+        setAccessibilityRole(.checkBox)
+        setAccessibilityLabel(title)
+        updateAppearance()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let circle = NSBezierPath(ovalIn: bounds.insetBy(dx: 1, dy: 1))
+        rowColor.withAlphaComponent(state == .on ? 0.09 : 0.035).setFill()
+        circle.fill()
+        rowColor.withAlphaComponent(state == .on ? 0.13 : 0.2).setStroke()
+        circle.lineWidth = 0.8
+        circle.stroke()
+        super.draw(dirtyRect)
+    }
+
+    func updateAppearance() {
+        let symbolName = state == .on ? "bell" : "bell.slash"
+        let description = state == .on ? "알림 켜짐" : "알림 꺼짐"
+        let configuration = NSImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        image = NSImage(systemSymbolName: symbolName, accessibilityDescription: description)?
+            .withSymbolConfiguration(configuration)
+        image?.isTemplate = true
+        contentTintColor = rowColor
+        setAccessibilityValue(state == .on ? "켜짐" : "꺼짐")
+        toolTip = state == .on ? "알림 켜짐 · 클릭하여 끄기" : "알림 꺼짐 · 클릭하여 켜기"
+        needsDisplay = true
+    }
+}
+
+/// A transparent overlay lets one synchronized sweep cross both the title and bell glyph.
+private final class ThreadShimmerOverlay: NSView {
+    override var isFlipped: Bool { true }
+
+    let gradient = CAGradientLayer()
+    private let maskLayer = CALayer()
+    private let textMask = CATextLayer()
+    private let bellMask = CALayer()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        gradient.colors = [NSColor.clear.cgColor, NSColor.white.withAlphaComponent(0.9).cgColor, NSColor.clear.cgColor]
+        gradient.locations = [0, 0.5, 1]
+        gradient.startPoint = CGPoint(x: 0, y: 0.5)
+        gradient.endPoint = CGPoint(x: 1, y: 0.5)
+        gradient.mask = maskLayer
+        maskLayer.addSublayer(textMask)
+        maskLayer.addSublayer(bellMask)
+        layer?.addSublayer(gradient)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func configure(title: String, titleFrame: NSRect, symbol: NSImage?, symbolFrame: NSRect, scale: CGFloat) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        gradient.frame = bounds
+        maskLayer.frame = bounds
+        textMask.frame = titleFrame
+        textMask.contentsScale = scale
+        textMask.string = NSAttributedString(string: title, attributes: [
+            .font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.white
+        ])
+        textMask.truncationMode = .end
+        textMask.alignmentMode = .left
+        bellMask.contentsScale = scale
+        bellMask.contentsGravity = .resizeAspect
+        if let symbol {
+            var proposedRect = CGRect(origin: .zero, size: symbol.size)
+            bellMask.contents = symbol.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil)
+        } else {
+            bellMask.contents = nil
+        }
+        bellMask.frame = symbolFrame
+        CATransaction.commit()
+    }
+}
+
 /// A native button keeps keyboard activation and VoiceOver while drawing the compact row.
 final class ThreadActivityButton: NSButton {
-    private let activity: ThreadActivity
-    private let shimmer = CAGradientLayer()
-    private let textMask = CATextLayer()
+    private var activity: ThreadActivity
+    private let shimmerOverlay = ThreadShimmerOverlay(frame: .zero)
+    private let notificationButton: ThreadNotificationButton
     private var hoverTrackingArea: NSTrackingArea?
     private var isHovered = false
     private let onOpened: (ThreadActivity) -> Void
@@ -13,6 +112,9 @@ final class ThreadActivityButton: NSButton {
     init(activity: ThreadActivity, frame: NSRect, onOpened: @escaping (ThreadActivity) -> Void = { _ in }) {
         self.activity = activity
         self.onOpened = onOpened
+        notificationButton = ThreadNotificationButton(
+            isOn: ThreadNotificationPreferences.shared.enabled(activity.id),
+            title: "\(activity.title) 알림")
         super.init(frame: frame)
         isBordered = false
         title = ""
@@ -20,12 +122,12 @@ final class ThreadActivityButton: NSButton {
         action = #selector(openThread)
         setAccessibilityLabel("\(activity.isRunning ? L10n.text("작업 중") : L10n.text("완료 · 미확인")), \(activity.title)")
         wantsLayer = true
-        shimmer.colors = [NSColor.clear.cgColor, NSColor.white.withAlphaComponent(0.9).cgColor, NSColor.clear.cgColor]
-        shimmer.locations = [0, 0.5, 1]
-        shimmer.startPoint = CGPoint(x: 0, y: 0.5)
-        shimmer.endPoint = CGPoint(x: 1, y: 0.5)
-        shimmer.mask = textMask
-        layer?.addSublayer(shimmer)
+        notificationButton.rowColor = activity.isRunning ? .secondaryLabelColor : .labelColor
+        notificationButton.updateAppearance()
+        notificationButton.target = self
+        notificationButton.action = #selector(toggleNotifications)
+        addSubview(notificationButton)
+        addSubview(shimmerOverlay)
     }
 
     required init?(coder: NSCoder) { nil }
@@ -71,29 +173,54 @@ final class ThreadActivityButton: NSButton {
         super.viewDidMoveToWindow()
         isHovered = false
         needsDisplay = true
-        shimmer.removeAllAnimations()
-        shimmer.isHidden = !activity.isRunning || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        guard window != nil, !shimmer.isHidden else { return }
+        updateShimmer()
+    }
+
+    func update(activity: ThreadActivity) {
+        notificationButton.state = ThreadNotificationPreferences.shared.enabled(activity.id) ? .on : .off
+        notificationButton.rowColor = activity.isRunning ? .secondaryLabelColor : .labelColor
+        notificationButton.setAccessibilityLabel("\(activity.title) 알림")
+        notificationButton.updateAppearance()
+        guard self.activity != activity else { return }
+        let runningChanged = self.activity.isRunning != activity.isRunning
+        self.activity = activity
+        setAccessibilityLabel("\(activity.isRunning ? L10n.text("작업 중") : L10n.text("완료 · 미확인")), \(activity.title)")
+        needsLayout = true
+        needsDisplay = true
+        if runningChanged { updateShimmer() }
+    }
+
+    private func updateShimmer() {
+        shimmerOverlay.gradient.removeAllAnimations()
+        shimmerOverlay.isHidden = !activity.isRunning || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        guard window != nil, !shimmerOverlay.isHidden else { return }
         let animation = CABasicAnimation(keyPath: "locations")
         animation.fromValue = [-0.35, -0.18, 0]
         animation.toValue = [1, 1.18, 1.35]
         animation.duration = 2.2
         animation.repeatCount = .infinity
-        shimmer.add(animation, forKey: "thinking")
+        shimmerOverlay.gradient.add(animation, forKey: "thinking")
     }
 
     override func layout() {
         super.layout()
+        notificationButton.frame = NSRect(x: bounds.width - 30, y: 6, width: 22, height: 22)
+        shimmerOverlay.frame = bounds
+        let titleFrame = NSRect(x: 36, y: 8, width: max(0, bounds.width - 78), height: 18)
+        let symbolSize = notificationButton.image?.size ?? NSSize(width: 11, height: 11)
+        let symbolFrame = NSRect(
+            x: notificationButton.frame.midX - symbolSize.width / 2,
+            y: notificationButton.frame.midY - symbolSize.height / 2,
+            width: symbolSize.width,
+            height: symbolSize.height)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        shimmer.frame = NSRect(x: 36, y: 8, width: bounds.width - 50, height: 18)
-        textMask.frame = shimmer.bounds
-        textMask.contentsScale = window?.backingScaleFactor ?? 2
-        textMask.string = NSAttributedString(string: activity.title, attributes: [
-            .font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.white
-        ])
-        textMask.truncationMode = .end
-        textMask.alignmentMode = .left
+        shimmerOverlay.configure(
+            title: activity.title,
+            titleFrame: titleFrame,
+            symbol: notificationButton.image,
+            symbolFrame: symbolFrame,
+            scale: window?.backingScaleFactor ?? 2)
         CATransaction.commit()
     }
 
@@ -123,7 +250,7 @@ final class ThreadActivityButton: NSButton {
         arrow.stroke()
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
-        (activity.title as NSString).draw(in: NSRect(x: 36, y: 8, width: bounds.width - 50, height: 18), withAttributes: [
+        (activity.title as NSString).draw(in: NSRect(x: 36, y: 8, width: max(0, bounds.width - 78), height: 18), withAttributes: [
             .font: NSFont.systemFont(ofSize: 11),
             .foregroundColor: color, .paragraphStyle: paragraph
         ])
@@ -139,32 +266,85 @@ final class ThreadActivityButton: NSButton {
         if NSWorkspace.shared.open(url) { onOpened(activity) }
     }
 
+    @objc private func toggleNotifications() {
+        ThreadNotificationPreferences.shared.setEnabled(notificationButton.state == .on, for: activity.id)
+        notificationButton.updateAppearance()
+        needsLayout = true
+    }
+
     var testHookHovered: Bool { isHovered }
     func testHookSetHovered(_ value: Bool) { isHovered = value }
 }
 
 final class ThreadActivityView: NSView {
     override var isFlipped: Bool { true }
+    private let scroll = NSScrollView()
+    private let document = ActivityDocumentView()
+    private var buttons: [String: ThreadActivityButton] = [:]
+    private var orderedIDs: [String] = []
+    private let onOpened: (ThreadActivity) -> Void
 
     init(activities: [ThreadActivity], onOpened: @escaping (ThreadActivity) -> Void = { _ in }) {
-        let count = max(1, activities.count)
-        super.init(frame: NSRect(x: 0, y: 0, width: 300, height: activities.isEmpty ? 0 : 8 + CGFloat(min(count, 5)) * 34))
-        if !activities.isEmpty {
-            let scroll = NSScrollView(frame: NSRect(x: 12, y: 4, width: 276, height: CGFloat(min(count, 5)) * 34))
-            scroll.drawsBackground = false
-            scroll.hasVerticalScroller = count > 5
-            scroll.scrollerStyle = .overlay
-            let document = ActivityDocumentView(frame: NSRect(x: 0, y: 0, width: 276, height: CGFloat(count) * 34))
-            for (index, activity) in activities.enumerated() {
-                document.addSubview(ThreadActivityButton(activity: activity,
-                    frame: NSRect(x: 0, y: CGFloat(index) * 34, width: 276, height: 34), onOpened: onOpened))
-            }
-            scroll.documentView = document
-            addSubview(scroll)
-        }
+        self.onOpened = onOpened
+        super.init(frame: NSRect(x: 0, y: 0, width: 300, height: 0))
+        scroll.drawsBackground = false
+        scroll.scrollerStyle = .overlay
+        scroll.documentView = document
+        addSubview(scroll)
+        update(activities: activities)
     }
 
     required init?(coder: NSCoder) { nil }
+
+    /// Reuse rows while tracking, but collapse the area when no tasks remain.
+    func update(activities: [ThreadActivity], preserveHeight: Bool = false) {
+        let incoming = Set(activities.map(\.id))
+        let animate = window != nil && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        for id in Array(buttons.keys) where !incoming.contains(id) {
+            guard let button = buttons.removeValue(forKey: id) else { continue }
+            button.isEnabled = false
+            if animate {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.15
+                    button.animator().alphaValue = 0
+                } completionHandler: { button.removeFromSuperview() }
+            } else { button.removeFromSuperview() }
+        }
+        if preserveHeight {
+            orderedIDs = orderedIDs.filter { incoming.contains($0) }
+            orderedIDs += activities.map(\.id).filter { !orderedIDs.contains($0) }
+        } else { orderedIDs = activities.map(\.id) }
+        for activity in activities {
+            if let button = buttons[activity.id] { button.update(activity: activity) }
+            else {
+                let button = ThreadActivityButton(activity: activity, frame: .zero, onOpened: onOpened)
+                buttons[activity.id] = button
+                document.addSubview(button)
+                if animate {
+                    button.alphaValue = 0
+                    NSAnimationContext.runAnimationGroup { context in
+                        context.duration = 0.15
+                        button.animator().alphaValue = 1
+                    }
+                }
+            }
+        }
+        if activities.isEmpty || !preserveHeight || bounds.height == 0 {
+            let height: CGFloat = activities.isEmpty ? 0 : 8 + CGFloat(min(activities.count, 5)) * 34
+            setFrameSize(NSSize(width: 300, height: height))
+        }
+        scroll.frame = NSRect(x: 12, y: 4, width: 276, height: max(0, bounds.height - 8))
+        document.setFrameSize(NSSize(width: 276, height: max(scroll.bounds.height, CGFloat(orderedIDs.count) * 34)))
+        scroll.hasVerticalScroller = CGFloat(orderedIDs.count) * 34 > scroll.bounds.height
+        for (index, id) in orderedIDs.enumerated() {
+            buttons[id]?.frame = NSRect(x: 0, y: CGFloat(index) * 34, width: 276, height: 34)
+        }
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: min(scroll.contentView.bounds.minY,
+            max(0, document.bounds.height - scroll.contentView.bounds.height))))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        needsDisplay = true
+        refreshHover()
+    }
 
     func refreshHover() {
         for case let scroll as NSScrollView in subviews {

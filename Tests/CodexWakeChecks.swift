@@ -91,21 +91,21 @@ import AppKit
         precondition(CodexWakeSchedule.revisedReset(now: now, targetReset: staleReset,
             currentReset: earlierReset) == earlierReset)
         precondition(CodexWakeSchedule.revisedReset(now: due, targetReset: staleReset,
-            currentReset: correctedReset) == correctedReset,
-            "A later same-cycle correction must not wake at the old deadline")
+            currentReset: correctedReset) == nil,
+            "An overdue unprocessed cycle must survive a newly reported date")
         precondition(CodexWakeSchedule.revisedReset(now: due, targetReset: staleReset,
-            currentReset: largeCorrection) == largeCorrection,
-            "A large correction smaller than a full cycle is not a reset")
+            currentReset: largeCorrection) == nil,
+            "A future date must not cancel an overdue wake")
         precondition(CodexWakeSchedule.revisedReset(now: due, targetReset: staleReset,
             currentReset: advancedReset) == nil,
             "A full-window advance after the deadline confirms the next cycle")
         precondition(!CodexWakeSchedule.shouldSubmit(now: due, due: due,
             targetReset: staleReset, currentReset: advancedReset, fetchedAt: now))
-        precondition(!CodexWakeSchedule.shouldSubmit(now: due, due: due,
+        precondition(CodexWakeSchedule.shouldSubmit(now: due, due: due,
             targetReset: staleReset, currentReset: correctedReset, fetchedAt: due))
-        precondition(!CodexWakeSchedule.shouldSubmit(now: due, due: due,
+        precondition(CodexWakeSchedule.shouldSubmit(now: due, due: due,
             targetReset: staleReset, currentReset: largeCorrection, fetchedAt: due))
-        precondition(!CodexWakeSchedule.shouldSubmit(now: due.addingTimeInterval(30), due: due,
+        precondition(CodexWakeSchedule.shouldSubmit(now: due.addingTimeInterval(30), due: due,
             targetReset: staleReset, currentReset: staleReset, fetchedAt: due.addingTimeInterval(30)))
         precondition(CodexWakeSchedule.shouldSubmit(now: due, due: due,
             targetReset: staleReset, currentReset: advancedReset, fetchedAt: due))
@@ -114,7 +114,7 @@ import AppKit
             fetchedAt: due.addingTimeInterval(120)))
         precondition(!CodexWakeSchedule.shouldSubmit(now: due.addingTimeInterval(120), due: due,
             targetReset: staleReset, currentReset: staleReset, fetchedAt: nil))
-        precondition(CodexWakeSchedule.shouldSubmit(now: due, due: due,
+        precondition(!CodexWakeSchedule.shouldSubmit(now: due, due: due,
             targetReset: nil, currentReset: nil, fetchedAt: due))
         wake.setEnabled(true)
         wake.scheduledResetAt = due
@@ -122,17 +122,18 @@ import AppKit
         let scheduler = CodexWakeScheduler(settings: wake)
         let correctedQuota = Quota(primary: QuotaWindow(usedPercent: 20,
             windowDurationMins: 300, resetsAt: correctedReset.timeIntervalSince1970), secondary: nil)
-        scheduler.tick(quota: correctedQuota, offline: false, quotaFetchedAt: due, now: due)
-        precondition(wake.scheduledResetAt == correctedReset && wake.nextAttemptAt == correctedReset,
-            "A fresh quota read must move the persisted wake deadline")
+        precondition(scheduler.prepareAttempt(quota: correctedQuota, offline: false,
+            quotaFetchedAt: due, now: due) == due)
+        precondition(wake.scheduledResetAt == due && wake.nextAttemptAt == due,
+            "A fresh quota read must preserve an overdue wake")
         let restartedWake = CodexWakeSettings(defaults: defaults)
         let restartedScheduler = CodexWakeScheduler(settings: restartedWake)
         let earlierQuota = Quota(primary: QuotaWindow(usedPercent: 20,
             windowDurationMins: 300, resetsAt: earlierReset.timeIntervalSince1970), secondary: nil)
-        restartedScheduler.tick(quota: earlierQuota, offline: false,
+        _ = restartedScheduler.prepareAttempt(quota: earlierQuota, offline: false,
             quotaFetchedAt: now.addingTimeInterval(60), now: now.addingTimeInterval(60))
-        precondition(restartedWake.scheduledResetAt == earlierReset && restartedWake.nextAttemptAt == earlierReset,
-            "Relaunch must not preserve an outdated wake deadline")
+        precondition(restartedWake.scheduledResetAt == earlierReset && restartedWake.nextAttemptAt == due,
+            "A cycle correction must not rewrite an independent retry deadline")
         wake.setEnabled(false)
         wake.setEnabled(true)
         wake.recordAttempt(at: now)

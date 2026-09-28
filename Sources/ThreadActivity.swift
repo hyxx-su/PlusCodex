@@ -239,7 +239,10 @@ struct ThreadActivityReadReceipts {
 /// Read-only adapter for the installed desktop app's versioned local IPC protocol.
 /// No tokens, message bodies, or read-state changes are persisted by this app.
 final class ThreadActivityMonitor {
-    private static let maximumBufferedFrameSize = 32 * 1024 * 1024
+    // Long-running threads can carry large tool outputs in their first snapshot.
+    // Keep a hard limit, but do not discard ordinary large conversations before
+    // their small runtime-status fields can be read.
+    private static let maximumBufferedFrameSize = 128 * 1024 * 1024
     private static let maximumDiscardedFrameSize = 256 * 1024 * 1024
     private let queue = DispatchQueue(label: "local.codexquota.activity", qos: .utility)
     private let onUpdate: ([ThreadActivity], Bool) -> Void
@@ -346,6 +349,25 @@ final class ThreadActivityMonitor {
               let id = params["conversationId"] as? String,
               let unread = params["hasUnreadTurn"] as? Bool else { return nil }
         return (id, unread)
+    }
+
+    static func refollowIDs(for message: [String: Any], followed: Set<String>, clientID: String) -> [String] {
+        guard message["type"] as? String == "broadcast",
+              message["version"] as? Int == 1 else { return [] }
+        switch message["method"] as? String {
+        case "ipc-connection-reset":
+            return followed.sorted()
+        case "thread-stream-following-status-requested":
+            guard let params = message["params"] as? [String: Any],
+                  params["hostId"] as? String == "local",
+                  let id = params["conversationId"] as? String,
+                  followed.contains(id),
+                  let requester = message["sourceClientId"] as? String,
+                  requester != clientID else { return [] }
+            return [id]
+        default:
+            return []
+        }
     }
 
     func start() { queue.async { self.run() } }
@@ -519,6 +541,13 @@ final class ThreadActivityMonitor {
             return
         }
         guard type == "broadcast", let params = message["params"] as? [String: Any] else { return }
+        // An owner may lose its follower list without closing our socket. Codex
+        // asks followers to reannounce after reconnect; missing that request
+        // leaves an active thread invisible until another full subscription.
+        for id in Self.refollowIDs(for: message, followed: followed, clientID: clientID) {
+            try follow(id, enabled: true)
+        }
+        if method == "ipc-connection-reset" || method == "thread-stream-following-status-requested" { return }
         if method == "client-status-changed", params["status"] as? String == "disconnected",
            let owner = params["clientId"] as? String {
             for id in Array(owners.keys) where owners[id] == owner {

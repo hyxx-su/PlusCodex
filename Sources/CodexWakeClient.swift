@@ -10,6 +10,11 @@ enum CodexWakeError: LocalizedError {
     case failed(String)
     case cancelled
 
+    var isDefiniteServerRejection: Bool {
+        if case .failed = self { return true }
+        return false
+    }
+
     var errorDescription: String? {
         switch self {
         case .unavailable: return L10n.text("Codex 실행 파일을 찾을 수 없습니다.")
@@ -65,6 +70,7 @@ final class CodexWakeClient {
                           shouldProceed: () -> Bool,
                           onThreadPrepared: (String) -> Void,
                           onTurnSubmission: () -> Void,
+                          onTurnStartRequested: () -> Void = {},
                           onModelResolved: (CodexWakeModel) -> Void = { _ in }) throws {
         let server = try AppServerSession()
         guard effort == "low" else { throw CodexWakeError.modelUnavailable }
@@ -105,11 +111,14 @@ final class CodexWakeClient {
         onThreadPrepared(threadID)
         guard shouldProceed() else { throw CodexWakeError.cancelled }
 
-        onTurnSubmission()
+        onTurnStartRequested()
         let result = try server.request("turn/start", params: turnStartParams(
             threadID: threadID, modelName: selected.modelName, effort: effort, message: message))
         guard let turn = result["turn"] as? [String: Any],
               let turnID = turn["id"] as? String else { throw CodexWakeError.invalidResponse }
+        // Persist the attempt only after the App Server confirms that it
+        // accepted the turn. Explicit rejections can then be retried safely.
+        onTurnSubmission()
         try server.waitForTurn(turnID)
     }
 }

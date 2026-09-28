@@ -26,6 +26,21 @@ import AppKit
         precondition(short.displayLabel(planType: "plus", isPrimary: true) == "5시간")
         precondition(weekly.displayLabel(planType: "free", isPrimary: false) == "주간")
         precondition(monthly.resetsAt == 12345 && monthly.remaining == 60)
+        let cached = Quota(primary: short, secondary: weekly)
+        let now = Date()
+        precondition(QuotaMenuView.canShowPreviousUsage(cached, updatedAt: now.addingTimeInterval(-9 * 60), now: now))
+        precondition(!QuotaMenuView.canShowPreviousUsage(cached, updatedAt: now.addingTimeInterval(-11 * 60), now: now))
+        precondition(!QuotaMenuView.canShowPreviousUsage(cached, updatedAt: now.addingTimeInterval(60), now: now))
+        precondition(!QuotaMenuView.canShowPreviousUsage(nil, updatedAt: now, now: now))
+        let previous = QuotaMenuView(quota: cached, updatedAt: now.addingTimeInterval(-60),
+                                     failure: "조회 시간 초과")
+        precondition(!previous.showsFailureScreen && previous.bounds.height == 250)
+        precondition(previous.subviews.allSatisfy { !($0 is QuotaLoadingView) })
+        let expired = QuotaMenuView(quota: cached, updatedAt: now.addingTimeInterval(-11 * 60),
+                                    failure: "조회 시간 초과")
+        precondition(expired.showsFailureScreen)
+        let claude = QuotaMenuView(quota: cached, updatedAt: now, failure: "조회 시간 초과", provider: .claude)
+        precondition(claude.showsFailureScreen, "Codex 이외 서비스의 오류 표시 방식은 그대로 둡니다")
         print("PASS: missing windows, real limits on all plans, dynamic height")
     }
 }

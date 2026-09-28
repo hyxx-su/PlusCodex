@@ -1,3 +1,33 @@
+# PlusCodex v1.1.2
+
+- Codex 사용량 초기화 알림과 자동 깨우기가 조회 때마다 움직이는 초기화 시각에 끌려다니지 않도록 주기를 안정화했습니다. 확인된 초기화 시각 변경과 계정 전환은 알림·깨우기 일정에 함께 반영하며, 앱 재실행 후에도 진행 중인 주기와 재시도 상태를 보존합니다.
+- 자동 깨우기는 초기화 시각 이후 새 사용량을 확인하고 잔여량이 있을 때만 보냅니다. Codex 서버가 요청을 수락한 뒤에만 완료 주기를 기록하고, 이미 처리한 주기의 중복 전송과 응답이 불확실한 연결 오류 뒤 중복 재시도를 막습니다.
+- 메뉴바를 열어 둔 동안에도 사용량과 채팅 작업 상태가 갱신됩니다. 사용량 막대·퍼센트는 자연스럽게 전환되고 계정 변경은 이전 계정의 애니메이션을 이어받지 않습니다. 진행 중 작업이 없으면 작업 목록 영역을 표시하지 않습니다.
+- 채팅 작업마다 원형 알림 버튼으로 완료·실패·승인/질문 알림을 개별적으로 켜거나 끌 수 있습니다. 진행 중 작업은 제목과 알림 아이콘을 가로지르는 애니메이션으로 표시됩니다.
+- Codex 작업 완료 직후 사용량을 다시 확인하되 동시 완료는 묶어 불필요한 조회를 줄입니다. 일시적인 조회 실패에는 최근 10분 이내 사용량을 유지하고, 그보다 오래된 정보는 오류 화면으로 전환합니다.
+- 큰 Codex 대화 상태도 처리하고 IPC 연결 재설정 뒤 작업 구독을 다시 연결해, 작업이 메뉴바에서 누락될 가능성을 줄였습니다.
+
+## English
+
+- Stabilized Codex reset scheduling so notifications and automatic wake do not chase a reset timestamp that slides on each usage refresh. Confirmed schedule corrections and account changes are synchronized, while pending-cycle and retry state survive app relaunch.
+- Automatic wake now requires a fresh post-reset usage check and available quota. A cycle is recorded only after the Codex server accepts the turn; duplicate sends for a completed cycle and retries after ambiguous connection failures are prevented.
+- Usage and chat activity continue updating while the menu bar is open. Percentages and bars transition smoothly, account changes do not inherit the previous account's animation, and the activity section stays hidden when there is no work.
+- Each chat has a circular notification control for muting or enabling its completion, failure, and attention notifications. Active work uses a synchronized shimmer across the title and notification icon.
+- Usage is refreshed shortly after task completion, with simultaneous completions batched to avoid unnecessary requests. Recent usage is retained for up to 10 minutes during transient lookup failures; older data switches to the error screen.
+- Improved handling of large Codex thread snapshots and restored activity subscriptions after IPC connection resets to reduce missing menu-bar activity.
+
+## 설치 및 업데이트
+
+기존 정식 버전은 앱의 업데이트 기능으로 `v1.1.2`를 설치할 수 있습니다. 수동 설치는 [PlusCodex-1.1.2.dmg](https://github.com/hyxx-su/PlusCodex/releases/download/v1.1.2/PlusCodex-1.1.2.dmg)를 열고 PlusCodex를 Applications로 옮기세요. 기존 설정은 유지됩니다.
+
+Apple Silicon Mac과 macOS 14 이상을 지원합니다. 이 배포본은 ad-hoc 서명되어 있으며 Apple Developer ID 서명·공증은 없습니다. PlusCodex는 OpenAI의 공식 앱이 아닙니다.
+
+## 검증 범위 / Validation
+
+전체 자동 검증(`bash test.sh`)이 통과했습니다. DMG 무결성 검사와 Sparkle 업데이트 피드·아카이브의 공개키 서명 및 길이 검증도 통과했습니다. macOS 알림 배너는 알림 권한과 집중 모드 설정의 영향을 받으며, 자동 깨우기는 Codex 로그인·앱 실행·사용량 갱신 상태에 따라 동작합니다.
+
+The full automated suite (`bash test.sh`) passed. DMG integrity and public-key verification of the Sparkle feed/archive signatures and byte lengths also passed. macOS notification banners depend on notification permissions and Focus settings; automatic wake requires Codex sign-in, a running app, and refreshed usage.
+
 # PlusCodex v1.1.1
 
 - Codex에서 완료 작업을 읽음 처리하면 메뉴바의 완료 작업 항목도 함께 사라지도록 읽음 상태 동기화를 보완했습니다. 새 작업이 생기면 다시 표시됩니다.

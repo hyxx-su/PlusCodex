@@ -5,7 +5,10 @@ final class QuotaMenuView: NSView {
     private var quota: Quota?
     private var account: CodexAccount?
     private var updatedAt: Date?
+    private var displayedPercents: [Double] = []
+    private var animationTimer: Timer?
     private(set) var failure: String?
+    let showsFailureScreen: Bool
     let intro: Bool
     let checkingForUpdates: Bool
     let offline: Bool
@@ -14,6 +17,15 @@ final class QuotaMenuView: NSView {
     let showRemaining: Bool
     private var headerIcon: NSImage? { CodexStatusIcon.image(size: 18, offline: false, provider: provider) }
     override var isFlipped: Bool { true }
+
+    /// A transient lookup error must not replace recently confirmed limits with
+    /// an error panel. Bound their lifetime so an old reset window is not shown
+    /// indefinitely if subsequent refreshes also fail.
+    static func canShowPreviousUsage(_ quota: Quota?, updatedAt: Date?, now: Date = Date()) -> Bool {
+        guard let quota, !quota.windows.isEmpty, let updatedAt else { return false }
+        let age = now.timeIntervalSince(updatedAt)
+        return age >= 0 && age <= 10 * 60
+    }
 
     init(quota: Quota?, account: CodexAccount? = nil, updatedAt: Date?, failure: String?, intro: Bool = false,
          checkingForUpdates: Bool = false, offline: Bool = false, missingExecutable: Bool = false,
@@ -25,24 +37,27 @@ final class QuotaMenuView: NSView {
         self.account = account
         self.updatedAt = updatedAt
         self.failure = failure
+        showsFailureScreen = failure != nil && !(provider == .codex
+            && Self.canShowPreviousUsage(quota, updatedAt: updatedAt))
         self.intro = intro
         self.checkingForUpdates = checkingForUpdates
         self.offline = offline
         self.missingExecutable = missingExecutable
         let baseHeight = preservedHeight ?? Self.panelHeight(quota: quota, intro: intro)
-        let height = failure != nil && !offline && !missingExecutable ? max(280, baseHeight) : baseHeight
+        let height = showsFailureScreen && !offline && !missingExecutable ? max(280, baseHeight) : baseHeight
         super.init(frame: NSRect(x: 0, y: 0, width: 300, height: height))
+        displayedPercents = quota?.windows.map { Double($0.displayPercent(showRemaining: showRemaining)) } ?? []
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
         // Only the first opening's intro panel carries the tiny logo loader;
         // after it expires the dashboard renders immediately, even without data.
-        if intro || checkingForUpdates || offline || missingExecutable || failure != nil {
+        if intro || checkingForUpdates || offline || missingExecutable || showsFailureScreen {
             let stateLabel = offline ? "네트워크 연결 없음" : missingExecutable ? "Codex를 찾을 수 없음"
-                : failure != nil ? "사용량 조회 실패"
+                : showsFailureScreen ? "사용량 조회 실패"
                 : checkingForUpdates ? "업데이트 확인 중. 최신 버전인지 확인하고 있어요." : "사용량을 불러오는 중"
             setAccessibilityLabel(L10n.text(stateLabel) + (failure.map { ". " + $0 } ?? ""))
             addSubview(QuotaLoadingView(frame: bounds,
-                                       logoSize: checkingForUpdates || offline || missingExecutable || failure != nil ? 40 : 28,
+                                       logoSize: checkingForUpdates || offline || missingExecutable || showsFailureScreen ? 40 : 28,
                                        checkingForUpdates: checkingForUpdates, offline: offline,
                                        missingExecutable: missingExecutable, failure: failure, provider: provider))
         } else {
@@ -54,14 +69,21 @@ final class QuotaMenuView: NSView {
     }
 
     required init?(coder: NSCoder) { nil }
+    var testHookDisplayedPercents: [Double] { displayedPercents }
 
-    func update(quota: Quota?, account: CodexAccount?, updatedAt: Date?, failure: String?) {
+    func update(quota: Quota?, account: CodexAccount?, updatedAt: Date?, failure: String?, preserveHeight: Bool = false) {
+        let target = quota?.windows.map { Double($0.displayPercent(showRemaining: showRemaining)) } ?? []
+        let sameAccount = self.account?.email == account?.email
+        if !sameAccount || target != self.quota?.windows.map({ Double($0.displayPercent(showRemaining: showRemaining)) }) {
+            animatePercents(to: target, allowed: sameAccount)
+        }
         self.quota = quota
         self.account = account
         self.updatedAt = updatedAt
         self.failure = failure
-        guard !intro && !checkingForUpdates && !offline && !missingExecutable && failure == nil else { return }
-        let height = Self.panelHeight(quota: quota, intro: false)
+        guard !intro && !checkingForUpdates && !offline && !missingExecutable && !showsFailureScreen else { return }
+        let naturalHeight = Self.panelHeight(quota: quota, intro: false)
+        let height = preserveHeight ? max(bounds.height, naturalHeight) : naturalHeight
         if bounds.height != height {
             setFrameSize(NSSize(width: 300, height: height))
             needsDisplay = true
@@ -74,6 +96,38 @@ final class QuotaMenuView: NSView {
         setNeedsDisplay(NSRect(x: 12, y: 62, width: 276, height: max(62, bounds.height - 62)))
     }
 
+    private func animatePercents(to target: [Double], allowed: Bool) {
+        animationTimer?.invalidate()
+        animationTimer = nil
+        guard allowed, window != nil, displayedPercents.count == target.count,
+              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            displayedPercents = target
+            return
+        }
+        let start = displayedPercents
+        let began = ProcessInfo.processInfo.systemUptime
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] timer in
+            guard let self, self.window != nil else { timer.invalidate(); return }
+            let t = min(1, (ProcessInfo.processInfo.systemUptime - began) / 0.25)
+            let eased = 1 - pow(1 - t, 3)
+            self.displayedPercents = zip(start, target).map { $0 + ($1 - $0) * eased }
+            self.needsDisplay = true
+            if t >= 1 { timer.invalidate(); self.animationTimer = nil }
+        }
+        animationTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        RunLoop.main.add(timer, forMode: .eventTracking)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil {
+            animationTimer?.invalidate()
+            animationTimer = nil
+            displayedPercents = quota?.windows.map { Double($0.displayPercent(showRemaining: showRemaining)) } ?? []
+        }
+    }
+
     /// Intro state: `until` is the moment the tiny logo-only panel reverts.
     static func introVisible(until deadline: Date?, now: Date) -> Bool {
         guard let deadline else { return false }
@@ -82,7 +136,7 @@ final class QuotaMenuView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        guard !intro && !checkingForUpdates && !offline && !missingExecutable && failure == nil else { return }
+        guard !intro && !checkingForUpdates && !offline && !missingExecutable && !showsFailureScreen else { return }
         if let headerIcon {
             let tintedIcon = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
                 headerIcon.draw(in: rect)
@@ -113,7 +167,8 @@ final class QuotaMenuView: NSView {
         } else {
             for (index, window) in windows.enumerated() {
                 card(window, title: provider == .codex ? window.displayLabel(planType: account?.planType,
-                     isPrimary: index == 0 && quota?.primary != nil) : window.label, y: 62 + CGFloat(index) * 92)
+                     isPrimary: index == 0 && quota?.primary != nil) : window.label, y: 62 + CGFloat(index) * 92,
+                     displayedPercent: displayedPercents.indices.contains(index) ? displayedPercents[index] : nil)
             }
         }
     }
@@ -124,7 +179,7 @@ final class QuotaMenuView: NSView {
         return count == 0 ? 124 : 66 + CGFloat(count) * 92
     }
 
-    private func card(_ window: QuotaWindow?, title: String, y: CGFloat) {
+    private func card(_ window: QuotaWindow?, title: String, y: CGFloat, displayedPercent: Double?) {
         let rect = NSRect(x: 12, y: y, width: 276, height: 84)
         NSColor.labelColor.withAlphaComponent(0.025).setFill()
         NSBezierPath(roundedRect: rect, xRadius: 14, yRadius: 14).fill()
@@ -143,7 +198,7 @@ final class QuotaMenuView: NSView {
         let track = NSRect(x: 24, y: y + 38, width: 252, height: 6)
         NSColor.labelColor.withAlphaComponent(0.08).setFill()
         NSBezierPath(roundedRect: track, xRadius: 4.5, yRadius: 4.5).fill()
-        if let remaining, remaining > 0 {
+        if let remaining = displayedPercent, remaining > 0 {
             let fill = NSRect(x: track.minX, y: track.minY,
                               width: track.width * CGFloat(remaining) / 100, height: track.height)
             NSGraphicsContext.saveGraphicsState()

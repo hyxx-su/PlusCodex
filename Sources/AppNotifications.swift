@@ -108,6 +108,7 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func completed(_ activity: ThreadActivity) {
+        guard ThreadNotificationPreferences.shared.enabled(activity.id) else { return }
         guard notificationSettings.isEnabled(.completion) else { return }
         let content = UNMutableNotificationContent()
         content.title = L10n.text("Codex 작업 완료")
@@ -119,6 +120,7 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func failed(_ activity: ThreadActivity) {
+        guard ThreadNotificationPreferences.shared.enabled(activity.id) else { return }
         guard notificationSettings.isEnabled(.failure) else { return }
         let content = UNMutableNotificationContent()
         content.title = L10n.text("Codex 작업 실패")
@@ -131,6 +133,7 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func attentionNeeded(_ event: ThreadAttentionEvent) {
+        guard ThreadNotificationPreferences.shared.enabled(event.activity.id) else { return }
         let kind: NotificationKind
         let titleKey: String
         let bodyKey: String

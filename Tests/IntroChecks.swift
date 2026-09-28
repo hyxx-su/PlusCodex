@@ -58,6 +58,21 @@ import AppKit
             precondition(delegate.testHookDashboardView !== trackedView,
                          "The latest state must appear after tracking ends")
         }
+        let cachedDelegate = AppDelegate()
+        let cachedWindow = QuotaWindow(usedPercent: 10, windowDurationMins: 300, resetsAt: nil)
+        cachedDelegate.testHookSetQuota(Quota(primary: cachedWindow, secondary: nil))
+        cachedDelegate.testHookSetUpdatedAt(Date())
+        cachedDelegate.testHookRenderForMenu()
+        cachedDelegate.testHookSetActivities([ThreadActivity(id: UUID().uuidString, title: "작업",
+            runtime: "active", unread: false, updatedAt: 0)])
+        cachedDelegate.testHookSetFailure("조회 시간 초과")
+        precondition(cachedDelegate.testHookMenuItemCount == 5,
+                     "최근 사용량 조회가 실패해도 진행 중인 작업을 숨기면 안 됩니다")
+        precondition((cachedDelegate.testHookDashboardView as? QuotaMenuView)?.showsFailureScreen == false)
+        cachedDelegate.testHookSetUpdatedAt(Date().addingTimeInterval(-11 * 60))
+        cachedDelegate.testHookRenderForMenu()
+        precondition(cachedDelegate.testHookMenuItemCount == 1,
+                     "오래된 조회값은 전체 오류 화면으로 전환해야 합니다")
         precondition(CodexStatusIcon.image(size: 18, offline: true)?.isTemplate == false)
         precondition(CodexStatusIcon.image(size: 18, offline: false)?.isTemplate == true)
         precondition(CodexStatusIcon.image(size: 18, offline: true)?.size == NSSize(width: 18, height: 18))

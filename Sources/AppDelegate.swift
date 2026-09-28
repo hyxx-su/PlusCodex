@@ -7,9 +7,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var timer: Timer?
     private var fetching = false
     private var refreshPending = false
+    private var completionRefreshTimer: Timer?
+    private var lastRefreshStartedAt = Date.distantPast
     private var refreshGeneration = 0
     private var codexAuthRevision = CodexAuthRevision.current()
     private var quota: Quota?
+    private var schedulingQuota: Quota?
+    private let resetSchedule = CodexResetSchedule()
     private var account: CodexAccount?
     private var updatedAt: Date?
     private var failure: String?
@@ -40,7 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                           wakeSettings: wakeSettings)
         controller.onWakeSettingsChanged = { [weak self] in
             guard let self else { return }
-            self.wakeScheduler.tick(quota: self.quota, offline: self.offline)
+            self.wakeScheduler.tick(quota: self.schedulingQuota, offline: self.offline)
         }
         return controller
     }()
@@ -53,6 +57,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NotificationCenter.default.addObserver(self, selector: #selector(threadNotificationChanged),
+            name: .threadNotificationPreferenceChanged, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(languageDidChange),
                                                name: .plusCodexLanguageDidChange, object: nil)
         let duplicates = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "local.codexquota.menubar")
@@ -123,6 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.readReceipts.markCompleted(activity)
             self.notifications.completed(activity)
             self.updateActivityView()
+            self.scheduleCompletionRefresh()
         }
         activityMonitor?.onRead = { [weak self] activity in
             guard let self else { return }
@@ -136,7 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.checkCodexLoginChange()
             self?.requestRefresh(retryWhenBusy: false)
             self?.extraProviders.forEach { $0.synchronize() }
-            if let self { self.wakeScheduler.tick(quota: self.quota, offline: self.offline) }
+            if let self { self.wakeScheduler.tick(quota: self.schedulingQuota, offline: self.offline) }
         }
         if let timer { RunLoop.main.add(timer, forMode: .common) }
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(wokeFromSleep),
@@ -158,6 +165,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let revision = CodexAuthRevision.current()
         guard revision != codexAuthRevision else { return }
         codexAuthRevision = revision
+        schedulingQuota = nil
+        resetSchedule.invalidateAccount()
         quota = nil
         account = nil
         updatedAt = nil
@@ -168,10 +177,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func wokeFromSleep() {
         refresh()
-        wakeScheduler.tick(quota: quota, offline: offline)
+        wakeScheduler.tick(quota: schedulingQuota, offline: offline)
     }
 
     @objc private func refresh() { requestRefresh(retryWhenBusy: true) }
+
+    private func scheduleCompletionRefresh() {
+        // Batch simultaneous completions without delaying indefinitely under load.
+        guard completionRefreshTimer == nil else { return }
+        let delay = max(2, 10 - Date().timeIntervalSince(lastRefreshStartedAt))
+        let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+            self?.completionRefreshTimer = nil
+            self?.requestRefresh(retryWhenBusy: true)
+        }
+        completionRefreshTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        RunLoop.main.add(timer, forMode: .eventTracking)
+    }
 
     private func requestRefresh(retryWhenBusy: Bool) {
         guard providerSettings.enabled(.codex), !offline else { return }
@@ -180,6 +202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         let requestRevision = CodexAuthRevision.current()
+        lastRefreshStartedAt = Date()
         codexAuthRevision = requestRevision
         refreshGeneration += 1
         let generation = refreshGeneration
@@ -204,6 +227,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 let authChanged = CodexAuthRevision.current() != requestRevision
                 if authChanged {
                     self.codexAuthRevision = CodexAuthRevision.current()
+                    self.schedulingQuota = nil
+                    self.resetSchedule.invalidateAccount()
                     self.quota = nil
                     self.account = nil
                     self.updatedAt = nil
@@ -212,17 +237,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 } else if self.providerSettings.enabled(.codex) {
                     switch result {
                 case .success(let snapshot):
-                    self.notifications.scheduleResets(snapshot.quota, account: snapshot.account)
                     self.notifications.checkThresholds(snapshot.quota, account: snapshot.account)
                     self.quota = snapshot.quota
                     self.account = snapshot.account
                     let refreshedAt = Date()
+                    let scheduledQuota = self.resetSchedule.update(snapshot.quota, account: snapshot.account,
+                                                                   now: refreshedAt)
+                    self.schedulingQuota = self.resetSchedule.resolvedAccount == nil ? nil : scheduledQuota
                     self.updatedAt = refreshedAt
                     self.failure = nil
                     self.codexExecutableMissing = false
                     self.settingsWindow.update(.codex, status: snapshot.account?.email ?? L10n.text("연결됨 · 사용량 조회 완료"))
-                    self.wakeScheduler.tick(quota: self.quota, offline: self.offline,
-                                            quotaFetchedAt: refreshedAt, now: refreshedAt)
+                    if let identity = self.resetSchedule.resolvedAccount {
+                        self.wakeSettings.selectAccount(identity)
+                        self.notifications.scheduleResets(scheduledQuota,
+                            account: CodexAccount(email: identity, planType: snapshot.account?.planType))
+                        self.wakeScheduler.tick(quota: scheduledQuota, offline: self.offline,
+                                                quotaFetchedAt: refreshedAt, now: refreshedAt)
+                    }
                 case .failure(let error):
                     self.failure = error.localizedDescription
                     self.codexExecutableMissing = (error as? QuotaError)?.isMissingExecutable == true
@@ -240,14 +272,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func render(allowingTrackedUpdateTransition: Bool = false) {
-        // Replacing or hiding menu items while AppKit is tracking the popup can dismiss it.
-        guard !menuTracking || allowingTrackedUpdateTransition else { return }
         statusWindow.update(quota: quota, fetching: fetching, failure: failure)
         let primary = quota?.primary ?? quota?.secondary
-        let valid = failure == nil
-        let unavailable = offline || codexExecutableMissing || failure != nil
+        let showingPreviousUsage = failure != nil
+            && QuotaMenuView.canShowPreviousUsage(quota, updatedAt: updatedAt)
+        let failureScreen = failure != nil && !showingPreviousUsage
+        let unavailable = offline || codexExecutableMissing || failureScreen
         let percent = unavailable ? ""
-            : valid ? primary.map { "\($0.displayPercent(showRemaining: providerSettings.showRemaining(.codex)))%" } ?? (quota == nil ? "…" : "—") : "--%"
+            : primary.map { "\($0.displayPercent(showRemaining: providerSettings.showRemaining(.codex)))%" } ?? (quota == nil ? "…" : "—")
         if let button = item?.button {
             button.image = CodexStatusIcon.image(size: 18, offline: unavailable)
             button.imagePosition = unavailable ? .imageOnly : .imageLeading
@@ -257,14 +289,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             ])
             let unavailableTitle = L10n.text(offline ? "네트워크 연결 없음"
                 : codexExecutableMissing ? "Codex를 찾을 수 없음" : "사용량 조회 실패")
-            button.setAccessibilityLabel(unavailable ? unavailableTitle : L10n.text("Codex 남은 사용량 ") + percent)
-            button.toolTip = unavailable ? unavailableTitle : L10n.text("Codex · %@ 잔여 %@", primary?.displayLabel(planType: account?.planType, isPrimary: quota?.primary != nil) ?? L10n.text("사용 한도"), percent)
+            let usageAccessibility = L10n.text("Codex 남은 사용량 ") + percent
+            button.setAccessibilityLabel(unavailable ? unavailableTitle
+                : showingPreviousUsage ? L10n.text("이전 조회") + " · " + usageAccessibility : usageAccessibility)
+            let usageTitle = L10n.text("Codex · %@ 잔여 %@", primary?.displayLabel(planType: account?.planType, isPrimary: quota?.primary != nil) ?? L10n.text("사용 한도"), percent)
+            button.toolTip = unavailable ? unavailableTitle
+                : showingPreviousUsage ? L10n.text("이전 조회") + " · " + usageTitle : usageTitle
+        }
+        // While tracking, mutate existing content only. Native menu restructuring
+        // is deferred to close; update-check transitions keep their existing path.
+        if menuTracking && !allowingTrackedUpdateTransition {
+            if let panel = dashboardItem?.view as? QuotaMenuView {
+                panel.update(quota: quota, account: account, updatedAt: updatedAt,
+                             failure: failure, preserveHeight: true)
+            }
+            updateActivityView()
+            return
         }
         // Measure AppKit's native row heights before hiding them; the status panel
         // then occupies exactly the same menu content area, including action rows.
         let intro = false
         let oldPanel = dashboardItem?.view as? QuotaMenuView
-        let stateScreen = (offline || codexExecutableMissing || failure != nil || checkingForUpdates)
+        let stateScreen = (offline || codexExecutableMissing || failureScreen || checkingForUpdates)
             && builtItems != nil
         if stateScreen, stateScreenHeight == nil, let built = builtItems, let oldPanel {
             let probe = NSMenu()
@@ -279,6 +325,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let panel = dashboardItem?.view as? QuotaMenuView, panel.intro == intro,
            panel.checkingForUpdates == checkingForUpdates, panel.offline == offline,
            panel.missingExecutable == codexExecutableMissing,
+           panel.showsFailureScreen == failureScreen,
            panel.failure == failure,
            panel.showRemaining == providerSettings.showRemaining(.codex) {
             panel.update(quota: quota, account: account, updatedAt: updatedAt, failure: failure)
@@ -443,23 +490,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .filter { !$0.isHidden }.count
     }
     func testHookSetQuota(_ value: Quota?) { quota = value }
+    func testHookSetMenuTracking(_ value: Bool) { menuTracking = value }
+    func testHookSetUpdatedAt(_ value: Date?) { updatedAt = value }
 
     private func updateActivityView() {
-        guard !menuTracking else { return }
         if stateScreenHeight != nil {
-            activityItem?.isHidden = true
+            if !menuTracking { activityItem?.isHidden = true }
             return
         }
         let visible = readReceipts.visibleRows(activities)
-        activityItem?.view = ThreadActivityView(activities: visible) { [weak self] opened in
-            guard let self else { return }
-            self.readReceipts.acknowledge(opened)
-            self.updateActivityView()
+        if let view = activityItem?.view as? ThreadActivityView {
+            view.update(activities: visible, preserveHeight: menuTracking)
+        } else if !menuTracking {
+            activityItem?.view = ThreadActivityView(activities: visible) { [weak self] opened in
+                guard let self else { return }
+                self.readReceipts.acknowledge(opened)
+                self.updateActivityView()
+            }
         }
-        activityItem?.isHidden = visible.isEmpty
+        if !menuTracking { activityItem?.isHidden = false }
     }
 
     func applicationWillTerminate(_ notification: Notification) { networkMonitor.cancel() }
+    @objc private func threadNotificationChanged() { updateActivityView() }
 
     func testHookSetPresentation(offline: Bool, checking: Bool) {
         self.offline = offline
