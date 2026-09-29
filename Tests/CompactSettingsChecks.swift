@@ -26,7 +26,9 @@ struct CompactSettingsChecks {
         }
         let switches = pages.flatMap(descendants).compactMap { $0 as? NSSwitch }
         let providers = switches.filter { AIProvider(rawValue: $0.identifier?.rawValue ?? "") != nil }
-        assert(providers.count == 3 && providers.allSatisfy { $0.state == .on })
+        assert(providers.count == 3)
+        assert(providers.filter { $0.identifier?.rawValue != "codex" }.allSatisfy { $0.state == .off },
+               "Optional providers must not start enabled before usage verification")
         assert(switches.allSatisfy { $0.frame.width <= 54 })
         assert(pages.filter { !$0.isHidden }.count == 1)
         print("PASS: compact window, page bounds, switches, initial navigation")

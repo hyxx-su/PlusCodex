@@ -18,9 +18,11 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
     private var lastResetSnapshot: (quota: Quota, account: CodexAccount?)?
     private var resetTargets: [String: ResetTarget] = [:]
     private var resetSyncInProgress = false
+    private let cycleLedger = ResetCycleLedger()
     private var resetSyncRequested = false
     private var pendingUpdateBuilds = Set<String>()
     var onUpdateNotificationOpened: (() -> Void)?
+    var isAttentionRequestCurrent: ((String, String?) -> Bool)?
 
     init(settings: NotificationSettings = NotificationSettings()) {
         notificationSettings = settings
@@ -42,7 +44,7 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
                 content.sound = self.notificationSettings.sound
                 content.userInfo = ["updateAvailable": true]
                 // Persist only after successful submission; failures may retry on the next check.
-                self.center.add(UNNotificationRequest(identifier: "update-\(build)", content: content, trigger: nil)) { error in
+                NotificationDelivery.shared.add(UNNotificationRequest(identifier: "update-\(build)", content: content, trigger: nil), duration: self.notificationSettings.notificationPlaybackDuration) { error in
                     DispatchQueue.main.async {
                         self.pendingUpdateBuilds.remove(build)
                         if let error {
@@ -76,7 +78,7 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
                         ? L10n.text("남은 사용량이 0%입니다. 초기화 시간을 확인하세요.")
                         : L10n.text("사용량이 얼마 남지 않았습니다. PlusCodex에서 현재 잔여량과 초기화 시간을 확인하세요.")
                     content.sound = self.notificationSettings.sound
-                    self.center.add(UNNotificationRequest(identifier: "quota-\(UUID().uuidString)", content: content, trigger: nil)) { error in
+                    NotificationDelivery.shared.add(UNNotificationRequest(identifier: "quota-\(UUID().uuidString)", content: content, trigger: nil), duration: self.notificationSettings.notificationPlaybackDuration) { error in
                         if let error {
                             NSLog("PlusCodex quota notification: %@", error.localizedDescription)
                             DispatchQueue.main.async {
@@ -108,6 +110,7 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func completed(_ activity: ThreadActivity) {
+        guard activity.id != CodexWakeSettings().threadID else { return }
         guard ThreadNotificationPreferences.shared.enabled(activity.id) else { return }
         guard notificationSettings.isEnabled(.completion) else { return }
         let content = UNMutableNotificationContent()
@@ -163,7 +166,8 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
             ? L10n.text(bodyKey, L10n.text("Codex 채팅"))
             : L10n.text(bodyKey, activity.title)
         content.sound = notificationSettings.sound
-        content.userInfo = ["threadID": activity.id]
+        content.userInfo = ["threadID": activity.id, "notificationKind": kind.rawValue]
+        if let identity = event.requestIdentity { content.userInfo["requestIdentity"] = identity }
         submit(UNNotificationRequest(identifier: "attention-\(activity.id)-\(UUID().uuidString)",
                                      content: content, trigger: nil))
     }
@@ -185,6 +189,12 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
                     sound: sound)
             }
         }
+        reconcileResets()
+    }
+
+    func invalidateResetAccount() {
+        lastResetSnapshot = nil
+        resetTargets.removeAll()
         reconcileResets()
     }
 
@@ -228,16 +238,29 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
             return
         }
         resetSyncInProgress = true
+        let snapshotStartedAt = Date()
         center.getPendingNotificationRequests { [weak self] requests in
             DispatchQueue.main.async {
                 guard let self else { return }
                 let pending = requests.filter { Self.resetName(for: $0.identifier) != nil }
+                NotificationDelivery.shared.remember(requests, defaultDuration: self.notificationSettings.notificationPlaybackDuration,
+                                                     snapshotStartedAt: snapshotStartedAt)
                 let pendingByID = Dictionary(uniqueKeysWithValues: pending.map { ($0.identifier, $0) })
                 let group = DispatchGroup()
                 let now = Date().timeIntervalSince1970
                 for request in pending {
                     guard let name = Self.resetName(for: request.identifier),
+                          let account = request.content.userInfo["resetAccount"] as? String,
+                          let deadline = request.content.userInfo["resetAt"] as? Double,
+                          let target = self.resetTargets["reset-\(name)"], target.account == account,
+                          let duration = target.windowDuration else { continue }
+                    self.cycleLedger.observeExisting(account: account, name: name, deadline: deadline, duration: duration)
+                }
+                for request in pending {
+                    guard let name = Self.resetName(for: request.identifier),
                           let target = self.resetTargets["reset-\(name)"] else {
+                        self.cancelLedgerReservation(request, now: now)
+                        NotificationDelivery.shared.cancel(request.identifier)
                         self.center.removePendingNotificationRequests(withIdentifiers: [request.identifier])
                         continue
                     }
@@ -255,18 +278,35 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
                     let pendingAt = request.content.userInfo["resetAt"] as? Double
                         ?? (request.trigger as? UNTimeIntervalNotificationTrigger)?
                             .nextTriggerDate()?.timeIntervalSince1970
+                    if let pendingAt, pendingAt <= now,
+                       request.content.userInfo["resetAccount"] as? String == target.account,
+                       !self.cycleLedger.permits(account: target.account, name: name, deadline: target.timestamp, now: now) {
+                        // Preserve an already-due OS request rather than replacing
+                        // it with a second notification for a shifted deadline.
+                        continue
+                    }
                     if Self.isPreviousCycleDue(pendingAt: pendingAt, latestAt: target.timestamp,
                         now: now, windowDuration: target.windowDuration),
                        request.content.userInfo["resetAccount"] as? String == target.account {
                         continue
                     }
+                    NotificationDelivery.shared.cancel(request.identifier)
+                    self.cancelLedgerReservation(request, now: now)
                     self.center.removePendingNotificationRequests(withIdentifiers: [request.identifier])
                 }
                 for name in Self.resetNames {
                     guard let target = self.resetTargets["reset-\(name)"], target.timestamp > now else { continue }
                     let id = Self.resetIdentifier(name: name, timestamp: target.timestamp)
+                    guard self.cycleLedger.permits(account: target.account, name: name,
+                                                   deadline: target.timestamp, now: now) else { continue }
                     if Self.resetRequestMatches(pendingByID[id], timestamp: target.timestamp,
-                        account: target.account, label: target.label, sound: target.sound) { continue }
+                        account: target.account, label: target.label, sound: target.sound) {
+                        if let duration = target.windowDuration {
+                            self.cycleLedger.registered(account: target.account, name: name,
+                                                        deadline: target.timestamp, duration: duration)
+                        }
+                        continue
+                    }
                     let content = UNMutableNotificationContent()
                     content.title = L10n.text("Codex %@ 초기화 시간", target.label)
                     content.body = L10n.text("사용량 초기화 예정 시간이 되었습니다. PlusCodex에서 남은 사용량을 확인하세요.")
@@ -277,10 +317,16 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
                     group.enter()
                     // A cycle-specific ID lets an overdue OS request survive while
                     // the next cycle is booked. The same ID replaces a stale copy.
-                    self.center.add(UNNotificationRequest(identifier: id, content: content,
-                        trigger: UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false))) { error in
-                        if let error { NSLog("PlusCodex reset notification failed: %@", error.localizedDescription) }
-                        group.leave()
+                    NotificationDelivery.shared.add(UNNotificationRequest(identifier: id, content: content,
+                        trigger: UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)), duration: self.notificationSettings.notificationPlaybackDuration) { error in
+                        DispatchQueue.main.async {
+                            if let error { NSLog("PlusCodex reset notification failed: %@", error.localizedDescription) }
+                            else if let duration = target.windowDuration {
+                                self.cycleLedger.registered(account: target.account, name: name,
+                                                            deadline: target.timestamp, duration: duration)
+                            }
+                            group.leave()
+                        }
                     }
                 }
                 group.notify(queue: .main) {
@@ -302,17 +348,44 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    private func cancelLedgerReservation(_ request: UNNotificationRequest, now: Double) {
+        guard let name = Self.resetName(for: request.identifier),
+              let account = request.content.userInfo["resetAccount"] as? String,
+              let deadline = request.content.userInfo["resetAt"] as? Double else { return }
+        cycleLedger.cancelFuture(account: account, name: name, deadline: deadline, now: now)
+    }
+
     private func cancelPendingResetsIfDisabled() {
         center.getPendingNotificationRequests { [weak self] requests in
+            DispatchQueue.main.async {
             guard let self, !self.notificationSettings.isEnabled(.reset) else { return }
+            requests.forEach { self.cancelLedgerReservation($0, now: Date().timeIntervalSince1970) }
             let ids = requests.map(\.identifier).filter { Self.resetName(for: $0) != nil }
+            ids.forEach { NotificationDelivery.shared.cancel($0) }
             self.center.removePendingNotificationRequests(withIdentifiers: ids)
+            }
         }
     }
 
-    private func submit(_ request: UNNotificationRequest) {
-        center.add(request) { error in
-            if let error { NSLog("PlusCodex notification failed: %@", error.localizedDescription) }
+    private func submit(_ request: UNNotificationRequest, attempt: Int = 0) {
+        NotificationDelivery.shared.add(request, duration: notificationSettings.notificationPlaybackDuration) { [weak self] error in
+            guard let error else { return }
+            NSLog("PlusCodex notification failed: %@", error.localizedDescription)
+            guard attempt < 2 else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double((attempt + 1) * 5)) { [weak self] in
+                guard let self, self.notificationSettings.anyEnabled else { return }
+                let kind: NotificationKind = request.identifier.hasPrefix("completion-") ? .completion
+                    : request.identifier.hasPrefix("failure-") ? .failure
+                    : NotificationKind(rawValue: request.content.userInfo["notificationKind"] as? String ?? "") ?? .approval
+                guard self.notificationSettings.isEnabled(kind) else { return }
+                if request.identifier.hasPrefix("attention-") {
+                    guard let id = request.content.userInfo["threadID"] as? String,
+                          self.isAttentionRequestCurrent?(id, request.content.userInfo["requestIdentity"] as? String) == true else { return }
+                }
+                if let id = request.content.userInfo["threadID"] as? String,
+                   !ThreadNotificationPreferences.shared.enabled(id) { return }
+                self.submit(request, attempt: attempt + 1)
+            }
         }
     }
 

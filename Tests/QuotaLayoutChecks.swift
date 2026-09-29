@@ -40,7 +40,8 @@ import AppKit
                                     failure: "조회 시간 초과")
         precondition(expired.showsFailureScreen)
         let claude = QuotaMenuView(quota: cached, updatedAt: now, failure: "조회 시간 초과", provider: .claude)
-        precondition(claude.showsFailureScreen, "Codex 이외 서비스의 오류 표시 방식은 그대로 둡니다")
+        precondition(!claude.showsFailureScreen && claude.bounds.height == 250,
+                     "Recent Claude usage is retained during a transient lookup failure")
         print("PASS: missing windows, real limits on all plans, dynamic height")
     }
 }

@@ -7,6 +7,7 @@ import AppKit
             Quota(primary: QuotaWindow(usedPercent: used, windowDurationMins: 300, resetsAt: nil), secondary: nil)
         }
         let delegate = AppDelegate()
+        delegate.testHookSetActivities([], connected: true)
         delegate.testHookSetQuota(quota(10))
         delegate.testHookRenderForMenu()
         let menu = delegate.testHookMenu!

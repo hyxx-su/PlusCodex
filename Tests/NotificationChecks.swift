@@ -4,6 +4,41 @@ import UserNotifications
 @main struct NotificationChecks {
     static func main() {
         var tracker = CompletionTracker()
+        var reconnectTracker = CompletionTracker()
+        var longTask = ThreadActivity(id: "long", title: "Long task", runtime: "active", unread: false, updatedAt: 1)
+        longTask.latestTurn = ThreadTurnState(key: "long", value: ["turnId": "long", "status": "inProgress", "turnStartedAtMs": 1])
+        precondition(reconnectTracker.update([longTask], connected: true).isEmpty)
+        let suite = "PlusCodex.completion-relaunch.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var persisted = CompletionTracker(defaults: defaults)
+        precondition(persisted.update([longTask], connected: true).isEmpty)
+        precondition(reconnectTracker.update([], connected: false).isEmpty)
+        precondition(reconnectTracker.update([], connected: true, retainingIDs: ["long"]).isEmpty)
+        longTask.runtime = "idle"
+        longTask.latestTurn?.status = "completed"
+        longTask.unread = true
+        var relaunched = CompletionTracker(defaults: defaults)
+        precondition(relaunched.update([longTask], connected: true).count == 1)
+        var relaunchedAgain = CompletionTracker(defaults: defaults)
+        precondition(relaunchedAgain.update([longTask], connected: true).isEmpty,
+                     "The same completed turn must not notify after relaunch")
+        precondition(reconnectTracker.update([longTask], connected: true).count == 1)
+        precondition(reconnectTracker.update([longTask], connected: true).isEmpty)
+        let recentStart = Date().addingTimeInterval(1)
+        var missed = ThreadActivity(id: "missed", title: "Late snapshot", runtime: "idle",
+                                   unread: false, updatedAt: recentStart.timeIntervalSince1970)
+        missed.latestTurn = ThreadTurnState(key: "missed", value: [
+            "turnId": "missed", "status": "completed",
+            "turnStartedAtMs": recentStart.timeIntervalSince1970 * 1000
+        ])
+        precondition(tracker.update([missed], connected: true,
+            now: recentStart.addingTimeInterval(3600)).isEmpty,
+            "A first snapshot of an hour-old completion must not notify")
+        var recentTracker = CompletionTracker()
+        precondition(recentTracker.update([missed], connected: true,
+            now: recentStart.addingTimeInterval(20)).count == 1,
+            "Recently started short turns may notify even if running was missed")
         let id = UUID().uuidString
         var row = ThreadActivity(id: id, title: "작업", runtime: "idle", unread: true, updatedAt: 0)
         precondition(tracker.update([row], connected: true).isEmpty, "Do not notify historic completions")
@@ -94,6 +129,8 @@ import UserNotifications
         waiting.pendingRequests = pending
         let events = attention.update([waiting], connected: true, now: 0)
         precondition(events.count == 4)
+        precondition(Set(events.compactMap(\.requestIdentity)) == Set(pending.map(\.identity)),
+                     "Retry validation must retain the exact pending request identities")
         precondition(attention.update([waiting], connected: true, now: 1).isEmpty)
         precondition(attention.update([], connected: false, now: 2).isEmpty)
         precondition(attention.update([waiting], connected: true, now: 3).isEmpty,

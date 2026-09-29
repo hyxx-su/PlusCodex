@@ -32,7 +32,7 @@ import AppKit
                      "Missing usage data must not be mistaken for a confirmed Free plan")
         precondition(ClaudeAvailability.State.notInstalled.actionURL?.absoluteString == "https://code.claude.com/docs/en/setup")
         precondition(ClaudeAvailability.State.confirmedFree.actionURL?.absoluteString == "https://claude.ai/upgrade")
-        precondition(ClaudeAvailability.State.usageUnavailable.actionURL?.absoluteString == "https://claude.ai/upgrade")
+        precondition(ClaudeAvailability.State.usageUnavailable.actionURL?.absoluteString == "https://claude.ai/login")
         precondition(GrokAvailability.classify(cliInstalled: false, authenticated: true) == .notInstalled)
         precondition(GrokAvailability.classify(cliInstalled: true, authenticated: false) == .notAuthenticated)
         precondition(GrokAvailability.classify(cliInstalled: true, authenticated: true) == .readyToCheck)
@@ -41,6 +41,7 @@ import AppKit
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = ProviderSettings(defaults: defaults)
+        let initialGeneration = settings.generation(.claude)
         precondition(settings.enabled(.codex) && !settings.enabled(.claude) && !settings.enabled(.grok))
         var changes = 0
         settings.onChange = { changes += 1 }
@@ -50,6 +51,8 @@ import AppKit
         precondition(ProviderSettings(defaults: defaults).enabled(.claude))
         settings.setEnabled(false, for: .claude)
         precondition(changes == 2)
+        precondition(settings.generation(.claude) == initialGeneration + 2,
+                     "An off/on transition must invalidate an in-flight request even if enabled again")
         precondition(!ProviderSettings(defaults: defaults).enabled(.claude))
         settings.setEnabled(true, for: .grok)
         precondition(changes == 3 && ProviderSettings(defaults: defaults).enabled(.grok))
@@ -180,13 +183,17 @@ import AppKit
 
         validationSettings.setEnabled(true, for: .grok)
         var throttledFetches = 0
+        var throttleReported = false
         let throttledController = ProviderStatusController(provider: .grok, settings: validationSettings,
             grokAvailability: { .readyToCheck }, fetchUsage: { _ in
                 throttledFetches += 1
                 throw UsageFailure.throttled(Date().addingTimeInterval(60))
             })
+        throttledController.onState = { throttleReported = $0 == UsageFailure.throttled(Date()).localizedDescription }
         throttledController.synchronize()
-        waitFor { !validationSettings.enabled(.grok) }
+        waitFor { throttleReported }
+        precondition(validationSettings.enabled(.grok), "A transient throttle must not disable the provider")
+        validationSettings.setEnabled(false, for: .grok)
         validationSettings.setEnabled(true, for: .grok)
         throttledController.synchronize()
         precondition(throttledFetches == 1, "Retry-After must not be bypassed by toggling")
@@ -238,7 +245,7 @@ import AppKit
         availability = .confirmedFree
         gatingWindow.synchronize()
         precondition(descendants(gatingWindow.window!.contentView!).compactMap { $0 as? NSTextField }
-            .contains { $0.stringValue == "클로드 코드 구독을 활성화하세요." })
+            .contains { $0.stringValue == "플랜 필요" })
         claudeToggle.performClick(nil)
         precondition(!gatingSettings.enabled(.claude) && claudeToggle.state == .off)
         precondition(openedURLs.last == ClaudeAvailability.State.confirmedFree.actionURL)
@@ -261,7 +268,9 @@ import AppKit
         gatingSettings.setEnabled(true, for: .claude)
         availability = .confirmedFree
         gatedController.synchronize()
-        precondition(!gatingSettings.enabled(.claude) && guidance == "클로드 코드 구독을 활성화하세요.")
+        precondition(!gatingSettings.enabled(.claude) && guidance == "플랜 필요")
+        precondition(ClaudeAvailability.State.usageUnavailable.guidance == "확인 불가")
+        precondition(GrokAvailability.State.notAuthenticated.guidance == "로그인 필요")
         var grokAvailability = GrokAvailability.State.notInstalled
         var openedGrokURLs: [URL] = []
         let grokWindow = AISettingsWindow(settings: gatingSettings,

@@ -128,6 +128,7 @@ final class NotificationSettings {
     }
 
     var previewURL: URL? { customSoundName.flatMap { soundFileURL(named: $0) } }
+    var notificationPlaybackDuration: TimeInterval { customSoundName == nil ? 2 : soundDuration }
 
     var maximumSelectableSoundDuration: Int {
         guard let playbackName = defaults.string(forKey: customSoundNameKey),
@@ -192,6 +193,7 @@ final class NotificationSettings {
     }
 
     func setCustomSound(from sourceURL: URL) throws {
+        invalidateConversion()
         let extensionName = sourceURL.pathExtension.lowercased()
         guard Self.supportedSoundExtensions.contains(extensionName) else {
             throw SoundError.unsupportedFormat
@@ -213,6 +215,7 @@ final class NotificationSettings {
     }
 
     func selectSavedSound(id: String) throws {
+        invalidateConversion()
         guard let saved = savedSounds.first(where: { $0.id == id }),
               let sourceURL = soundFileURL(named: saved.sourceName) else {
             throw SoundError.unreadable
@@ -302,7 +305,72 @@ final class NotificationSettings {
         onChange?()
     }
 
+    private let conversionQueue = DispatchQueue(label: "PlusCodex.sound-conversion", qos: .userInitiated)
+    private var conversionGeneration = 0
+    private var requestedDuration: Double?
+    private var requestedVolume: Double?
+    private func invalidateConversion() {
+        conversionGeneration += 1
+        requestedDuration = nil
+        requestedVolume = nil
+    }
+
+    /// Conversion is isolated; only the latest request may commit settings.
+    func updateSoundAsync(duration: Double? = nil, volume: Double? = nil,
+                          completion: @escaping (Result<Bool, Error>) -> Void) {
+        precondition(Thread.isMainThread)
+        let duration = duration ?? requestedDuration ?? soundDuration
+        let volume = volume ?? requestedVolume ?? soundVolume
+        guard duration.isFinite, duration >= Self.minimumSoundDuration,
+              duration <= Double(maximumSelectableSoundDuration), volume.isFinite,
+              (0...Self.maximumSoundVolume).contains(volume) else {
+            completion(.failure(SoundError.invalidDuration)); return
+        }
+        conversionGeneration += 1
+        let generation = conversionGeneration
+        requestedDuration = duration
+        requestedVolume = volume
+        guard let playback = customSoundName else {
+            do { try setCustomSoundDuration(duration, volume: volume); completion(.success(true)) }
+            catch { completion(.failure(error)) }
+            requestedDuration = nil; requestedVolume = nil
+            return
+        }
+        let source = defaults.string(forKey: customSoundSourceNameKey) ?? playback
+        guard let sourceURL = soundFileURL(named: source) else {
+            requestedDuration = nil; requestedVolume = nil
+            completion(.failure(SoundError.unreadable)); return
+        }
+        conversionQueue.async {
+            let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".caf")
+            let result = Result { () throws -> Data in
+                defer { try? FileManager.default.removeItem(at: temporary) }
+                try self.writeTrimmedSound(from: sourceURL, to: temporary, duration: duration.rounded(), volume: volume)
+                return try Data(contentsOf: temporary)
+            }
+            DispatchQueue.main.async {
+                guard self.conversionGeneration == generation else { completion(.success(false)); return }
+                self.requestedDuration = nil; self.requestedVolume = nil
+                guard self.customSoundName == playback else { completion(.success(false)); return }
+                do {
+                    let data = try result.get()
+                    let name = "\(self.managedSoundPrefix)playback-\(UUID().uuidString).caf"
+                    do { try self.writeManagedData(data, named: name) }
+                    catch { self.removeManagedSound(named: name); throw error }
+                    self.defaults.set(source, forKey: self.customSoundSourceNameKey)
+                    self.defaults.set(name, forKey: self.customSoundNameKey)
+                    self.defaults.set(duration.rounded(), forKey: self.soundDurationKey)
+                    self.defaults.set(volume, forKey: "notifications.sound.volume")
+                    if playback != source { self.removeManagedSound(named: playback) }
+                    self.onChange?()
+                    completion(.success(true))
+                } catch { completion(.failure(error)) }
+            }
+        }
+    }
+
     func setCustomSoundDuration(_ duration: TimeInterval, volume: Double? = nil) throws {
+        invalidateConversion()
         guard duration.isFinite,
               duration >= Self.minimumSoundDuration,
               duration <= TimeInterval(maximumSelectableSoundDuration),
@@ -356,6 +424,7 @@ final class NotificationSettings {
     }
 
     func clearCustomSound() {
+        invalidateConversion()
         let names = Set([defaults.string(forKey: customSoundNameKey),
                          defaults.string(forKey: customSoundSourceNameKey)].compactMap { $0 })
         for name in names {

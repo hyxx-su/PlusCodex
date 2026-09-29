@@ -10,7 +10,7 @@ enum GrokAvailability {
         var guidance: String? {
             switch self {
             case .notInstalled: return "미설치"
-            case .notAuthenticated: return "Grok에 로그인하세요."
+            case .notAuthenticated: return "로그인 필요"
             case .readyToCheck: return nil
             }
         }

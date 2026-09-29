@@ -51,9 +51,8 @@ private final class SearchOptionButton: NSButton {
     private func updateBackground() {
         // Selection is communicated by the checkmark. The row background is
         // reserved for the pointer hover state, matching the reference menu.
-        layer?.backgroundColor = isPointerInside
-            ? NSColor.labelColor.withAlphaComponent(0.07).cgColor
-            : NSColor.clear.cgColor
+        setAdaptiveBackgroundColor(isPointerInside
+            ? NSColor.labelColor.adaptiveAlpha(0.07) : .clear)
     }
 }
 
@@ -423,10 +422,10 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
                                                name: .plusCodexLanguageDidChange, object: nil)
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 680, height: 600))
         root.wantsLayer = true
-        root.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        root.setAdaptiveBackgroundColor(NSColor.windowBackgroundColor)
         root.layer?.cornerRadius = 16
         root.layer?.borderWidth = 1
-        root.layer?.borderColor = NSColor.separatorColor.cgColor
+        root.setAdaptiveBorderColor(NSColor.separatorColor)
         root.layer?.masksToBounds = true
         window.contentView = root
         window.standardWindowButton(.closeButton)?.isHidden = true
@@ -480,10 +479,10 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         closeButton = close
         let searchContainer = NSView(frame: NSRect(x: 10, y: 335, width: 188, height: 32))
         searchContainer.wantsLayer = true
-        searchContainer.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        searchContainer.setAdaptiveBackgroundColor(NSColor.windowBackgroundColor)
         searchContainer.layer?.cornerRadius = 16
         searchContainer.layer?.borderWidth = 1
-        searchContainer.layer?.borderColor = NSColor.separatorColor.cgColor
+        searchContainer.setAdaptiveBorderColor(NSColor.separatorColor)
         let searchIcon = NSImageView(frame: NSRect(x: 13, y: 8, width: 16, height: 16))
         searchIcon.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)?
             .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12.5, weight: .regular))
@@ -664,10 +663,10 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         label("기본 설정", in: general, x: 13, y: 347, width: 437, size: 14, bold: true)
         let generalCard = NSView(frame: NSRect(x: 13, y: 189, width: 437, height: 150))
         generalCard.wantsLayer = true
-        generalCard.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        generalCard.setAdaptiveBackgroundColor(NSColor.windowBackgroundColor)
         generalCard.layer?.cornerRadius = 12
         generalCard.layer?.borderWidth = 1
-        generalCard.layer?.borderColor = NSColor.separatorColor.cgColor
+        generalCard.setAdaptiveBorderColor(NSColor.separatorColor)
         generalCard.layer?.masksToBounds = true
         general.addSubview(generalCard)
 
@@ -692,10 +691,10 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         languagePicker.displayTitle = L10n.text("한국어")
         languagePicker.contentTintColor = .labelColor
         languagePicker.wantsLayer = true
-        languagePicker.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        languagePicker.setAdaptiveBackgroundColor(NSColor.controlBackgroundColor)
         languagePicker.layer?.cornerRadius = 13
         languagePicker.layer?.borderWidth = 1
-        languagePicker.layer?.borderColor = NSColor.separatorColor.cgColor
+        languagePicker.setAdaptiveBorderColor(NSColor.separatorColor)
         // Center the picker against the complete title-and-description group.
         languagePicker.frame = NSRect(x: 343, y: 101 - languageVerticalOffset, width: 78, height: 26)
         languagePicker.identifier = NSUserInterfaceItemIdentifier("appLanguage")
@@ -724,10 +723,10 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         label("Codex 깨우기", in: general, x: 13, y: 141, width: 437, size: 14, bold: true)
         let wakeCard = NSView(frame: NSRect(x: 13, y: -101, width: 437, height: 234))
         wakeCard.wantsLayer = true
-        wakeCard.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        wakeCard.setAdaptiveBackgroundColor(NSColor.windowBackgroundColor)
         wakeCard.layer?.cornerRadius = 12
         wakeCard.layer?.borderWidth = 1
-        wakeCard.layer?.borderColor = NSColor.separatorColor.cgColor
+        wakeCard.setAdaptiveBorderColor(NSColor.separatorColor)
         wakeCard.layer?.masksToBounds = true
         general.addSubview(wakeCard)
         cardSeparator(wakeCard, y: 156)
@@ -755,10 +754,10 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
                                 key: "Codex를 깨울 때 사용할 모델을 선택합니다."))
         wakeModelPicker.contentTintColor = .labelColor
         wakeModelPicker.wantsLayer = true
-        wakeModelPicker.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        wakeModelPicker.setAdaptiveBackgroundColor(NSColor.controlBackgroundColor)
         wakeModelPicker.layer?.cornerRadius = 13
         wakeModelPicker.layer?.borderWidth = 1
-        wakeModelPicker.layer?.borderColor = NSColor.separatorColor.cgColor
+        wakeModelPicker.setAdaptiveBorderColor(NSColor.separatorColor)
         wakeModelPicker.frame = NSRect(x: 343, y: 105, width: 78, height: 26)
         wakeModelPicker.identifier = NSUserInterfaceItemIdentifier("codexWakeModel")
         wakeModelPicker.target = self
@@ -797,10 +796,10 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
                                                 width: 437,
                                                 height: providerCardHeight))
         providerCard.wantsLayer = true
-        providerCard.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        providerCard.setAdaptiveBackgroundColor(NSColor.windowBackgroundColor)
         providerCard.layer?.cornerRadius = 12
         providerCard.layer?.borderWidth = 1
-        providerCard.layer?.borderColor = NSColor.separatorColor.cgColor
+        providerCard.setAdaptiveBorderColor(NSColor.separatorColor)
         providerCard.layer?.masksToBounds = true
         ai.addSubview(providerCard)
 
@@ -840,10 +839,10 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
                                              width: 437,
                                              height: usageCardHeight))
         usageCard.wantsLayer = true
-        usageCard.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        usageCard.setAdaptiveBackgroundColor(NSColor.windowBackgroundColor)
         usageCard.layer?.cornerRadius = 12
         usageCard.layer?.borderWidth = 1
-        usageCard.layer?.borderColor = NSColor.separatorColor.cgColor
+        usageCard.setAdaptiveBorderColor(NSColor.separatorColor)
         usageCard.layer?.masksToBounds = true
         ai.addSubview(usageCard)
 
@@ -879,10 +878,10 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
                                                   width: 437, height: permissionCardHeight))
         notificationPermissionCard = permissionCard
         permissionCard.wantsLayer = true
-        permissionCard.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        permissionCard.setAdaptiveBackgroundColor(NSColor.windowBackgroundColor)
         permissionCard.layer?.cornerRadius = 12
         permissionCard.layer?.borderWidth = 1
-        permissionCard.layer?.borderColor = NSColor.separatorColor.cgColor
+        permissionCard.setAdaptiveBorderColor(NSColor.separatorColor)
         permissionCard.layer?.masksToBounds = true
         notifications.addSubview(permissionCard)
         label("알림 설정", in: permissionCard, x: 16, y: 194, width: 250, size: 13, bold: true)
@@ -906,10 +905,10 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         let soundPicker = LanguagePickerButton(frame: NSRect(x: 343, y: 106, width: 78, height: 26))
         soundPicker.contentTintColor = .labelColor
         soundPicker.wantsLayer = true
-        soundPicker.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        soundPicker.setAdaptiveBackgroundColor(NSColor.controlBackgroundColor)
         soundPicker.layer?.cornerRadius = 13
         soundPicker.layer?.borderWidth = 1
-        soundPicker.layer?.borderColor = NSColor.separatorColor.cgColor
+        soundPicker.setAdaptiveBorderColor(NSColor.separatorColor)
         soundPicker.target = self
         soundPicker.action = #selector(showNotificationSoundMenu(_:))
         soundPicker.setAccessibilityLabel(L10n.text("알림 소리"))
@@ -929,10 +928,10 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         durationPicker.centersTitleInButton = true
         durationPicker.contentTintColor = .labelColor
         durationPicker.wantsLayer = true
-        durationPicker.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        durationPicker.setAdaptiveBackgroundColor(NSColor.controlBackgroundColor)
         durationPicker.layer?.cornerRadius = 13
         durationPicker.layer?.borderWidth = 1
-        durationPicker.layer?.borderColor = NSColor.separatorColor.cgColor
+        durationPicker.setAdaptiveBorderColor(NSColor.separatorColor)
         durationPicker.target = self
         durationPicker.action = #selector(showNotificationSoundDurationMenu(_:))
         durationPicker.setAccessibilityLabel(L10n.text("재생 시간"))
@@ -973,10 +972,10 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
                                              action: #selector(sendSoundTestNotification(_:)))
         testButton.isBordered = false
         testButton.wantsLayer = true
-        testButton.layer?.backgroundColor = NSColor.white.cgColor
+        testButton.setAdaptiveBackgroundColor(NSColor.controlBackgroundColor)
         testButton.layer?.cornerRadius = 8
         testButton.layer?.borderWidth = 1
-        testButton.layer?.borderColor = NSColor.separatorColor.cgColor
+        testButton.setAdaptiveBorderColor(NSColor.separatorColor)
         testButton.contentTintColor = NSColor.labelColor
         let testRowCenterY: CGFloat = 41
         testButton.frame = NSRect(x: 296, y: testRowCenterY - 13, width: 125, height: 26)
@@ -999,10 +998,10 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         let optionCard = NSView(frame: NSRect(x: 13, y: optionCardTop,
                                               width: 437, height: optionCardHeight))
         optionCard.wantsLayer = true
-        optionCard.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        optionCard.setAdaptiveBackgroundColor(NSColor.windowBackgroundColor)
         optionCard.layer?.cornerRadius = 12
         optionCard.layer?.borderWidth = 1
-        optionCard.layer?.borderColor = NSColor.separatorColor.cgColor
+        optionCard.setAdaptiveBorderColor(NSColor.separatorColor)
         optionCard.layer?.masksToBounds = true
         notifications.addSubview(optionCard)
         notificationOptionsCard = optionCard
@@ -1044,7 +1043,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
                 for view in page.subviews { view.frame.origin.y += verticalOffset }
             }
         }
-        let footerColor = NSColor.labelColor.withAlphaComponent(0.35)
+        let footerColor = NSColor.labelColor.adaptiveAlpha(0.35)
         let footerFont = NSFont.systemFont(ofSize: 10)
         let releaseTitle = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
         let separatorTitle = "|"
@@ -1165,8 +1164,8 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         let wasVisible = pages[index].isHidden == false
         for (offset, page) in pages.enumerated() {
             page.isHidden = offset != index
-            navigation[offset].layer?.backgroundColor = offset == index
-                ? NSColor.labelColor.withAlphaComponent(0.05).cgColor : NSColor.clear.cgColor
+            navigation[offset].setAdaptiveBackgroundColor(offset == index
+                ? NSColor.labelColor.adaptiveAlpha(0.05) : .clear)
             navigation[offset].setAccessibilityValue(offset == index ? 1 : 0)
         }
         if index == 2 && !wasVisible {
@@ -1205,7 +1204,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
 
         // Keep the search field's appearance stable. Only its clear button
         // and result list change while the user types.
-        navigationSearchContainer?.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        navigationSearchContainer?.setAdaptiveBackgroundColor(.windowBackgroundColor)
         navigationSearchContainer?.layer?.borderWidth = 1
         navigationClearButton?.isHidden = !isSearching
         sender.frame.size.width = isSearching ? 118 : 146
@@ -1380,10 +1379,10 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         let contentHeight = headerHeight + listHeight + bottomInset + listTopInset
         let content = NSView(frame: NSRect(x: 0, y: 0, width: contentWidth, height: contentHeight))
         content.wantsLayer = true
-        content.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        content.setAdaptiveBackgroundColor(NSColor.windowBackgroundColor)
         content.layer?.cornerRadius = 13
         content.layer?.borderWidth = 1
-        content.layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.16).cgColor
+        content.setAdaptiveBorderColor(NSColor.labelColor.adaptiveAlpha(0.16))
 
         let searchIcon = NSImageView(frame: NSRect(x: 13, y: contentHeight - 30, width: 15, height: 15))
         searchIcon.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)?
@@ -2040,15 +2039,10 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
     @objc private func selectNotificationSoundDuration(_ sender: NSMenuItem) {
         guard notificationAlertStyle == .alert,
               let value = sender.representedObject as? NSNumber else { return }
-        do {
-            try notificationSettings.setCustomSoundDuration(value.doubleValue)
-            synchronize()
-        } catch let error as NotificationSettings.SoundError {
-            showNotificationSoundError(error)
-            synchronize()
-        } catch {
-            showNotificationSoundError(.copyFailed)
-            synchronize()
+        notificationSettings.updateSoundAsync(duration: value.doubleValue) { [weak self] result in
+            if case .failure = result { self?.showNotificationSoundError(.copyFailed) }
+            if case .success(false) = result { return }
+            self?.synchronize()
         }
     }
 
@@ -2089,12 +2083,11 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         // on every pointer movement. AppKit sends the final action on mouse-up.
         if let eventType = NSApp.currentEvent?.type,
            eventType == .leftMouseDown || eventType == .leftMouseDragged { return }
-        do {
-            try notificationSettings.setSoundVolume(sender.doubleValue / 100)
-        } catch {
-            showNotificationSoundError(.copyFailed)
+        notificationSettings.updateSoundAsync(volume: sender.doubleValue / 100) { [weak self] result in
+            if case .failure = result { self?.showNotificationSoundError(.copyFailed) }
+            if case .success(false) = result { return }
+            self?.synchronize()
         }
-        synchronize()
     }
 
     @objc private func sendSoundTestNotification(_ sender: NSButton) {
@@ -2160,6 +2153,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
             // Only remove the previous test; a delayed lookup must never cancel the new request.
             center.removeDeliveredNotifications(withIdentifiers: [previousID])
             center.removePendingNotificationRequests(withIdentifiers: [previousID])
+            NotificationDelivery.shared.cancel(previousID)
         }
         lastSoundTestRequestID = requestID
         // The saved duration applies only to persistent alerts; use the existing
@@ -2168,13 +2162,14 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
             ? notificationSettings.soundDuration : 2.0
 
         let request = UNNotificationRequest(identifier: requestID, content: content, trigger: nil)
-        center.add(request) { [weak self] error in
+        NotificationDelivery.shared.add(request, duration: notificationSettings.notificationPlaybackDuration) { [weak self] error in
             DispatchQueue.main.async {
                 guard let self else { return }
                 guard self.activeSoundTestRequestID == requestID else {
                     // Cancellation can race with add; clean up again after scheduling completes.
                     center.removePendingNotificationRequests(withIdentifiers: [requestID])
                     center.removeDeliveredNotifications(withIdentifiers: [requestID])
+                    NotificationDelivery.shared.cancel(requestID)
                     return
                 }
                 guard let error else {
@@ -2205,6 +2200,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: [requestID])
         center.removeDeliveredNotifications(withIdentifiers: [requestID])
+        NotificationDelivery.shared.cancel(requestID)
     }
 
     private func cancelSoundTestNotification() {
@@ -2217,6 +2213,9 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: [requestID])
         center.removeDeliveredNotifications(withIdentifiers: [requestID])
+        // Removing the OS request does not release our sound reservation.
+        // Release only this test so an immediate retry is not silently muted.
+        NotificationDelivery.shared.cancel(requestID)
     }
     private func showNotificationSoundError(_ error: NotificationSettings.SoundError) {
         guard let window else { return }

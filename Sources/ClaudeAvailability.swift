@@ -12,7 +12,8 @@ enum ClaudeAvailability {
         var guidance: String? {
             switch self {
             case .notInstalled: return "미설치"
-            case .confirmedFree, .usageUnavailable: return "클로드 코드 구독을 활성화하세요."
+            case .confirmedFree: return "플랜 필요"
+            case .usageUnavailable: return "확인 불가"
             case .availableOrUnknown: return nil
             }
         }
@@ -20,7 +21,8 @@ enum ClaudeAvailability {
         var actionURL: URL? {
             switch self {
             case .notInstalled: return URL(string: "https://code.claude.com/docs/en/setup")
-            case .confirmedFree, .usageUnavailable: return URL(string: "https://claude.ai/upgrade")
+            case .confirmedFree: return URL(string: "https://claude.ai/upgrade")
+            case .usageUnavailable: return URL(string: "https://claude.ai/login")
             case .availableOrUnknown: return nil
             }
         }

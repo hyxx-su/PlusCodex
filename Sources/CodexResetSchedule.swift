@@ -40,14 +40,12 @@ final class CodexResetSchedule {
             var state = states[stateKey] ?? State(anchor: reported, lastObservedAt: time - 1)
             let previous = state.anchor
             if time > state.lastObservedAt {
-                if time >= state.anchor {
+                if time >= state.anchor && reported > time && reported - state.anchor >= 5 * 60 * 60 - 10 * 60 {
                     // The wake scheduler retains its own overdue, unprocessed
                     // cycle. Notifications can book the next full cycle here.
-                    if reported > time, reported - state.anchor >= 5 * 60 * 60 - 10 * 60 {
-                        state.anchor = reported
-                        state.candidate = nil
-                        state.candidateSince = nil
-                    }
+                    state.anchor = reported
+                    state.candidate = nil
+                    state.candidateSince = nil
                 } else if abs(reported - state.anchor) <= 1 {
                     state.candidate = nil
                     state.candidateSince = nil

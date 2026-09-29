@@ -37,8 +37,7 @@ final class QuotaMenuView: NSView {
         self.account = account
         self.updatedAt = updatedAt
         self.failure = failure
-        showsFailureScreen = failure != nil && !(provider == .codex
-            && Self.canShowPreviousUsage(quota, updatedAt: updatedAt))
+        showsFailureScreen = failure != nil && !Self.canShowPreviousUsage(quota, updatedAt: updatedAt)
         self.intro = intro
         self.checkingForUpdates = checkingForUpdates
         self.offline = offline

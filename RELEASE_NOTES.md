@@ -1,11 +1,38 @@
-# PlusCodex v1.1.2
+# PlusCodex v1.1.3
 
-- Codex 사용량 초기화 알림과 자동 깨우기가 조회 때마다 움직이는 초기화 시각에 끌려다니지 않도록 주기를 안정화했습니다. 확인된 초기화 시각 변경과 계정 전환은 알림·깨우기 일정에 함께 반영하며, 앱 재실행 후에도 진행 중인 주기와 재시도 상태를 보존합니다.
-- 자동 깨우기는 초기화 시각 이후 새 사용량을 확인하고 잔여량이 있을 때만 보냅니다. Codex 서버가 요청을 수락한 뒤에만 완료 주기를 기록하고, 이미 처리한 주기의 중복 전송과 응답이 불확실한 연결 오류 뒤 중복 재시도를 막습니다.
-- 메뉴바를 열어 둔 동안에도 사용량과 채팅 작업 상태가 갱신됩니다. 사용량 막대·퍼센트는 자연스럽게 전환되고 계정 변경은 이전 계정의 애니메이션을 이어받지 않습니다. 진행 중 작업이 없으면 작업 목록 영역을 표시하지 않습니다.
-- 채팅 작업마다 원형 알림 버튼으로 완료·실패·승인/질문 알림을 개별적으로 켜거나 끌 수 있습니다. 진행 중 작업은 제목과 알림 아이콘을 가로지르는 애니메이션으로 표시됩니다.
-- Codex 작업 완료 직후 사용량을 다시 확인하되 동시 완료는 묶어 불필요한 조회를 줄입니다. 일시적인 조회 실패에는 최근 10분 이내 사용량을 유지하고, 그보다 오래된 정보는 오류 화면으로 전환합니다.
-- 큰 Codex 대화 상태도 처리하고 IPC 연결 재설정 뒤 작업 구독을 다시 연결해, 작업이 메뉴바에서 누락될 가능성을 줄였습니다.
+- 사용량과 작업 완료·읽음 기록을 계정별로 분리했습니다. 계정 전환 중 이전 계정의 늦은 조회 결과가 새 계정 화면에 반영되지 않으며, 읽은 완료 항목이 앱 재실행 뒤 다시 나타나는 현상을 줄였습니다.
+- Codex 작업 상태 연결이 끊기거나 응답이 늦는 경우 복구 구독을 다시 시도합니다. 확인되지 않은 작업은 실행 또는 읽음 완료로 단정하지 않고, 장시간 응답이 없는 행은 메뉴에서 정리한 뒤 새 상태를 받으면 다시 표시합니다. 완료 항목의 읽음 상태는 이벤트와 짧은 재확인 주기로 동기화합니다.
+- 사용량 초기화 알림에 계정·주기별 예약 장부를 추가했습니다. 조회 때마다 바뀌는 초기화 시각에 같은 주기의 알림을 반복 예약하지 않으며, 확인된 주기 변경은 알림과 자동 깨우기 일정에 함께 반영합니다.
+- 자동 깨우기는 계정 전환과 오래된 전송 결과를 확인하고, 저장된 Codex 대화방을 재사용합니다. 새 사용량 주기와 예약 상태는 재실행 후에도 복구합니다.
+- Claude와 Grok 사용량 조회는 계정 변경이나 설정 토글 전에 시작한 오래된 결과를 폐기합니다. 일시적인 네트워크 제한은 로그아웃으로 오인하지 않고 재시도 대기와 최근 사용량 표시를 유지합니다. Claude 플랜 미보유와 구독 확인 실패 안내를 구분합니다.
+- 알림음 예약을 취소하거나 테스트를 다시 보내면 해당 예약도 함께 정리합니다. 사용자 지정 음원의 길이·음량 변환은 백그라운드에서 처리하고 마지막 설정만 적용해 설정 화면이 멈추는 일을 줄였습니다.
+- 상태 복구·중복 알림·계정 경계를 검사 목록에 추가하고 Sparkle 준비 중 빌드 경합을 막았습니다. 메뉴 진입 시 업데이트 확인 동작은 유지했습니다.
+
+## English
+
+- Usage and task completion/read receipts are now scoped by account. Late results from a previous sign-in are discarded, and acknowledged tasks are less likely to reappear after relaunch.
+- Codex activity subscriptions recover after disconnects and delayed responses. Unknown tasks are not treated as running or read; rows without a response are eventually hidden and return when a fresh state arrives. Read state for completed tasks is synchronized from events and a short retry interval.
+- Reset notifications use a persistent ledger keyed by account and usage cycle. Repeated usage refreshes no longer schedule duplicate alerts for the same cycle, and confirmed reset changes update both notification and automatic-wake schedules.
+- Automatic wake validates account changes and stale send results, reuses the saved Codex conversation, and restores its schedule after relaunch.
+- Claude and Grok discard usage results started before an account or setting change. Temporary network throttling preserves retry timing and recent usage instead of appearing as sign-out. Claude plan requirements are distinguished from subscription lookup failures.
+- Cancelling or retrying a sound test also releases its reservation. Custom sound conversion runs in the background and applies only the latest duration and volume settings.
+- Added checks for recovery, duplicate notifications, and account boundaries, and prevented build races while preparing Sparkle. The existing update check on menu open is retained.
+
+## 설치 및 업데이트
+
+기존 정식 버전은 앱의 업데이트 기능으로 `v1.1.3`을 설치할 수 있습니다. 수동 설치는 [PlusCodex-1.1.3.dmg](https://github.com/hyxx-su/PlusCodex/releases/download/v1.1.3/PlusCodex-1.1.3.dmg)를 열고 PlusCodex를 Applications로 옮기세요. 기존 설정은 유지됩니다.
+
+Apple Silicon Mac과 macOS 14 이상을 지원합니다. 이 배포본은 ad-hoc 서명되어 있으며 Apple Developer ID 서명·공증은 없습니다. PlusCodex는 OpenAI의 공식 앱이 아닙니다.
+
+## 검증 범위 / Validation
+
+전체 자동 검증(`bash test.sh`)이 통과했습니다. DMG 무결성 검사와 Sparkle 업데이트 피드·ZIP의 공개키 서명 및 길이 검증도 통과했습니다. 실제 절전 복귀와 macOS 알림 전달·재생은 OS 권한, 집중 모드 및 기기 상태에 따라 달라져 별도 실기 확인이 필요합니다. Claude Desktop 캐시와 현재 로그인 조직의 일치 여부는 이번 릴리즈에서 보장하지 않습니다. 메뉴 진입 시 업데이트 확인 동작은 기존대로 유지했습니다.
+
+The full automated suite (`bash test.sh`) passed. DMG integrity and public-key verification of the Sparkle feed and ZIP archive also passed. Actual sleep/wake recovery and macOS notification delivery/playback require device testing because they depend on OS permissions, Focus, and device state. This release does not guarantee that a Claude Desktop cache belongs to the currently signed-in organization. The existing update check on menu open remains unchanged.
+
+---
+
+# PlusCodex v1.1.2
 
 ## English
 

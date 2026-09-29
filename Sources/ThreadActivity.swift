@@ -2,6 +2,26 @@ import Foundation
 import AppKit
 import Darwin
 import SQLite3
+import CryptoKit
+
+enum ThreadRecordScope {
+    static func key(_ account: String) -> String {
+        SHA256.hash(data: Data(account.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().utf8))
+            .map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+enum ThreadRecoveryPolicy {
+    static func shouldRefreshReadState(runtime: String?, unread: Bool?, awaitingSnapshot: Bool,
+                                       recoveryDue: Bool) -> Bool {
+        if awaitingSnapshot { return recoveryDue }
+        return runtime == "idle" && unread == true
+    }
+
+    static func shouldRetain(waitingSince: Date?, now: Date) -> Bool {
+        waitingSince.map { now.timeIntervalSince($0) < 300 } ?? true
+    }
+}
 
 enum ThreadAttentionKind: Hashable {
     case approval
@@ -41,6 +61,11 @@ struct ThreadActivity: Equatable {
     var latestTurn: ThreadTurnState?
     var unread: Bool
     var updatedAt: Double
+    var stateConfirmed = true
+    var statusLabel: String {
+        !stateConfirmed ? L10n.text("작업 상태 확인 불가")
+            : isRunning ? L10n.text("작업 중") : L10n.text("완료 · 미확인")
+    }
 
     private static func normalizedRuntime(_ runtime: String) -> String {
         runtime
@@ -80,12 +105,38 @@ struct ThreadTurnResult {
 /// A terminal turn status distinguishes failures from successful completion.
 /// For older snapshots without turn history, keep the existing active-to-idle fallback.
 struct CompletionTracker {
+    private struct TurnRecord: Codable {
+        let thread: String
+        let turn: String
+        let running: Bool
+        let notified: Bool
+        let savedAt: Date
+    }
+    private let defaults: UserDefaults?
+    private var savedTurns: [String: TurnRecord] = [:]
+    private let storageKey: String
     private var previous: [String: ThreadActivity] = [:]
     private var notifiedTurnIDs: [String: Set<String>] = [:]
     private let sessionStartedAtMs = Date().timeIntervalSince1970 * 1000
 
-    mutating func update(_ rows: [ThreadActivity], connected: Bool) -> [ThreadTurnResult] {
-        guard connected else { previous.removeAll(); return [] }
+    init(defaults: UserDefaults? = nil, account: String = "test-local") {
+        self.defaults = defaults
+        storageKey = "threadCompletionTurns.v2." + ThreadRecordScope.key(account)
+        if let data = defaults?.data(forKey: storageKey),
+           let records = try? JSONDecoder().decode([String: TurnRecord].self, from: data) {
+            savedTurns = records.filter { Date().timeIntervalSince($0.value.savedAt) < 30 * 86400 }
+            for record in savedTurns.values where record.notified {
+                notifiedTurnIDs[record.thread, default: []].insert(record.turn)
+            }
+        }
+    }
+
+    mutating func update(_ rows: [ThreadActivity], connected: Bool, now: Date = Date(), retainingIDs: Set<String> = []) -> [ThreadTurnResult] {
+        guard connected else {
+            // Only identified turns can be reconciled safely across a gap.
+            previous = previous.filter { $0.value.latestTurn != nil }
+            return []
+        }
         var results: [ThreadTurnResult] = []
         for activity in rows {
             let prior = previous[activity.id]
@@ -93,8 +144,11 @@ struct CompletionTracker {
             if let turn = activity.latestTurn {
                 let observedRunningTurn = prior?.latestTurn?.id == turn.id
                     && prior?.latestTurn?.status == "inProgress"
+                    || (activity.unread && savedTurns[activity.id + ":" + turn.id]?.running == true)
                 let firstObservedRecentTerminalTurn = prior?.latestTurn?.id != turn.id
                     && turn.startedAtMs >= sessionStartedAtMs
+                    && turn.startedAtMs <= now.timeIntervalSince1970 * 1000
+                    && now.timeIntervalSince1970 * 1000 - turn.startedAtMs <= 120_000
                     && ["completed", "failed", "interrupted"].contains(turn.status)
                 if (observedRunningTurn || becameIdle || firstObservedRecentTerminalTurn)
                     && !notifiedTurnIDs[activity.id, default: []].contains(turn.id) {
@@ -110,12 +164,23 @@ struct CompletionTracker {
                     default: break
                     }
                 }
+                let key = activity.id + ":" + turn.id
+                let running = turn.status == "inProgress"
+                let notified = notifiedTurnIDs[activity.id, default: []].contains(turn.id)
+                if savedTurns[key]?.running != running || savedTurns[key]?.notified != notified {
+                    savedTurns[key] = TurnRecord(thread: activity.id, turn: turn.id, running: running,
+                                                 notified: notified, savedAt: now)
+                }
             } else if becameIdle {
                 results.append(ThreadTurnResult(activity: activity, kind: .completed))
             }
             previous[activity.id] = activity
         }
-        previous = previous.filter { id, _ in rows.contains(where: { $0.id == id }) }
+        previous = previous.filter { id, _ in retainingIDs.contains(id) || rows.contains(where: { $0.id == id }) }
+        savedTurns = savedTurns.filter { now.timeIntervalSince($0.value.savedAt) < 30 * 86400 }
+        if let defaults, let data = try? JSONEncoder().encode(savedTurns) {
+            if defaults.data(forKey: storageKey) != data { defaults.set(data, forKey: storageKey) }
+        }
         return results
     }
 }
@@ -123,6 +188,7 @@ struct CompletionTracker {
 struct ThreadAttentionEvent {
     let activity: ThreadActivity
     let kind: ThreadAttentionKind
+    var requestIdentity: String? = nil
 }
 
 /// Request IDs prevent repeat alerts, including after an IPC reconnect. Give an
@@ -153,7 +219,7 @@ struct AttentionTracker {
                     if state.unidentifiedFallback && !matchedFallback {
                         matchedFallback = true
                     } else {
-                        events.append(ThreadAttentionEvent(activity: activity, kind: request.kind))
+                        events.append(ThreadAttentionEvent(activity: activity, kind: request.kind, requestIdentity: request.identity))
                     }
                     state.notifiedIDs.insert(request.identity)
                 }
@@ -184,10 +250,38 @@ struct AttentionTracker {
 /// Keep completed rows visible even when Codex's unread flag disagrees with what
 /// the user has actually opened. Opening a completed row acknowledges it.
 struct ThreadActivityReadReceipts {
+    private struct Receipt: Codable {
+        let turn: String
+        let updatedAt: Double
+        let savedAt: Date
+    }
+    private let defaults: UserDefaults?
+    private var receipts: [String: Receipt] = [:]
+    private let storageKey: String
     private var opened: [String: Double] = [:]
+    private var openedTurns: [String: String] = [:]
     private var pendingCompletions: [String: ThreadActivity] = [:]
 
+    init(defaults: UserDefaults? = nil, account: String = "test-local") {
+        self.defaults = defaults
+        storageKey = "threadReadReceipts.v2." + ThreadRecordScope.key(account)
+        if let data = defaults?.data(forKey: storageKey),
+           let saved = try? JSONDecoder().decode([String: Receipt].self, from: data) {
+            receipts = saved.filter { Date().timeIntervalSince($0.value.savedAt) < 30 * 86400 }
+            opened = receipts.mapValues(\.updatedAt)
+            openedTurns = receipts.mapValues(\.turn)
+        }
+    }
+
+    private mutating func persist() {
+        receipts = receipts.filter { Date().timeIntervalSince($0.value.savedAt) < 30 * 86400 }
+        if let data = try? JSONEncoder().encode(receipts) { defaults?.set(data, forKey: storageKey) }
+    }
+
     mutating func markCompleted(_ activity: ThreadActivity) {
+        if let turn = activity.latestTurn?.id, openedTurns[activity.id] == turn { return }
+        // A delayed completion must not undo an explicit acknowledgement.
+        guard activity.updatedAt > (opened[activity.id] ?? -.infinity) else { return }
         var completed = activity
         completed.runtime = "idle"
         completed.activeFlags = []
@@ -197,9 +291,22 @@ struct ThreadActivityReadReceipts {
     }
 
     mutating func acknowledge(_ activity: ThreadActivity) {
-        guard !activity.isRunning else { return }
+        guard activity.stateConfirmed, !activity.isRunning else { return }
         pendingCompletions.removeValue(forKey: activity.id)
         opened[activity.id] = activity.updatedAt
+        openedTurns[activity.id] = activity.latestTurn?.id
+        if let turn = activity.latestTurn?.id {
+            receipts[activity.id] = Receipt(turn: turn, updatedAt: activity.updatedAt, savedAt: Date())
+            persist()
+        }
+    }
+
+    mutating func forget(_ id: String) {
+        opened.removeValue(forKey: id)
+        openedTurns.removeValue(forKey: id)
+        pendingCompletions.removeValue(forKey: id)
+        receipts.removeValue(forKey: id)
+        persist()
     }
 
     /// Acknowledge a completed row when Codex reports that it was read outside
@@ -211,8 +318,12 @@ struct ThreadActivityReadReceipts {
 
     mutating func visibleRows(_ rows: [ThreadActivity]) -> [ThreadActivity] {
         for row in rows {
-            if row.isRunning || row.updatedAt > (opened[row.id] ?? .infinity) {
+            if !row.stateConfirmed { pendingCompletions.removeValue(forKey: row.id) }
+            let sameReadTurn = row.latestTurn.map { openedTurns[row.id] == $0.id } ?? false
+            if !sameReadTurn && (row.isRunning || row.updatedAt > (opened[row.id] ?? .infinity)) {
                 opened.removeValue(forKey: row.id)
+                openedTurns.removeValue(forKey: row.id)
+                if receipts.removeValue(forKey: row.id) != nil { persist() }
             }
             guard row.isRunning, let pending = pendingCompletions[row.id] else { continue }
             let pendingTurnID = pending.latestTurn?.id
@@ -257,12 +368,43 @@ final class ThreadActivityMonitor {
     private var lastPublished: [ThreadActivity] = []
     private var lastConnected = false
     private var completionTracker = CompletionTracker()
+    private let accountLock = NSLock()
+    private var requestedAccount: String?
+    private var activeAccount: String?
+    private var awaitingSince: [String: Date] = [:]
+    func selectAccount(_ account: String?) {
+        accountLock.lock()
+        requestedAccount = account
+        accountLock.unlock()
+    }
+    private func accountIsCurrent(_ account: String?) -> Bool {
+        accountLock.lock()
+        defer { accountLock.unlock() }
+        return requestedAccount == account
+    }
+
+    private func synchronizeAccount() {
+        accountLock.lock()
+        let account = requestedAccount
+        accountLock.unlock()
+        guard account != activeAccount else { return }
+        activeAccount = account
+        completionTracker = account.map { CompletionTracker(defaults: .standard, account: $0) } ?? CompletionTracker()
+        attentionTracker = AttentionTracker()
+        awaitingSnapshots.formUnion(activities.keys)
+        followed.removeAll()
+        pendingReadActivities.removeAll()
+    }
     private var attentionTracker = AttentionTracker()
     private var pendingReadActivities: [String: ThreadActivity] = [:]
+    private var awaitingSnapshots = Set<String>()
+    private var lastReadRefresh = Date.distantPast
+    var onArchive: ((String) -> Void)?
     var onCompletion: ((ThreadActivity) -> Void)?
     var onFailure: ((ThreadActivity) -> Void)?
     var onAttention: ((ThreadAttentionEvent) -> Void)?
     var onRead: ((ThreadActivity) -> Void)?
+    var onCompatibilityChanged: ((Bool) -> Void)?
 
     init(onUpdate: @escaping ([ThreadActivity], Bool) -> Void) { self.onUpdate = onUpdate }
 
@@ -380,9 +522,13 @@ final class ThreadActivityMonitor {
                           "method": "initialize", "version": 0,
                           "params": ["clientType": "codex-quota"]])
                 var refreshAt = Date.distantPast
+                let initializationDeadline = Date().addingTimeInterval(10)
                 while true {
+                    synchronizeAccount()
+                    if clientID.isEmpty && Date() >= initializationDeadline { throw ActivityError.connection }
                     if !clientID.isEmpty && Date() >= refreshAt {
                         try refreshCandidates()
+                        publish(connected: true)
                         refreshAt = Date().addingTimeInterval(5)
                     }
                     var descriptor = pollfd(fd: socketFD, events: Int16(POLLIN), revents: 0)
@@ -431,18 +577,25 @@ final class ThreadActivityMonitor {
                 pending.removeAll()
                 discardedFrameBytesRemaining = 0
                 followed.removeAll()
-                activities.removeAll()
+                awaitingSnapshots = Set(activities.keys)
                 owners.removeAll()
                 revisions.removeAll()
                 pendingReadActivities.removeAll()
                 publish(connected: false)
-                Thread.sleep(forTimeInterval: 5)
+                if case ActivityError.protocolMismatch = error {
+                    RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) { self.onCompatibilityChanged?(true) }
+                    CFRunLoopWakeUp(CFRunLoopGetMain())
+                    NSLog("PlusCodex activity monitor: unsupported IPC protocol or database schema; retrying in 60 seconds")
+                    Thread.sleep(forTimeInterval: 60)
+                } else {
+                    Thread.sleep(forTimeInterval: 5)
+                }
             }
         }
     }
 
     private func connect() throws {
-        let path = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/ipc/ipc.sock").path
+        let path = Self.codexHome.appendingPathComponent("ipc/ipc.sock").path
         var info = stat()
         guard lstat(path, &info) == 0, info.st_uid == getuid(),
               (info.st_mode & S_IFMT) == S_IFSOCK else { throw ActivityError.connection }
@@ -490,9 +643,14 @@ final class ThreadActivityMonitor {
                   "params": ["conversationId": id, "hostId": "local", "following": enabled]])
     }
 
+    private static var codexHome: URL {
+        ProcessInfo.processInfo.environment["CODEX_HOME"].map { URL(fileURLWithPath: $0) }
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
+    }
+
     private func refreshCandidates() throws {
         var database: OpaquePointer?
-        let path = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/state_5.sqlite").path
+        let path = Self.codexHome.appendingPathComponent("state_5.sqlite").path
         guard sqlite3_open_v2(path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
             if let database { sqlite3_close(database) }
             throw ActivityError.connection
@@ -504,25 +662,59 @@ final class ThreadActivityMonitor {
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else { throw ActivityError.protocolMismatch }
         defer { sqlite3_finalize(statement) }
         var candidates = Set(activities.values.filter(\.isVisible).map(\.id))
-        while sqlite3_step(statement) == SQLITE_ROW {
+        var step = sqlite3_step(statement)
+        while step == SQLITE_ROW {
             if let value = sqlite3_column_text(statement, 0) {
                 let id = String(cString: value)
                 if UUID(uuidString: id) != nil { candidates.insert(id) }
+            }
+            step = sqlite3_step(statement)
+        }
+        guard step == SQLITE_DONE else { throw ActivityError.connection }
+        // The top-100 query cannot prove that an older row was archived.
+        // Resolve each retained row by ID before removing it.
+        var retained: OpaquePointer?
+        guard sqlite3_prepare_v2(database, "SELECT archived FROM threads WHERE id = ?", -1, &retained, nil) == SQLITE_OK else {
+            throw ActivityError.protocolMismatch
+        }
+        defer { sqlite3_finalize(retained) }
+        for id in Array(activities.keys) {
+            sqlite3_reset(retained)
+            sqlite3_clear_bindings(retained)
+            let outcome = id.withCString { pointer -> Int32 in
+                sqlite3_bind_text(retained, 1, pointer, -1, nil)
+                return sqlite3_step(retained)
+            }
+            guard outcome == SQLITE_ROW || outcome == SQLITE_DONE else { throw ActivityError.connection }
+            if outcome == SQLITE_DONE || sqlite3_column_int(retained, 0) != 0 {
+                candidates.remove(id)
+                activities.removeValue(forKey: id)
+                awaitingSnapshots.remove(id)
+                RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) { self.onArchive?(id) }
+                CFRunLoopWakeUp(CFRunLoopGetMain())
             }
         }
         for id in followed.subtracting(candidates) {
             try follow(id, enabled: false)
             activities.removeValue(forKey: id)
+            awaitingSnapshots.remove(id)
             owners.removeValue(forKey: id)
             revisions.removeValue(forKey: id)
         }
         // Read broadcasts can be missed while the desktop changes owners/windows.
         // Refresh outstanding completed rows from the owner's authoritative snapshot.
         // Keep the previous state until it arrives; absence is not completion evidence.
-        for id in candidates.intersection(followed) where activities[id]?.runtime == "idle" && activities[id]?.unread == true {
+        let now = Date()
+        let recoveryDue = now.timeIntervalSince(lastReadRefresh) >= 30
+        // Completed unread rows use the existing five-second refresh. Unknown
+        // states retain the slower recovery cadence to avoid repeated retries.
+        for id in candidates.intersection(followed) where ThreadRecoveryPolicy.shouldRefreshReadState(
+            runtime: activities[id]?.runtime, unread: activities[id]?.unread,
+            awaitingSnapshot: awaitingSnapshots.contains(id), recoveryDue: recoveryDue) {
             try follow(id, enabled: false)
             try follow(id, enabled: true)
         }
+        if recoveryDue { lastReadRefresh = now }
         for id in candidates.subtracting(followed) { try follow(id, enabled: true) }
         followed = candidates
     }
@@ -551,7 +743,7 @@ final class ThreadActivityMonitor {
         if method == "client-status-changed", params["status"] as? String == "disconnected",
            let owner = params["clientId"] as? String {
             for id in Array(owners.keys) where owners[id] == owner {
-                activities.removeValue(forKey: id)
+                awaitingSnapshots.insert(id)
                 owners.removeValue(forKey: id)
                 revisions.removeValue(forKey: id)
                 followed.remove(id)
@@ -561,9 +753,8 @@ final class ThreadActivityMonitor {
         }
         guard params["hostId"] as? String == "local" else { return }
         if let change = Self.readStateChange(from: message) {
-            let wasUnread = activities[change.id]?.unread == true
             activities[change.id]?.unread = change.unread
-            if wasUnread, !change.unread, let activity = activities[change.id] {
+            if !change.unread, let activity = activities[change.id] {
                 pendingReadActivities[change.id] = activity
             }
             publish(connected: true)
@@ -571,6 +762,11 @@ final class ThreadActivityMonitor {
         }
         if method == "thread-archived", let id = params["conversationId"] as? String {
             activities.removeValue(forKey: id)
+            awaitingSnapshots.remove(id)
+            followed.remove(id)
+            owners.removeValue(forKey: id)
+            revisions.removeValue(forKey: id)
+            RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) { self.onArchive?(id) }
             publish(connected: true)
             return
         }
@@ -583,7 +779,6 @@ final class ThreadActivityMonitor {
         if change["type"] as? String == "snapshot",
            let state = change["conversationState"] as? [String: Any],
            let runtime = state["threadRuntimeStatus"] as? [String: Any], let status = runtime["type"] as? String {
-            let wasUnread = activities[id]?.unread == true
             let activity = ThreadActivity(id: id, title: state["title"] as? String ?? L10n.text("Codex 채팅"),
                 runtime: status,
                 activeFlags: runtime["activeFlags"] as? [String] ?? [],
@@ -592,18 +787,22 @@ final class ThreadActivityMonitor {
                 unread: state["hasUnreadTurn"] as? Bool ?? false,
                 updatedAt: state["updatedAt"] as? Double ?? 0)
             activities[id] = activity
-            if wasUnread, !activity.unread { pendingReadActivities[id] = activity }
+            awaitingSnapshots.remove(id)
+            if state["hasUnreadTurn"] as? Bool == false, !activity.isRunning {
+                pendingReadActivities[id] = activity
+            }
             owners[id] = owner
             revisions[id] = revision
         } else if change["type"] as? String == "patches", owners[id] == owner {
             guard let base = change["baseRevision"] as? Int, revisions[id] == base else {
-                activities.removeValue(forKey: id)
+                awaitingSnapshots.insert(id)
                 try follow(id, enabled: false)
                 try follow(id, enabled: true)
                 publish(connected: true)
                 return
             }
             var refreshPendingRequests = false
+            var explicitlyRead = false
             for patch in change["patches"] as? [[String: Any]] ?? [] {
                 guard let path = patch["path"] as? [Any], let key = path.first as? String else { continue }
                 let value = patch["value"]
@@ -621,12 +820,9 @@ final class ThreadActivityMonitor {
                 }
                 if key == "title", path.count == 1, let title = value as? String { activities[id]?.title = title }
                 if key == "hasUnreadTurn", path.count == 1 {
-                    let wasUnread = activities[id]?.unread == true
-                    let unread = value as? Bool ?? false
+                    guard let unread = value as? Bool else { continue }
                     activities[id]?.unread = unread
-                    if wasUnread, !unread, let activity = activities[id] {
-                        pendingReadActivities[id] = activity
-                    }
+                    explicitlyRead = !unread
                 }
                 if key == "updatedAt", path.count == 1, let timestamp = value as? Double { activities[id]?.updatedAt = timestamp }
                 if key == "activeFlags" {
@@ -677,6 +873,11 @@ final class ThreadActivityMonitor {
                     }
                 }
             }
+            // Resolve after all patches so runtime and timestamp are current,
+            // even when the read flag precedes the idle transition.
+            if explicitlyRead, let activity = activities[id] {
+                pendingReadActivities[id] = activity
+            }
             revisions[id] = revision
             if refreshPendingRequests {
                 try follow(id, enabled: false)
@@ -688,9 +889,19 @@ final class ThreadActivityMonitor {
     }
 
     private func publish(connected: Bool) {
-        let results = completionTracker.update(Array(activities.values), connected: connected)
+        synchronizeAccount()
+        let account = activeAccount
+        let now = Date()
+        awaitingSince = awaitingSince.filter { awaitingSnapshots.contains($0.key) }
+        for id in awaitingSnapshots where awaitingSince[id] == nil { awaitingSince[id] = now }
+        if connected {
+            RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) { self.onCompatibilityChanged?(false) }
+        }
+        let confirmed = activities.values.filter { !awaitingSnapshots.contains($0.id) }
+        let results = completionTracker.update(confirmed, connected: connected, retainingIDs: awaitingSnapshots)
         if !results.isEmpty {
             RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) {
+                guard self.accountIsCurrent(account) else { return }
                 for result in results {
                     switch result.kind {
                     case .completed: self.onCompletion?(result.activity)
@@ -700,9 +911,10 @@ final class ThreadActivityMonitor {
             }
             CFRunLoopWakeUp(CFRunLoopGetMain())
         }
-        let attentionEvents = attentionTracker.update(Array(activities.values), connected: connected)
+        let attentionEvents = attentionTracker.update(confirmed, connected: connected)
         if !attentionEvents.isEmpty {
             RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) {
+                guard self.accountIsCurrent(account) else { return }
                 for event in attentionEvents { self.onAttention?(event) }
             }
             CFRunLoopWakeUp(CFRunLoopGetMain())
@@ -711,20 +923,31 @@ final class ThreadActivityMonitor {
         pendingReadActivities.removeAll()
         if !readActivities.isEmpty {
             RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) {
+                guard self.accountIsCurrent(account) else { return }
                 for activity in readActivities { self.onRead?(activity) }
             }
             CFRunLoopWakeUp(CFRunLoopGetMain())
         }
-        let rows = activities.values.filter(\.isVisible).sorted {
+        let rows = activities.values.filter {
+            $0.isVisible && ThreadRecoveryPolicy.shouldRetain(waitingSince: awaitingSince[$0.id], now: now)
+        }.map { activity -> ThreadActivity in
+            var row = activity
+            row.stateConfirmed = connected && !awaitingSnapshots.contains(row.id)
+            return row
+        }.sorted {
             if $0.isRunning != $1.isRunning { return $0.isRunning }
             if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
             return $0.id < $1.id
         }
+        let connected = connected && (awaitingSnapshots.isEmpty || !rows.isEmpty)
         guard rows != lastPublished || connected != lastConnected else { return }
         lastPublished = rows
         lastConnected = connected
         // Menu tracking uses a separate run-loop mode; deliver updates there as well.
-        RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) { self.onUpdate(rows, connected) }
+        RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) {
+            guard self.accountIsCurrent(account) else { return }
+            self.onUpdate(rows, connected)
+        }
         CFRunLoopWakeUp(CFRunLoopGetMain())
     }
 

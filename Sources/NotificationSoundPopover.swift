@@ -77,18 +77,16 @@ private final class SoundPopoverOptionButton: NSButton {
     }
 
     private func updateBackground() {
-        layer?.backgroundColor = pointerInside
-            ? NSColor.labelColor.withAlphaComponent(0.07).cgColor
-            : NSColor.clear.cgColor
+        setAdaptiveBackgroundColor(pointerInside
+            ? NSColor.labelColor.adaptiveAlpha(0.07) : .clear)
     }
 }
 
 private final class SoundPopoverDeleteButton: NSButton {
     private var pointerInside = false {
         didSet {
-            layer?.backgroundColor = pointerInside
-                ? NSColor.labelColor.withAlphaComponent(0.07).cgColor
-                : NSColor.clear.cgColor
+            setAdaptiveBackgroundColor(pointerInside
+                ? NSColor.labelColor.adaptiveAlpha(0.07) : .clear)
             contentTintColor = pointerInside ? .labelColor : .secondaryLabelColor
         }
     }
@@ -189,10 +187,10 @@ final class NotificationSoundPopover: NSObject, NSTextFieldDelegate {
         let contentHeight = headerHeight + 8 + listHeight + listBottom
         let content = NSView(frame: NSRect(x: 0, y: 0, width: contentWidth, height: contentHeight))
         content.wantsLayer = true
-        content.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        content.setAdaptiveBackgroundColor(NSColor.windowBackgroundColor)
         content.layer?.cornerRadius = 13
         content.layer?.borderWidth = 1
-        content.layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.16).cgColor
+        content.setAdaptiveBorderColor(NSColor.labelColor.adaptiveAlpha(0.16))
         content.layer?.masksToBounds = true
 
         let searchIcon = NSImageView(frame: NSRect(x: 13, y: contentHeight - 30, width: 15, height: 15))

@@ -20,13 +20,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var codexExecutableMissing = false
     private var activityMonitor: ThreadActivityMonitor?
     private var activities: [ThreadActivity] = []
+    private var activityConnected = false
+    private var activityCompatibilityIssue = false
     private var activityItem: NSMenuItem?
     private var dashboardItem: NSMenuItem?
-    private var refreshItem: NSMenuItem?
+    private var discordItem: NSMenuItem?
     private var quitItem: NSMenuItem?
     private var separatorItem: NSMenuItem?
     private var builtItems: StatusMenuBuilder.Items?
     private var readReceipts = ThreadActivityReadReceipts()
+    private var recordAccount: String?
+    private func selectRecordAccount(_ identity: String?) {
+        guard recordAccount != identity else { return }
+        recordAccount = identity
+        readReceipts = identity.map { ThreadActivityReadReceipts(defaults: .standard, account: $0) } ?? ThreadActivityReadReceipts()
+        activityMonitor?.selectAccount(identity)
+    }
     private let notificationSettings = NotificationSettings()
     private lazy var notifications = AppNotifications(settings: notificationSettings)
     private let updater = AppUpdater()
@@ -119,17 +128,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do { try LoginLaunchController().applyInitialDefault() }
         catch { NSLog("PlusCodex login item: %@", error.localizedDescription) }
         updater.start()
-        activityMonitor = ThreadActivityMonitor { [weak self] activities, _ in
+        activityMonitor = ThreadActivityMonitor { [weak self] activities, connected in
             guard let self else { return }
             self.activities = activities
+            self.activityConnected = connected
             self.updateActivityView()
         }
         activityMonitor?.onCompletion = { [weak self] activity in
             guard let self else { return }
+            self.scheduleCompletionRefresh()
+            // Automatic wake is maintenance work; do not pin its success as
+            // an unread user task or generate a completion notification.
+            guard activity.id != self.wakeSettings.threadID else { return }
             self.readReceipts.markCompleted(activity)
             self.notifications.completed(activity)
             self.updateActivityView()
-            self.scheduleCompletionRefresh()
         }
         activityMonitor?.onRead = { [weak self] activity in
             guard let self else { return }
@@ -137,7 +150,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.updateActivityView()
         }
         activityMonitor?.onFailure = { [weak self] activity in self?.notifications.failed(activity) }
+        activityMonitor?.onArchive = { [weak self] id in
+            self?.readReceipts.forget(id)
+            self?.activities.removeAll { $0.id == id }
+            self?.updateActivityView()
+        }
         activityMonitor?.onAttention = { [weak self] event in self?.notifications.attentionNeeded(event) }
+        activityMonitor?.onCompatibilityChanged = { [weak self] incompatible in
+            guard let self, self.activityCompatibilityIssue != incompatible else { return }
+            self.activityCompatibilityIssue = incompatible
+            self.updateActivityView()
+        }
+        notifications.isAttentionRequestCurrent = { [weak self] id, identity in
+            guard let self, self.activityConnected,
+                  let activity = self.activities.first(where: { $0.id == id }), activity.stateConfirmed else { return false }
+            if let identity { return activity.pendingRequests.contains { $0.identity == identity } }
+            return activity.isWaitingForApproval
+        }
         activityMonitor?.start()
         timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
             self?.checkCodexLoginChange()
@@ -165,6 +194,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let revision = CodexAuthRevision.current()
         guard revision != codexAuthRevision else { return }
         codexAuthRevision = revision
+        notifications.invalidateResetAccount()
+        selectRecordAccount(nil)
         schedulingQuota = nil
         resetSchedule.invalidateAccount()
         quota = nil
@@ -226,6 +257,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.fetching = false
                 let authChanged = CodexAuthRevision.current() != requestRevision
                 if authChanged {
+                    self.notifications.invalidateResetAccount()
+                    self.selectRecordAccount(nil)
                     self.codexAuthRevision = CodexAuthRevision.current()
                     self.schedulingQuota = nil
                     self.resetSchedule.invalidateAccount()
@@ -249,6 +282,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     self.codexExecutableMissing = false
                     self.settingsWindow.update(.codex, status: snapshot.account?.email ?? L10n.text("연결됨 · 사용량 조회 완료"))
                     if let identity = self.resetSchedule.resolvedAccount {
+                        self.selectRecordAccount(identity)
                         self.wakeSettings.selectAccount(identity)
                         self.notifications.scheduleResets(scheduledQuota,
                             account: CodexAccount(email: identity, planType: snapshot.account?.planType))
@@ -340,12 +374,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let dashboardItem, let built = builtItems {
             dashboardItem.view = panel
             StatusMenuBuilder.apply(intro: stateScreen, activity: built.activity,
-                                    separator: built.separator, refresh: built.refresh, quit: built.quit)
+                                    separator: built.separator, discord: built.discord, quit: built.quit)
             updateActivityView()
             return
         }
         let built = StatusMenuBuilder.make(intro: intro, dashboardView: panel, delegate: self,
-                                           target: self, refreshAction: #selector(refresh),
+                                           target: self, discordAction: #selector(openDiscord),
                                            quitAction: #selector(quitApp))
         builtItems = built
         let settings = NSMenuItem(title: L10n.text("설정"), action: #selector(openSettings), keyEquivalent: ",")
@@ -355,7 +389,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsItem = settings
         dashboardItem = built.dashboard
         activityItem = built.activity
-        refreshItem = built.refresh
+        discordItem = built.discord
         quitItem = built.quit
         separatorItem = built.separator
         updateActivityView()
@@ -364,6 +398,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func quitApp() { NSApp.terminate(nil) }
 
+    @objc private func openDiscord() {
+        NSWorkspace.shared.open(URL(string: "https://discord.gg/jR87pagNRG")!)
+    }
+
     @objc private func openSettings() {
         checkCodexLoginChange()
         extraProviders.forEach { $0.synchronize() }
@@ -371,7 +409,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func languageDidChange() {
-        refreshItem?.title = L10n.text("지금 새로고침")
+        if let discordItem { StatusMenuBuilder.configureDiscord(discordItem) }
         quitItem?.title = L10n.text("PlusCodex 종료")
         settingsItem?.title = L10n.text("설정")
         extraProviders.forEach { $0.reloadLocalization() }
@@ -476,8 +514,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // MARK: Test hooks (no production behavior change)
-    func testHookSetActivities(_ value: [ThreadActivity]) {
+    func testHookSetActivities(_ value: [ThreadActivity], connected: Bool = true) {
         activities = value
+        activityConnected = connected
         updateActivityView()
     }
     func testHookMenuWillOpen(_ menu: NSMenu) { menuWillOpen(menu) }
@@ -486,7 +525,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var testHookMenu: NSMenu? { builtItems?.menu }
     var testHookMenuItemCount: Int {
         guard let built = builtItems else { return 0 }
-        return [built.dashboard, built.activity, built.separator, built.refresh, built.quit]
+        return [built.dashboard, built.activity, built.separator, built.discord, built.quit]
             .filter { !$0.isHidden }.count
     }
     func testHookSetQuota(_ value: Quota?) { quota = value }
@@ -500,14 +539,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         let visible = readReceipts.visibleRows(activities)
         if let view = activityItem?.view as? ThreadActivityView {
-            view.update(activities: visible, preserveHeight: menuTracking)
+            view.update(activities: visible, preserveHeight: menuTracking, connected: activityConnected,
+                        incompatible: activityCompatibilityIssue)
         } else if !menuTracking {
             activityItem?.view = ThreadActivityView(activities: visible) { [weak self] opened in
                 guard let self else { return }
                 self.readReceipts.acknowledge(opened)
                 self.updateActivityView()
             }
+            (activityItem?.view as? ThreadActivityView)?.update(activities: visible, connected: activityConnected,
+                                                             incompatible: activityCompatibilityIssue)
         }
+        activityItem?.view?.alphaValue = activityConnected ? 1 : 0.55
+        activityItem?.view?.toolTip = activityConnected ? nil : L10n.text("작업 상태 연결 복구 중 · 마지막 확인 정보")
         if !menuTracking { activityItem?.isHidden = false }
     }
 

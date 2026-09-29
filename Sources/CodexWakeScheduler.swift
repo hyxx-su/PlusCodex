@@ -55,6 +55,7 @@ final class CodexWakeScheduler {
         let message = settings.message
         let previousThreadID = settings.threadID
         let accountIdentity = settings.accountIdentity
+        let authRevision = CodexAuthRevision.current()
         // Reserve the slot before launching a worker. If the app crashes while
         // the request is in flight, a relaunch must not submit a duplicate.
         settings.nextAttemptAt = now.addingTimeInterval(CodexWakeSettings.interval)
@@ -67,25 +68,37 @@ final class CodexWakeScheduler {
                 try CodexWakeClient.sendHello(modelID: modelID, effort: effort, message: message,
                                               previousThreadID: previousThreadID,
                                               shouldProceed: {
-                                                  self?.settings.enabled == true && self?.settings.accountIdentity == accountIdentity
+                                                  guard CodexAuthRevision.current() == authRevision else { return false }
+                                                  return DispatchQueue.main.sync {
+                                                      self?.settings.enabled == true && self?.settings.accountIdentity == accountIdentity
+                                                  }
                                               },
                                               onThreadPrepared: {
-                                                  if self?.settings.accountIdentity == accountIdentity {
-                                                      self?.settings.recordThreadID($0)
+                                                  let id = $0
+                                                  DispatchQueue.main.sync {
+                                                      if CodexAuthRevision.current() == authRevision,
+                                                         self?.settings.accountIdentity == accountIdentity {
+                                                          self?.settings.recordThreadID(id)
+                                                      }
                                                   }
                                               },
                                               onTurnSubmission: {
                                                   submitted = true
                                                   DispatchQueue.main.sync {
-                                                      if self?.settings.accountIdentity == accountIdentity {
+                                                      if CodexAuthRevision.current() == authRevision,
+                                                         self?.settings.accountIdentity == accountIdentity {
                                                           self?.settings.recordAttempt(at: Date(), cycleResetAt: cycle)
                                                       }
                                                   }
                                               },
                                               onTurnStartRequested: { submissionStarted = true },
                                               onModelResolved: {
-                                                  if self?.settings.accountIdentity == accountIdentity {
-                                                      self?.settings.select($0)
+                                                  let model = $0
+                                                  DispatchQueue.main.sync {
+                                                      if CodexAuthRevision.current() == authRevision,
+                                                         self?.settings.accountIdentity == accountIdentity {
+                                                          self?.settings.select(model)
+                                                      }
                                                   }
                                               })
             } catch CodexWakeError.cancelled {
@@ -99,6 +112,7 @@ final class CodexWakeScheduler {
             }
             DispatchQueue.main.async {
                 if shouldRetry, self?.settings.enabled == true,
+                   CodexAuthRevision.current() == authRevision,
                    self?.settings.accountIdentity == accountIdentity {
                     // A known pre-submission failure used no model quota; retry
                     // later without repeatedly starting Codex every minute.

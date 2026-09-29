@@ -18,6 +18,7 @@ for size in 16 32 128 256 512; do
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/PlusCodex.icns"
 cp Resources/PlusCodex.png "$APP/Contents/Resources/PlusCodex.png"
+cp Resources/Discord.png "$APP/Contents/Resources/Discord.png"
 cp Info.plist "$APP/Contents/Info.plist"
 ditto Resources/ko.lproj "$APP/Contents/Resources/ko.lproj"
 ditto Resources/en.lproj "$APP/Contents/Resources/en.lproj"

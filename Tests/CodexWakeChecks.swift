@@ -166,6 +166,22 @@ import AppKit
         wake.setEnabled(false)
 
         var createdReplacement = false
+        wake.selectAccount("account-a")
+        wake.recordThreadID("saved-task")
+        wake.recordAttempt(at: now, cycleResetAt: due)
+        wake.nextAttemptAt = due
+        wake.scheduledResetAt = due
+        wake.selectAccount("account-b")
+        precondition(wake.threadID == "saved-task", "Account changes must retain the local wake chat")
+        precondition(wake.lastAttemptAt == nil && wake.completedResetAt == nil
+                     && wake.nextAttemptAt == nil && wake.scheduledResetAt == nil,
+                     "Account changes must still clear scheduling state")
+        let restoredWake = CodexWakeSettings(defaults: defaults)
+        restoredWake.selectAccount("account-a")
+        precondition(restoredWake.threadID == "saved-task", "Returning to an account after relaunch must reuse the chat")
+        let restoredID = try! CodexWakeClient.prepareThread(previousThreadID: restoredWake.threadID,
+            resume: { $0 }, start: { createdReplacement = true; return "replacement" })
+        precondition(restoredID == "saved-task" && !createdReplacement)
         let reusedID = try! CodexWakeClient.prepareThread(previousThreadID: "saved-task",
             resume: { $0 }, start: { createdReplacement = true; return "replacement" })
         precondition(reusedID == "saved-task" && !createdReplacement)

@@ -12,9 +12,12 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
     private let dashboard = NSMenuItem()
     private var actions: [NSMenuItem] = []
     private var snapshot: QuotaSnapshot?
+    private var snapshotAt: Date?
+    private var snapshotRevision: Data?
     private var failure: String?
     private var fetching = false
     private var nextFetch = Date.distantPast
+    private var throttledUntil = Date.distantPast
     private var overlayHeight: CGFloat?
     private var offline = false
     private var checking = false
@@ -42,12 +45,15 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
         menu.addItem(separator)
         actions = [separator]
         for (title, selector, shortcut) in [
-            (L10n.text("지금 새로고침"), #selector(refreshClicked), "r"),
+            (L10n.text("디스코드"), #selector(discordClicked), ""),
             (L10n.text("설정"), #selector(settingsClicked), ","),
             (L10n.text("PlusCodex 종료"), #selector(quit), "q")
         ] {
             let row = NSMenuItem(title: title, action: selector, keyEquivalent: shortcut)
             row.target = self
+            if selector == #selector(discordClicked) {
+                StatusMenuBuilder.configureDiscord(row)
+            }
             menu.addItem(row)
             actions.append(row)
         }
@@ -113,7 +119,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
 
     func reloadLocalization() {
         guard actions.count >= 4 else { return }
-        actions[1].title = L10n.text("지금 새로고침")
+        StatusMenuBuilder.configureDiscord(actions[1])
         actions[2].title = L10n.text("설정")
         actions[3].title = L10n.text("PlusCodex 종료")
         // Recompute the current status text as well; otherwise a status
@@ -126,7 +132,10 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
         self.offline = offline
         self.checking = checking
         render()
-        if reconnected { refresh() }
+        if reconnected {
+            nextFetch = throttledUntil
+            refresh()
+        }
     }
 
     func refresh() {
@@ -140,12 +149,22 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
         render()
         let provider = self.provider
         let fetchUsage = self.fetchUsage
+        let generation = settings.generation(provider)
         DispatchQueue.global(qos: .utility).async { [weak self] in
+            let revision = ExternalUsageClient.authenticationRevision(provider)
             let result = Result { try fetchUsage(provider) }
+            let unchanged = revision == ExternalUsageClient.authenticationRevision(provider)
             RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) { [weak self] in
                 guard let self else { return }
                 self.fetching = false
                 guard self.settings.enabled(provider) else { return }
+                guard unchanged, self.settings.generation(provider) == generation else {
+                    self.snapshot = nil
+                    self.failure = nil
+                    self.nextFetch = self.throttledUntil
+                    self.refresh()
+                    return
+                }
                 switch result {
                 case .success(let snapshot):
                     if provider == .grok {
@@ -161,6 +180,8 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
                         }
                     }
                     self.snapshot = snapshot
+                    self.snapshotAt = Date()
+                    self.snapshotRevision = revision
                     self.failure = nil
                     self.nextFetch = Date().addingTimeInterval(provider == .claude ? 300 : 60)
                     if provider == .grok { self.settings.setGrokUsageVerified(true) }
@@ -168,19 +189,30 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
                         ? L10n.text("Claude Desktop 연결됨 · 사용량 수치 미제공")
                         : snapshot.account?.email ?? L10n.text("연결됨 · 사용량 조회 완료"))
                 case .failure(let error):
+                    if case UsageFailure.throttled(let date) = error { self.throttledUntil = date }
                     let noSubscriptionUsage = (error as? UsageFailure).map {
                         if case .subscriptionUsageUnavailable = $0 { return true }
                         return false
                     } ?? false
-                    if provider == .grok && (!self.settings.grokUsageVerified || noSubscriptionUsage) {
+                    if provider == .grok && noSubscriptionUsage {
                         if case UsageFailure.throttled(let date) = error { self.nextFetch = date }
                         self.settings.setEnabled(false, for: provider)
                         self.onState?(error.localizedDescription)
                         return
                     }
                     self.failure = error.localizedDescription
-                    // Never retain a previous account's percentage after auth errors.
-                    self.snapshot = nil
+                    let invalidCredentials: Bool
+                    switch error as? UsageFailure {
+                    case .authentication?, .credentialsUnavailable?, .missingScope?, .subscriptionUsageUnavailable?:
+                        invalidCredentials = true
+                    default: invalidCredentials = false
+                    }
+                    // Only a confirmed unchanged credential revision may retain old usage.
+                    if invalidCredentials || revision == nil || revision != self.snapshotRevision
+                        || !QuotaMenuView.canShowPreviousUsage(self.snapshot?.quota, updatedAt: self.snapshotAt) {
+                        self.snapshot = nil
+                        self.snapshotAt = nil
+                    }
                     if case UsageFailure.throttled(let date) = error { self.nextFetch = date }
                     else { self.nextFetch = Date().addingTimeInterval(provider == .claude ? 300 : 60) }
                     self.onState?(error.localizedDescription)
@@ -203,7 +235,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
         }
         let showRemaining = settings.showRemaining(provider)
         let percent = snapshot?.quota.windows.first.map { " \($0.displayPercent(showRemaining: showRemaining))%" } ?? ""
-        let unavailable = offline || failure != nil
+        let unavailable = offline || (failure != nil && !QuotaMenuView.canShowPreviousUsage(snapshot?.quota, updatedAt: snapshotAt))
         item?.button?.image = CodexStatusIcon.image(size: 18, offline: unavailable, provider: provider)
         item?.button?.imagePosition = unavailable || percent.isEmpty ? .imageOnly : .imageLeading
         item?.button?.attributedTitle = NSAttributedString(string: unavailable ? "" : percent, attributes: [
@@ -221,7 +253,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
         }
         if !overlay { overlayHeight = nil }
         dashboard.view = QuotaMenuView(quota: snapshot?.quota, account: snapshot?.account,
-            updatedAt: nil, failure: failure, intro: fetching && snapshot == nil && !overlay,
+            updatedAt: snapshotAt, failure: failure, intro: fetching && snapshot == nil && !overlay,
             checkingForUpdates: checking, offline: offline,
             preservedHeight: overlayHeight, provider: provider, showRemaining: showRemaining)
         actions.forEach { $0.isHidden = overlay }
@@ -253,7 +285,9 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
         DispatchQueue.main.async { self.settings.setEnabled(false, for: self.provider) }
     }
     @objc private func settingsClicked() { onSettings?() }
-    @objc private func refreshClicked() { refresh() }
+    @objc private func discordClicked() {
+        NSWorkspace.shared.open(URL(string: "https://discord.gg/jR87pagNRG")!)
+    }
     @objc private func quit() { NSApp.terminate(nil) }
 
     var testHookMenu: NSMenu { menu }

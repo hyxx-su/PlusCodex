@@ -124,8 +124,10 @@ final class CodexWakeSettings {
 
     func selectAccount(_ identity: String) {
         if let previous = defaults.string(forKey: Key.account), previous != identity {
+            // The wake chat belongs to the shared local history. Keep its ID
+            // across sign-ins, but never reuse the previous account's schedule.
             for key in [Key.lastAttemptAt, Key.completedResetAt, Key.nextAttemptAt,
-                        Key.scheduledResetAt, Key.threadID] {
+                        Key.scheduledResetAt] {
                 defaults.removeObject(forKey: key)
             }
         }

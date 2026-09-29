@@ -120,7 +120,8 @@ final class ThreadActivityButton: NSButton {
         title = ""
         target = self
         action = #selector(openThread)
-        setAccessibilityLabel("\(activity.isRunning ? L10n.text("작업 중") : L10n.text("완료 · 미확인")), \(activity.title)")
+        setAccessibilityLabel("\(activity.statusLabel), \(activity.title)")
+        toolTip = activity.statusLabel
         wantsLayer = true
         notificationButton.rowColor = activity.isRunning ? .secondaryLabelColor : .labelColor
         notificationButton.updateAppearance()
@@ -182,9 +183,10 @@ final class ThreadActivityButton: NSButton {
         notificationButton.setAccessibilityLabel("\(activity.title) 알림")
         notificationButton.updateAppearance()
         guard self.activity != activity else { return }
-        let runningChanged = self.activity.isRunning != activity.isRunning
+        let runningChanged = self.activity.isRunning != activity.isRunning || self.activity.stateConfirmed != activity.stateConfirmed
         self.activity = activity
-        setAccessibilityLabel("\(activity.isRunning ? L10n.text("작업 중") : L10n.text("완료 · 미확인")), \(activity.title)")
+        setAccessibilityLabel("\(activity.statusLabel), \(activity.title)")
+        toolTip = activity.statusLabel
         needsLayout = true
         needsDisplay = true
         if runningChanged { updateShimmer() }
@@ -192,7 +194,7 @@ final class ThreadActivityButton: NSButton {
 
     private func updateShimmer() {
         shimmerOverlay.gradient.removeAllAnimations()
-        shimmerOverlay.isHidden = !activity.isRunning || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        shimmerOverlay.isHidden = !activity.stateConfirmed || !activity.isRunning || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         guard window != nil, !shimmerOverlay.isHidden else { return }
         let animation = CABasicAnimation(keyPath: "locations")
         animation.fromValue = [-0.35, -0.18, 0]
@@ -291,13 +293,24 @@ final class ThreadActivityView: NSView {
         scroll.scrollerStyle = .overlay
         scroll.documentView = document
         addSubview(scroll)
+        connectionLabel.font = .systemFont(ofSize: 11)
+        connectionLabel.textColor = .secondaryLabelColor
+        addSubview(connectionLabel)
         update(activities: activities)
     }
 
     required init?(coder: NSCoder) { nil }
 
+    private let connectionLabel = NSTextField(labelWithString: "")
+
     /// Reuse rows while tracking, but collapse the area when no tasks remain.
-    func update(activities: [ThreadActivity], preserveHeight: Bool = false) {
+    func update(activities: [ThreadActivity], preserveHeight: Bool = false, connected: Bool = true, incompatible: Bool = false) {
+        let allConfirmed = connected && !incompatible && activities.allSatisfy(\.stateConfirmed)
+        let statusChanged = connectionLabel.isHidden != allConfirmed
+        connectionLabel.isHidden = allConfirmed
+        connectionLabel.stringValue = incompatible ? L10n.text("Codex 연결 형식 미지원 · 앱 업데이트를 확인하세요")
+            : L10n.text("작업 상태 연결 복구 중 · 마지막 확인 정보")
+        let statusHeight: CGFloat = allConfirmed ? 0 : 22
         let incoming = Set(activities.map(\.id))
         let animate = window != nil && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         for id in Array(buttons.keys) where !incoming.contains(id) {
@@ -329,11 +342,12 @@ final class ThreadActivityView: NSView {
                 }
             }
         }
-        if activities.isEmpty || !preserveHeight || bounds.height == 0 {
+        if activities.isEmpty || !preserveHeight || bounds.height == 0 || statusChanged {
             let height: CGFloat = activities.isEmpty ? 0 : 8 + CGFloat(min(activities.count, 5)) * 34
-            setFrameSize(NSSize(width: 300, height: height))
+            setFrameSize(NSSize(width: 300, height: height + statusHeight))
         }
-        scroll.frame = NSRect(x: 12, y: 4, width: 276, height: max(0, bounds.height - 8))
+        connectionLabel.frame = NSRect(x: 12, y: 3, width: 276, height: 18)
+        scroll.frame = NSRect(x: 12, y: 4 + statusHeight, width: 276, height: max(0, bounds.height - 8 - statusHeight))
         document.setFrameSize(NSSize(width: 276, height: max(scroll.bounds.height, CGFloat(orderedIDs.count) * 34)))
         scroll.hasVerticalScroller = CGFloat(orderedIDs.count) * 34 > scroll.bounds.height
         for (index, id) in orderedIDs.enumerated() {

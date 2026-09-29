@@ -15,6 +15,8 @@ final class ProviderSettings {
     // A persisted Grok preference is not proof that the current account still
     // provides a displayable quota. Revalidate once per app launch.
     private(set) var grokUsageVerified = false
+    private var generations: [AIProvider: Int] = [:]
+    func generation(_ provider: AIProvider) -> Int { generations[provider, default: 0] }
     var onChange: (() -> Void)?
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
     var claudeShowRemaining: Bool {
@@ -37,6 +39,7 @@ final class ProviderSettings {
     }
     func setEnabled(_ enabled: Bool, for provider: AIProvider) {
         guard self.enabled(provider) != enabled else { return }
+        generations[provider, default: 0] += 1
         if provider == .grok && !enabled { grokUsageVerified = false }
         defaults.set(enabled, forKey: "provider.\(provider.rawValue).enabled")
         onChange?()

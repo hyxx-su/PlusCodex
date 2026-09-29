@@ -3,6 +3,16 @@ import AppKit
 @main
 struct ActivityChecks {
     static func main() {
+        precondition(ThreadRecoveryPolicy.shouldRefreshReadState(runtime: "idle", unread: true,
+            awaitingSnapshot: false, recoveryDue: false))
+        precondition(!ThreadRecoveryPolicy.shouldRefreshReadState(runtime: "idle", unread: false,
+            awaitingSnapshot: false, recoveryDue: true))
+        precondition(!ThreadRecoveryPolicy.shouldRefreshReadState(runtime: "active", unread: true,
+            awaitingSnapshot: false, recoveryDue: true))
+        precondition(!ThreadRecoveryPolicy.shouldRefreshReadState(runtime: "idle", unread: true,
+            awaitingSnapshot: true, recoveryDue: false))
+        precondition(ThreadRecoveryPolicy.shouldRefreshReadState(runtime: nil, unread: nil,
+            awaitingSnapshot: true, recoveryDue: true))
         let id = "01a0aa9a-48f3-7971-bbf0-1af8c1985b3c"
         var activity = ThreadActivity(id: id, title: "작업", runtime: "active", unread: false, updatedAt: 0)
         precondition(activity.isVisible && activity.isRunning)
@@ -71,16 +81,56 @@ struct ActivityChecks {
         receipts.acknowledgeExternally(externallyCompleted)
         precondition(receipts.visibleRows([externallyCompleted]).isEmpty,
                      "Codex에서 읽은 완료 작업은 메뉴바에서 사라져야 합니다")
+        receipts.markCompleted(externallyCompleted)
+        precondition(receipts.visibleRows([externallyCompleted]).isEmpty,
+                     "A delayed completion must not restore an acknowledged result")
+        externallyCompleted.unread = false
+        receipts.acknowledgeExternally(externallyCompleted)
+        precondition(receipts.visibleRows([externallyCompleted]).isEmpty,
+                     "Repeated read receipts must remain effective")
+        externallyCompleted.unread = true
         externallyCompleted.updatedAt = 21
         precondition(receipts.visibleRows([externallyCompleted]).count == 1,
                      "새로 갱신된 완료 작업은 다시 표시되어야 합니다")
 
         _ = NSApplication.shared
+        var turnReceipts = ThreadActivityReadReceipts()
+        var readTurn = externallyCompleted
+        readTurn.latestTurn = ThreadTurnState(key: "read", value: ["turnId": "read", "status": "completed"])
+        let receiptSuite = "PlusCodex.receipts.\(UUID().uuidString)"
+        let receiptDefaults = UserDefaults(suiteName: receiptSuite)!
+        defer { receiptDefaults.removePersistentDomain(forName: receiptSuite) }
+        var persisted = ThreadActivityReadReceipts(defaults: receiptDefaults)
+        persisted.acknowledge(readTurn)
+        var restored = ThreadActivityReadReceipts(defaults: receiptDefaults)
+        precondition(restored.visibleRows([readTurn]).isEmpty, "Read turns must stay hidden after relaunch")
+        restored.forget(readTurn.id)
+        var forgotten = ThreadActivityReadReceipts(defaults: receiptDefaults)
+        precondition(forgotten.visibleRows([readTurn]).count == 1)
+        var uncertain = readTurn
+        uncertain.stateConfirmed = false
+        forgotten.acknowledge(uncertain)
+        precondition(forgotten.visibleRows([uncertain]).count == 1,
+                     "Unconfirmed state must not be treated as read completion")
+        precondition(uncertain.statusLabel == L10n.text("작업 상태 확인 불가"))
+        turnReceipts.acknowledge(readTurn)
+        readTurn.updatedAt += 100
+        turnReceipts.markCompleted(readTurn)
+        precondition(turnReceipts.visibleRows([readTurn]).isEmpty)
+        turnReceipts.forget(readTurn.id)
+        turnReceipts.markCompleted(readTurn)
+        turnReceipts.forget(readTurn.id)
+        precondition(turnReceipts.visibleRows([]).isEmpty)
         let empty = ThreadActivityView(activities: [])
         precondition(empty.frame.height == 0 && empty.subviews.first is NSScrollView)
         let populated = ThreadActivityView(activities: [activity])
         precondition(populated.frame.height == 42)
-        precondition(populated.subviews.count == 1 && populated.subviews.first is NSScrollView)
+        precondition(populated.subviews.first is NSScrollView)
+        empty.update(activities: [], connected: false)
+        precondition(empty.frame.height > 0)
+        precondition(empty.subviews.compactMap { $0 as? NSTextField }.contains { !$0.isHidden && !$0.stringValue.isEmpty })
+        empty.update(activities: [], connected: true)
+        precondition(empty.frame.height == 0)
         let scroll = populated.subviews.first as! NSScrollView
         let originalRow = scroll.documentView!.subviews.first!
         activity.runtime = "idle"

@@ -57,6 +57,12 @@ import Foundation
 
         // Stable corrections are accepted before the deadline, including after restart.
         let other = CodexAccount(email: "correction-test@example.invalid", planType: "plus")
+        let lateAccount = CodexAccount(email: "late@example.invalid", planType: "plus")
+        _ = schedule.update(quota(due), account: lateAccount, now: base)
+        let lateCorrection = due.addingTimeInterval(3600)
+        _ = schedule.update(quota(lateCorrection), account: lateAccount, now: due.addingTimeInterval(60))
+        let lateConfirmed = schedule.update(quota(lateCorrection), account: lateAccount, now: due.addingTimeInterval(120))
+        precondition(lateConfirmed.primary?.resetsAt == lateCorrection.timeIntervalSince1970)
         _ = schedule.update(quota(due), account: other, now: base)
         let corrected = due.addingTimeInterval(1800)
         let first = schedule.update(quota(corrected), account: other, now: base.addingTimeInterval(60))

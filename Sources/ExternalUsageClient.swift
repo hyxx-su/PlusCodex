@@ -26,6 +26,21 @@ enum UsageFailure: LocalizedError {
 /// Read-only adapters informed by Orca's rate-limit fetchers (MIT, see Resources/Orca-LICENSE).
 /// Credentials remain in memory and are sent only to the provider's fixed HTTPS endpoint.
 enum ExternalUsageClient {
+    /// An in-memory fingerprint only; never persist or log credentials.
+    static func authenticationRevision(_ provider: AIProvider) -> Data? {
+        let data: Data?
+        if provider == .claude {
+            data = claudeOAuthCredentials().flatMap {
+                try? JSONSerialization.data(withJSONObject: $0, options: .sortedKeys)
+            }
+        } else {
+            let home = ProcessInfo.processInfo.environment["GROK_HOME"].map { URL(fileURLWithPath: $0) }
+                ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok")
+            data = try? Data(contentsOf: home.appendingPathComponent("auth.json"))
+        }
+        return data.map { Data(SHA256.hash(data: $0)) }
+    }
+
     static func fetch(_ provider: AIProvider) throws -> QuotaSnapshot {
         switch provider {
         case .claude: return try claude()
