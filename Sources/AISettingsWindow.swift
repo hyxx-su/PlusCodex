@@ -304,6 +304,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
     private let wakeToggle = NSSwitch()
     private let wakeModelPicker = LanguagePickerButton(frame: .zero)
     private let wakeMessageField = NSTextField(frame: .zero)
+    private let wakeDescription = NSTextField(labelWithString: "")
     var onWakeSettingsChanged: (() -> Void)?
     private lazy var searchPopover: SettingsSearchPanel = {
         let panel = SettingsSearchPanel(contentRect: .zero,
@@ -733,12 +734,12 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         cardSeparator(wakeCard, y: 78)
         label("자동으로 깨우기", in: wakeCard, x: 16, y: 194,
               width: 250, size: 13, bold: true)
-        let wakeDescription = NSTextField(labelWithString: L10n.text("사용량이 초기화될 때마다 Codex를 자동으로 깨웁니다."))
+        wakeDescription.stringValue = L10n.text("사용량이 초기화될 때마다 Codex를 자동으로 깨웁니다.")
         status(wakeDescription, in: wakeCard, y: 176, width: 280)
         wakeDescription.font = .systemFont(ofSize: 11)
-        wakeDescription.toolTip = L10n.text("Codex 사용량이 소모됩니다. 깨우기 채팅이 사용 중이면 나중에 다시 시도합니다.")
-        localizedFields.append((field: wakeDescription,
-                                key: "사용량이 초기화될 때마다 Codex를 자동으로 깨웁니다."))
+        wakeDescription.toolTip = L10n.language == .korean
+            ? "Codex 사용량이 소모됩니다. 채팅 재사용이 거절되면 새 채팅을 생성합니다."
+            : "Uses Codex quota. Creates a replacement chat when reuse is explicitly rejected."
         placeSwitch(wakeToggle, in: wakeCard, centerY: 197)
         wakeToggle.identifier = NSUserInterfaceItemIdentifier("codexWakeEnabled")
         wakeToggle.target = self
@@ -1298,6 +1299,16 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         languagePicker.displayTitle = language.selected == .korean ? L10n.text("한국어") : "English"
         updateLanguagePickerFrame()
         wakeToggle.state = wakeSettings.enabled ? .on : .off
+        if let failure = wakeSettings.lastFailure {
+            let next = wakeSettings.nextAttemptAt.map {
+                DateFormatter.localizedString(from: $0, dateStyle: .none, timeStyle: .short)
+            } ?? "—"
+            wakeDescription.stringValue = L10n.language == .korean
+                ? "깨우기 실패 · 다음 시도 \(next)" : "Wake failed · Next attempt \(next)"
+            wakeDescription.toolTip = failure
+        } else {
+            wakeDescription.stringValue = L10n.text("사용량이 초기화될 때마다 Codex를 자동으로 깨웁니다.")
+        }
         configureWakeModelPicker()
         updatePickerSelection()
         for provider in AIProvider.allCases {

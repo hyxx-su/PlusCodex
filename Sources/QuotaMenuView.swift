@@ -175,7 +175,8 @@ final class QuotaMenuView: NSView {
     static func panelHeight(quota: Quota?, intro: Bool) -> CGFloat {
         if intro { return 250 }
         let count = quota?.windows.count ?? 0
-        return count == 0 ? 124 : 66 + CGFloat(count) * 92
+        // The activity section supplies its own top inset; avoid doubling that gap.
+        return count == 0 ? 124 : 58 + CGFloat(count) * 92
     }
 
     private func card(_ window: QuotaWindow?, title: String, y: CGFloat, displayedPercent: Double?) {

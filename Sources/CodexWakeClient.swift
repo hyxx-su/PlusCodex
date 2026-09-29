@@ -9,6 +9,21 @@ enum CodexWakeError: LocalizedError {
     case modelUnavailable
     case failed(String)
     case cancelled
+    case desktopResponse(String)
+
+    var isActiveWriterConflict: Bool {
+        if case .failed(let message) = self {
+            return message.contains("already has an active writer")
+        }
+        return false
+    }
+
+    var allowsReplacementBeforeSubmission: Bool {
+        guard case .failed(let message) = self else { return false }
+        let text = message.lowercased()
+        return isActiveWriterConflict || text.hasPrefix("thread not found")
+            || text.hasPrefix("no rollout found for thread")
+    }
 
     var isDefiniteServerRejection: Bool {
         if case .failed = self { return true }
@@ -24,6 +39,7 @@ enum CodexWakeError: LocalizedError {
         case .modelUnavailable: return L10n.text("선택한 Codex 모델을 사용할 수 없습니다.")
         case .failed(let message): return message
         case .cancelled: return L10n.text("Codex 깨우기가 꺼졌습니다.")
+        case .desktopResponse(let message): return "Codex desktop: \(message)"
         }
     }
 }
@@ -40,11 +56,16 @@ final class CodexWakeClient {
         try AppServerSession().models()
     }
 
-    /// Never fall back to a new chat when a saved chat cannot be resumed.
-    /// The caller can retry that same chat after its active writer is gone.
+    /// Only explicit resume rejections permit replacement. This helper never
+    /// sends a turn, so replacement cannot duplicate a submitted wake message.
     static func prepareThread(previousThreadID: String?, resume: (String) throws -> String,
                               start: () throws -> String) throws -> String {
-        if let previousThreadID { return try resume(previousThreadID) }
+        if let previousThreadID {
+            do { return try resume(previousThreadID) }
+            catch let error as CodexWakeError where error.allowsReplacementBeforeSubmission {
+                NSLog("PlusCodex wake replacing unavailable chat before submission")
+            }
+        }
         return try start()
     }
 
@@ -91,6 +112,7 @@ final class CodexWakeClient {
                   let resumedID = thread["id"] as? String else { throw CodexWakeError.invalidResponse }
             return resumedID
         }, start: {
+            guard shouldProceed() else { throw CodexWakeError.cancelled }
             let started = try server.request("thread/start", params: [
                 "model": selected.modelName,
                 "cwd": "/private/tmp",
@@ -230,6 +252,32 @@ private final class AppServerSession {
                   turn["id"] as? String == turnID else { continue }
             if turn["status"] as? String == "completed" { return }
             throw CodexWakeError.failed(L10n.text("Codex 깨우기 작업을 완료하지 못했습니다."))
+        }
+        throw CodexWakeError.timedOut
+    }
+
+    func waitForStoredTurn(threadID: String, turnID: String) throws {
+        let deadline = Date().addingTimeInterval(120)
+        while Date() < deadline {
+            let result: [String: Any]
+            do {
+                result = try request("thread/read", params: ["threadId": threadID, "includeTurns": true],
+                                     timeout: min(20, max(0.1, deadline.timeIntervalSinceNow)))
+            } catch {
+                // A history-read rejection says nothing about the accepted
+                // turn's outcome, so it must not authorize another submission.
+                throw CodexWakeError.invalidResponse
+            }
+            let thread = result["thread"] as? [String: Any]
+            let turns = thread?["turns"] as? [[String: Any]] ?? []
+            if let turn = turns.first(where: { $0["id"] as? String == turnID }) {
+                switch turn["status"] as? String {
+                case "completed": return
+                case "failed", "interrupted": throw CodexWakeError.failed("Codex wake turn failed")
+                default: break
+                }
+            }
+            Thread.sleep(forTimeInterval: 1)
         }
         throw CodexWakeError.timedOut
     }

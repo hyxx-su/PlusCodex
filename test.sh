@@ -7,7 +7,7 @@ for file in Sources/*.swift; do
     [[ "$file" == Sources/main.swift ]] || SOURCES+=("$file")
 done
 # QuotaStartupChecks requires a real authenticated account and is intentionally opt-in.
-for name in ReliabilityChecks AppearanceSoundChecks CLIInstallationChecks QuotaTests QuotaAlertChecks QuotaLayoutChecks IssueReportChecks NotificationChecks NotificationSoundChecks MenuBuilderChecks IntroChecks ActivityChecks LiveMenuChecks ThreadNotificationChecks UpdateLoadingChecks UpdaterChecks ProviderChecks ClaudeFallbackChecks SettingsChecks BackgroundKeychainChecks PresentationChecks CodexWakeChecks CodexResetScheduleChecks UsageDisplayChecks StatusWindowChecks CompactSettingsChecks; do
+for name in ReliabilityChecks AppearanceSoundChecks CLIInstallationChecks QuotaTests QuotaAlertChecks QuotaLayoutChecks IssueReportChecks NotificationChecks NotificationSoundChecks MenuBuilderChecks IntroChecks ActivityChecks LiveMenuChecks ThreadNotificationChecks UpdateLoadingChecks UpdaterChecks ProviderChecks ClaudeFallbackChecks SettingsChecks BackgroundKeychainChecks PresentationChecks CodexWakeChecks CodexWakeBridgeChecks CodexResetScheduleChecks UsageDisplayChecks StatusWindowChecks CompactSettingsChecks; do
     TEST_APP="$PWD/build/$name.app"
     mkdir -p "$TEST_APP/Contents/MacOS" "$TEST_APP/Contents/Resources"
     cp Info.plist "$TEST_APP/Contents/Info.plist"

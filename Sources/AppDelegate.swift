@@ -53,7 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                           wakeSettings: wakeSettings)
         controller.onWakeSettingsChanged = { [weak self] in
             guard let self else { return }
-            self.wakeScheduler.tick(quota: self.schedulingQuota, offline: self.offline)
+            self.wakeScheduler.tick(quota: self.quota, offline: self.offline)
         }
         return controller
     }()
@@ -172,7 +172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.checkCodexLoginChange()
             self?.requestRefresh(retryWhenBusy: false)
             self?.extraProviders.forEach { $0.synchronize() }
-            if let self { self.wakeScheduler.tick(quota: self.schedulingQuota, offline: self.offline) }
+            if let self { self.wakeScheduler.tick(quota: self.quota, offline: self.offline) }
         }
         if let timer { RunLoop.main.add(timer, forMode: .common) }
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(wokeFromSleep),
@@ -208,7 +208,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func wokeFromSleep() {
         refresh()
-        wakeScheduler.tick(quota: schedulingQuota, offline: offline)
+        wakeScheduler.tick(quota: quota, offline: offline)
     }
 
     @objc private func refresh() { requestRefresh(retryWhenBusy: true) }
@@ -286,7 +286,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                         self.wakeSettings.selectAccount(identity)
                         self.notifications.scheduleResets(scheduledQuota,
                             account: CodexAccount(email: identity, planType: snapshot.account?.planType))
-                        self.wakeScheduler.tick(quota: scheduledQuota, offline: self.offline,
+                        self.wakeScheduler.tick(quota: snapshot.quota, offline: self.offline,
                                                 quotaFetchedAt: refreshedAt, now: refreshedAt)
                     }
                 case .failure(let error):

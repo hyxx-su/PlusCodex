@@ -44,6 +44,24 @@ struct CodexWakeAccount: Equatable {
 final class CodexWakeSettings {
     static let interval: TimeInterval = 5 * 60 * 60
 
+    struct Observation: Codable {
+        let fetchedAt: Date
+        let resetAt: Date
+        let usedPercent: Double
+    }
+
+    var observation: Observation? {
+        get {
+            defaults.data(forKey: "codexWake.observation.v1").flatMap {
+                try? JSONDecoder().decode(Observation.self, from: $0)
+            }
+        }
+        set {
+            defaults.set(newValue.flatMap { try? JSONEncoder().encode($0) },
+                         forKey: "codexWake.observation.v1")
+        }
+    }
+
     private enum Key {
         static let enabled = "codexWake.enabled"
         static let modelID = "codexWake.modelID"
@@ -75,6 +93,10 @@ final class CodexWakeSettings {
     }
 
     var enabled: Bool { defaults.bool(forKey: Key.enabled) }
+    var lastFailure: String? {
+        get { defaults.string(forKey: "codexWake.lastFailure") }
+        set { defaults.set(newValue, forKey: "codexWake.lastFailure") }
+    }
     var modelID: String { defaults.string(forKey: Key.modelID) ?? "gpt-6-luna" }
     var modelName: String { defaults.string(forKey: Key.modelName) ?? "gpt-6-luna" }
     var displayName: String { defaults.string(forKey: Key.displayName) ?? "GPT-6 Luna" }
@@ -100,6 +122,8 @@ final class CodexWakeSettings {
     func setEnabled(_ value: Bool) {
         guard enabled != value else { return }
         defaults.set(value, forKey: Key.enabled)
+        lastFailure = nil
+        observation = nil
         // Re-evaluate the current five-hour window when re-enabled, but retain
         // the last attempt so switching off and on cannot send twice at once.
         nextAttemptAt = nil
@@ -124,6 +148,8 @@ final class CodexWakeSettings {
 
     func selectAccount(_ identity: String) {
         if let previous = defaults.string(forKey: Key.account), previous != identity {
+            lastFailure = nil
+            observation = nil
             // The wake chat belongs to the shared local history. Keep its ID
             // across sign-ins, but never reuse the previous account's schedule.
             for key in [Key.lastAttemptAt, Key.completedResetAt, Key.nextAttemptAt,
@@ -135,6 +161,8 @@ final class CodexWakeSettings {
     }
 
     func recordAttempt(at date: Date, cycleResetAt: Date? = nil) {
+        lastFailure = nil
+        observation = nil
         defaults.set(date, forKey: Key.lastAttemptAt)
         if let cycleResetAt { defaults.set(cycleResetAt, forKey: Key.completedResetAt) }
         nextAttemptAt = cycleResetAt == nil ? date.addingTimeInterval(Self.interval) : nil

@@ -9,11 +9,14 @@ import AppKit
             let account = CodexAccount(email: "test@example.com", planType: plan)
             let quota = Quota(primary: nil, secondary: weekly)
             let view = QuotaMenuView(quota: quota, account: account, updatedAt: nil, failure: nil)
-            precondition(view.bounds.height == 158)
+            precondition(view.bounds.height == 150)
             precondition(quota.windows.map(\.label) == ["주간"])
             precondition(!(view.accessibilityLabel() ?? "").contains("5시간"))
             view.update(quota: Quota(primary: short, secondary: weekly), account: account, updatedAt: nil, failure: nil)
-            precondition(view.bounds.height == 250, "Keep real limits on every plan")
+            precondition(view.bounds.height == 242, "Keep real limits on every plan")
+            let lastCardBottom = CGFloat(62 + 92 + 84)
+            precondition(view.bounds.height - lastCardBottom == 4,
+                         "Keep only a small trailing inset before the activity section")
             view.update(quota: Quota(primary: nil, secondary: nil), account: account, updatedAt: nil, failure: nil)
             precondition(view.bounds.height == 124)
         }
@@ -34,13 +37,13 @@ import AppKit
         precondition(!QuotaMenuView.canShowPreviousUsage(nil, updatedAt: now, now: now))
         let previous = QuotaMenuView(quota: cached, updatedAt: now.addingTimeInterval(-60),
                                      failure: "조회 시간 초과")
-        precondition(!previous.showsFailureScreen && previous.bounds.height == 250)
+        precondition(!previous.showsFailureScreen && previous.bounds.height == 242)
         precondition(previous.subviews.allSatisfy { !($0 is QuotaLoadingView) })
         let expired = QuotaMenuView(quota: cached, updatedAt: now.addingTimeInterval(-11 * 60),
                                     failure: "조회 시간 초과")
         precondition(expired.showsFailureScreen)
         let claude = QuotaMenuView(quota: cached, updatedAt: now, failure: "조회 시간 초과", provider: .claude)
-        precondition(!claude.showsFailureScreen && claude.bounds.height == 250,
+        precondition(!claude.showsFailureScreen && claude.bounds.height == 242,
                      "Recent Claude usage is retained during a transient lookup failure")
         print("PASS: missing windows, real limits on all plans, dynamic height")
     }

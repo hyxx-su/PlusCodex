@@ -69,6 +69,7 @@ final class CodexWakeScheduler {
             var submissionStarted = false
             var submitted = false
             var shouldRetry = false
+            var failureMessage: String?
             do {
                 try CodexWakeClient.sendHello(modelID: modelID, effort: effort, message: message,
                                               previousThreadID: previousThreadID,
@@ -110,6 +111,7 @@ final class CodexWakeScheduler {
             } catch CodexWakeError.cancelled {
                 // The user switched the feature off before the turn was sent.
             } catch {
+                failureMessage = error.localizedDescription
                 NSLog("PlusCodex wake message failed: %@", error.localizedDescription)
                 let definiteRejection = (error as? CodexWakeError)?.isDefiniteServerRejection == true
                 // A timeout or disconnect after sending is ambiguous: retrying
@@ -117,6 +119,10 @@ final class CodexWakeScheduler {
                 shouldRetry = !submitted && (!submissionStarted || definiteRejection)
             }
             DispatchQueue.main.async {
+                if CodexAuthRevision.current() == authRevision,
+                   self?.settings.accountIdentity == accountIdentity {
+                    self?.settings.lastFailure = failureMessage
+                }
                 if shouldRetry, self?.settings.enabled == true,
                    CodexAuthRevision.current() == authRevision,
                    self?.settings.accountIdentity == accountIdentity {
@@ -135,8 +141,16 @@ final class CodexWakeScheduler {
         guard settings.enabled, !offline,
               quotaFetchedAt.map({ $0 <= now }) ?? true,
               let window = quota?.windows.first(where: { $0.windowDurationMins == 300 }),
+              window.usedPercent.isFinite, (0...100).contains(window.usedPercent),
               let seconds = window.resetsAt, seconds.isFinite else { return nil }
         let currentReset = Date(timeIntervalSince1970: seconds)
+        let previous = settings.observation
+        if let fetchedAt = quotaFetchedAt {
+            guard now.timeIntervalSince(fetchedAt) <= 120,
+                  previous.map({ fetchedAt.timeIntervalSince($0.fetchedAt) >= 30 }) ?? true else { return nil }
+            settings.observation = .init(fetchedAt: fetchedAt, resetAt: currentReset,
+                                         usedPercent: window.usedPercent)
+        }
         // Recover the next deadline even if the Mac shut down immediately after
         // success, before another usage read could book it. A missed interval
         // results in one catch-up attempt, not a replay of every missed cycle.
@@ -144,7 +158,11 @@ final class CodexWakeScheduler {
             if settings.completedResetAt == nil, let legacyDue = settings.nextAttemptAt {
                 settings.scheduledResetAt = legacyDue
             } else {
-                settings.scheduledResetAt = lastAttempt.addingTimeInterval(CodexWakeSettings.interval)
+                // Prefer the observed active window after a successful send.
+                // A local five-hour fallback only preserves recovery when no
+                // active window has yet been observed (e.g. immediate shutdown).
+                settings.scheduledResetAt = quotaFetchedAt != nil && window.usedPercent > 0 && currentReset > now
+                    ? currentReset : lastAttempt.addingTimeInterval(CodexWakeSettings.interval)
             }
         }
         if settings.scheduledResetAt == nil {
@@ -161,11 +179,30 @@ final class CodexWakeScheduler {
         guard let cycle = settings.scheduledResetAt else { return nil }
         let due = max(cycle, settings.nextAttemptAt ?? .distantPast,
                       settings.lastAttemptAt?.addingTimeInterval(CodexWakeSettings.interval) ?? .distantPast)
-        // Settings changes and timer ticks can persist a plan from known usage,
-        // but only a new successful read at/after the deadline can authorize sending.
-        guard window.usedPercent.isFinite, window.usedPercent >= 0, window.usedPercent < 100,
-              CodexWakeSchedule.shouldSubmit(now: now, due: due, targetReset: cycle,
+        // A newer, stable deadline with usage means another client may have
+        // already started the next cycle. Do not spend quota waking it again.
+        // Keep retry/in-flight reservations intact even when adopting that cycle.
+        if let fetchedAt = quotaFetchedAt, let previous,
+           previous.fetchedAt >= cycle, fetchedAt.timeIntervalSince(previous.fetchedAt) >= 30,
+           previous.usedPercent > 0, window.usedPercent > 0,
+           currentReset > now, currentReset > cycle,
+           abs(currentReset.timeIntervalSince(previous.resetAt)) <= 1 {
+            settings.scheduledResetAt = currentReset
+            return nil
+        }
+        // Zero can be rounded or temporarily stale. Require two separate fresh
+        // reads after the deadline, with a future reset, rather than treating
+        // any available balance as proof that the previous cycle ended.
+        guard CodexWakeSchedule.shouldSubmit(now: now, due: due, targetReset: cycle,
                                              currentReset: currentReset, fetchedAt: quotaFetchedAt) else { return nil }
+        guard let fetchedAt = quotaFetchedAt, let previous,
+              previous.fetchedAt >= due,
+              fetchedAt.timeIntervalSince(previous.fetchedAt) >= 30,
+              previous.usedPercent == 0, window.usedPercent == 0,
+              previous.resetAt > previous.fetchedAt, currentReset > now else { return nil }
+        guard quota?.windows.allSatisfy({
+            $0.usedPercent.isFinite && $0.usedPercent >= 0 && $0.usedPercent < 100
+        }) == true else { return nil }
         return cycle
     }
 }

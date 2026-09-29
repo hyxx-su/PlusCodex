@@ -1,3 +1,33 @@
+# PlusCodex v1.1.5
+
+- Codex 깨우기는 기존 사용량 조회의 원본 응답과 이전 관측값을 비교합니다. 예약 이후 최소 30초 간격의 두 정상 조회에서 사용량 0%와 미래 초기화 시각이 확인될 때 전송하며, 잔량이 있다는 이유만으로 실행하지 않습니다. 시간이 계속 밀리는 빈 주기는 기존 예약을 유지합니다.
+- 새 초기화 시각이 안정적으로 확인되고 사용량이 발생한 경우 이미 시작된 주기로 간주해 불필요한 깨우기를 생략합니다. 전송 성공 후 활성 주기가 조회되면 로컬 계산보다 서버의 초기화 시각을 우선합니다.
+- 저장된 채팅의 재사용이 전송 전에 명확하게 거절되면 새 채팅을 만들고 다음 실행을 위해 저장합니다. 기존 채팅은 삭제하지 않습니다. 전송 후 응답이 불명확한 경우에는 새 채팅으로 즉시 재전송하지 않아 중복을 방지합니다.
+- 오래되거나 순서가 뒤바뀐 응답은 전송 판단에서 제외합니다. 계정 변경 시 비교 기록을 초기화하고, 주간 한도 등 조회된 한도가 소진된 경우 깨우기를 보내지 않습니다. 설정에는 마지막 깨우기 실패 사유와 다음 시도 안내를 표시합니다.
+- 작업 목록 위쪽 여백을 줄여 아래쪽 간격과 균형을 맞췄습니다. 메뉴 진입 시 업데이트 확인 동작은 유지했습니다.
+
+## English
+
+- Automatic wake compares raw responses from existing usage refreshes with persisted observations. Sending requires two successful post-deadline reads at least 30 seconds apart showing zero usage and a future reset. Available balance alone no longer authorizes a wake; moving empty-window estimates do not continually postpone the reservation.
+- A stable future reset with positive usage is treated as an already active cycle, avoiding an unnecessary wake. After a successful send, an observed active server window takes precedence over a locally calculated deadline.
+- When reusing the saved chat is explicitly rejected before submission, a replacement chat is created and remembered without deleting the previous chat. Ambiguous post-submission errors do not trigger an immediate replacement send.
+- Stale and out-of-order responses are rejected, account changes clear comparison history, and exhausted reported limits including the weekly window block sending. Settings show the latest wake failure and next-attempt information.
+- Reduced the spacing above task rows to balance the lower gap. Update checks on menu open remain unchanged.
+
+## 설치 및 업데이트
+
+기존 정식 버전은 앱의 업데이트 기능으로 `v1.1.5`를 설치할 수 있습니다. 수동 설치는 [PlusCodex-1.1.5.dmg](https://github.com/hyxx-su/PlusCodex/releases/download/v1.1.5/PlusCodex-1.1.5.dmg)를 열고 PlusCodex를 Applications로 옮기세요. 기존 설정은 유지됩니다.
+
+Apple Silicon Mac과 macOS 14 이상을 지원합니다. 이 배포본은 ad-hoc 서명되어 있으며 Apple Developer ID 서명·공증은 없습니다. PlusCodex는 OpenAI의 공식 앱이 아닙니다.
+
+## 검증 범위 / Validation
+
+배포 검증 대상은 전체 자동 테스트(`bash test.sh`), DMG 무결성, Sparkle 업데이트 피드·ZIP 서명과 길이입니다. 새 채팅 대체 전송은 실제 응답 완료를 확인했습니다. 실제 Mac의 짧은 잠자기·복귀 후 예약 유지를 확인했으나, 5시간 실예약 및 예약 시각을 넘긴 장시간 잠자기 후 자동 전송은 아직 검증 중입니다. 주기 전환 판단은 조회 응답에 기반한 보수적 추정이며 서버의 명시적인 초기화 완료 이벤트가 아닙니다. Mac이 꺼지거나 잠든 동안에는 실행되지 않으며, 복귀 후 앱 실행·로그인·정상 사용량 조회가 필요합니다.
+
+Release validation covers the full automated suite, DMG integrity, and Sparkle feed/ZIP signatures and lengths. A real replacement-chat send completed successfully. A brief physical sleep/wake test preserved the reservation; a full five-hour scheduled run and catch-up after sleeping across the deadline remain under validation. Cycle detection is a conservative inference from usage responses, not an explicit server reset event. Execution requires an awake Mac, a running app, authentication, and successful usage reads.
+
+---
+
 # PlusCodex v1.1.4
 
 - Codex 자동 깨우기는 요청 접수만으로 성공 처리하지 않고 실제 작업 완료를 확인한 뒤 해당 주기를 기록합니다. 명확하게 실패한 작업은 기존 15분 재시도를 사용하며, 전송 후 응답이 불명확한 경우에는 중복 전송 방지를 위한 보수적인 대기를 유지합니다.

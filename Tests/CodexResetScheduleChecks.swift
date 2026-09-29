@@ -8,7 +8,7 @@ import Foundation
         let base = Date(timeIntervalSince1970: 1_800_000_000)
         let due = base.addingTimeInterval(600)
         let account = CodexAccount(email: "schedule-test@example.invalid", planType: "plus")
-        func quota(_ date: Date, used: Double = 20) -> Quota {
+        func quota(_ date: Date, used: Double = 0) -> Quota {
             Quota(primary: QuotaWindow(usedPercent: used, windowDurationMins: 300,
                                        resetsAt: date.timeIntervalSince1970), secondary: nil)
         }
@@ -33,7 +33,7 @@ import Foundation
         precondition(nextQuota.primary?.resetsAt == next.timeIntervalSince1970,
                      "Notifications must be able to book the next cycle")
         precondition(scheduler.prepareAttempt(quota: nextQuota, offline: false,
-            quotaFetchedAt: due, now: due) == due, "The unprocessed wake still belongs to the old cycle")
+            quotaFetchedAt: due, now: due) == nil, "One empty sample cannot confirm a reset")
 
         let retry = due.addingTimeInterval(15 * 60)
         wake.nextAttemptAt = retry
@@ -43,7 +43,10 @@ import Foundation
         precondition(wake.nextAttemptAt == retry && wake.scheduledResetAt == due,
                      "A fresh read or relaunch cannot overwrite the retry deadline")
         precondition(restarted.prepareAttempt(quota: nextQuota, offline: false,
-            quotaFetchedAt: retry, now: retry) == due)
+            quotaFetchedAt: retry, now: retry) == nil)
+        let confirmedRetry = retry.addingTimeInterval(60)
+        precondition(restarted.prepareAttempt(quota: nextQuota, offline: false,
+            quotaFetchedAt: confirmedRetry, now: confirmedRetry) == due)
         precondition(restarted.prepareAttempt(quota: quota(next, used: 100), offline: false,
             quotaFetchedAt: retry, now: retry) == nil, "Exhausted quota must not submit a wake")
         precondition(restarted.prepareAttempt(quota: nextQuota, offline: true,
@@ -85,7 +88,7 @@ import Foundation
         wake.recordAttempt(at: due.addingTimeInterval(-CodexWakeSettings.interval))
         precondition(wake.completedResetAt == nil && wake.nextAttemptAt == due)
         precondition(restarted.prepareAttempt(quota: quota(next), offline: false,
-            quotaFetchedAt: due, now: due) == due)
+            quotaFetchedAt: due, now: due) == nil)
         precondition(wake.scheduledResetAt == due)
 
         let recoverySuite = "\(suite).wake-recovery"
@@ -123,8 +126,11 @@ import Foundation
             quotaFetchedAt: base, now: resumedAt) == nil)
         precondition(resumedWake.scheduledResetAt == due)
         precondition(resumedScheduler.prepareAttempt(quota: postSleepQuota, offline: false,
-            quotaFetchedAt: resumedAt, now: resumedAt) == due,
-            "After sleep or restart, a fresh read must recover the missed reservation")
+            quotaFetchedAt: resumedAt, now: resumedAt) == nil)
+        let confirmedResume = resumedAt.addingTimeInterval(60)
+        precondition(resumedScheduler.prepareAttempt(quota: postSleepQuota, offline: false,
+            quotaFetchedAt: confirmedResume, now: confirmedResume) == due,
+            "After sleep or restart, two fresh empty reads recover the missed reservation")
         resumedWake.recordAttempt(at: resumedAt, cycleResetAt: due)
         // Simulate power-off immediately after success, before the next poll.
         precondition(resumedWake.scheduledResetAt == nil)
@@ -134,7 +140,10 @@ import Foundation
         let nextBootWake = CodexWakeSettings(defaults: recoveryDefaults)
         let nextBootScheduler = CodexWakeScheduler(settings: nextBootWake)
         precondition(nextBootScheduler.prepareAttempt(quota: nextBootQuota, offline: false,
-            quotaFetchedAt: nextBoot, now: nextBoot) == nextDue,
+            quotaFetchedAt: nextBoot, now: nextBoot) == nil)
+        let confirmedBoot = nextBoot.addingTimeInterval(60)
+        precondition(nextBootScheduler.prepareAttempt(quota: nextBootQuota, offline: false,
+            quotaFetchedAt: confirmedBoot, now: confirmedBoot) == nextDue,
             "A successful cycle must leave a recoverable next deadline across shutdown")
         nextBootWake.recordAttempt(at: nextBoot, cycleResetAt: nextDue)
         precondition(nextBootScheduler.prepareAttempt(quota: nextBootQuota, offline: false,
@@ -144,6 +153,45 @@ import Foundation
         _ = nextBootScheduler.prepareAttempt(quota: quota(nextDue), offline: false,
             quotaFetchedAt: nil, now: nextBoot)
         precondition(nextBootWake.scheduledResetAt == nextBoot.addingTimeInterval(CodexWakeSettings.interval))
+
+        // Use raw snapshots: a moving empty-window forecast must not postpone
+        // waking, while a stable window with usage should not be woken again.
+        recoveryDefaults.removePersistentDomain(forName: recoverySuite)
+        let observed = CodexWakeSettings(defaults: recoveryDefaults)
+        observed.selectAccount("observed@example.invalid")
+        observed.setEnabled(true)
+        let observedScheduler = CodexWakeScheduler(settings: observed)
+        func sample(_ at: Date, _ reset: Date, _ used: Double) -> Date? {
+            observedScheduler.prepareAttempt(quota: quota(reset, used: used), offline: false,
+                                              quotaFetchedAt: at, now: at)
+        }
+        precondition(sample(base, due, 45) == nil)
+        precondition(sample(due, next, 0) == nil)
+        precondition(sample(due.addingTimeInterval(10), next, 0) == nil)
+        precondition(sample(due.addingTimeInterval(60), next.addingTimeInterval(60), 0) == due,
+                     "Frequent reads must not starve confirmation of a moving empty window")
+        observed.recordAttempt(at: due.addingTimeInterval(60), cycleResetAt: due)
+        let serverNext = next.addingTimeInterval(30)
+        precondition(sample(due.addingTimeInterval(120), serverNext, 1) == nil)
+        precondition(observed.scheduledResetAt == serverNext,
+                     "After success prefer server reset, not completion plus five hours")
+        observed.scheduledResetAt = due
+        precondition(sample(due.addingTimeInterval(180), serverNext, 2) == nil)
+        precondition(observed.scheduledResetAt == serverNext,
+                     "Existing usage in a stable new window skips an unnecessary wake")
+        observed.selectAccount("changed@example.invalid")
+        precondition(observed.observation == nil && observed.scheduledResetAt == nil)
+        precondition(sample(base, due, 10) == nil)
+        precondition(sample(due, next, 0) == nil)
+        let weeklyBlocked = Quota(primary: quota(next).primary,
+            secondary: QuotaWindow(usedPercent: 100, windowDurationMins: 10080,
+                                   resetsAt: next.timeIntervalSince1970))
+        let check = due.addingTimeInterval(60)
+        precondition(observedScheduler.prepareAttempt(quota: weeklyBlocked, offline: false,
+            quotaFetchedAt: check, now: check) == nil, "Weekly exhaustion must block wake")
+        precondition(observedScheduler.prepareAttempt(quota: quota(next), offline: false,
+            quotaFetchedAt: check, now: check.addingTimeInterval(180)) == nil,
+                     "Old reads cannot authorize a send")
         print("PASS: moving deadlines, stable corrections, shared cycles, retry isolation, relaunch and duplicate guards")
     }
 }

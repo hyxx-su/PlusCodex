@@ -124,7 +124,8 @@ import AppKit
         let correctedQuota = Quota(primary: QuotaWindow(usedPercent: 20,
             windowDurationMins: 300, resetsAt: correctedReset.timeIntervalSince1970), secondary: nil)
         precondition(scheduler.prepareAttempt(quota: correctedQuota, offline: false,
-            quotaFetchedAt: due, now: due) == due)
+            quotaFetchedAt: due, now: due) == nil,
+            "Available balance alone must not authorize waking")
         precondition(wake.scheduledResetAt == due && wake.nextAttemptAt == due,
             "A fresh quota read must preserve an overdue wake")
         let restartedWake = CodexWakeSettings(defaults: defaults)
@@ -133,8 +134,8 @@ import AppKit
             windowDurationMins: 300, resetsAt: earlierReset.timeIntervalSince1970), secondary: nil)
         _ = restartedScheduler.prepareAttempt(quota: earlierQuota, offline: false,
             quotaFetchedAt: now.addingTimeInterval(60), now: now.addingTimeInterval(60))
-        precondition(restartedWake.scheduledResetAt == earlierReset && restartedWake.nextAttemptAt == due,
-            "A cycle correction must not rewrite an independent retry deadline")
+        precondition(restartedWake.scheduledResetAt == due && restartedWake.nextAttemptAt == due,
+            "An out-of-order read must not rewrite the cycle or retry deadline")
         wake.setEnabled(false)
         wake.setEnabled(true)
         wake.recordAttempt(at: now)
@@ -186,6 +187,19 @@ import AppKit
         let reusedID = try! CodexWakeClient.prepareThread(previousThreadID: "saved-task",
             resume: { $0 }, start: { createdReplacement = true; return "replacement" })
         precondition(reusedID == "saved-task" && !createdReplacement)
+        for rejection in ["thread saved already has an active writer", "thread not found: saved",
+                          "no rollout found for thread saved"] {
+            let replacement = try! CodexWakeClient.prepareThread(previousThreadID: "saved",
+                resume: { _ in throw CodexWakeError.failed(rejection) }, start: { "replacement" })
+            precondition(replacement == "replacement")
+        }
+        for ambiguous in [CodexWakeError.timedOut, .disconnected, .invalidResponse, .failed("permission denied")] {
+            do {
+                _ = try CodexWakeClient.prepareThread(previousThreadID: "saved",
+                    resume: { _ in throw ambiguous }, start: { preconditionFailure("Unsafe replacement") })
+                preconditionFailure("Resume failure must propagate")
+            } catch {}
+        }
         do {
             _ = try CodexWakeClient.prepareThread(previousThreadID: "busy-task",
                 resume: { _ in throw CodexWakeError.failed("active writer") },
