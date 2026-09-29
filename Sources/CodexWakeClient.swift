@@ -69,7 +69,7 @@ final class CodexWakeClient {
                           previousThreadID: String?,
                           shouldProceed: () -> Bool,
                           onThreadPrepared: (String) -> Void,
-                          onTurnSubmission: () -> Void,
+                          onTurnCompletedSuccessfully: () -> Void,
                           onTurnStartRequested: () -> Void = {},
                           onModelResolved: (CodexWakeModel) -> Void = { _ in }) throws {
         let server = try AppServerSession()
@@ -116,10 +116,11 @@ final class CodexWakeClient {
             threadID: threadID, modelName: selected.modelName, effort: effort, message: message))
         guard let turn = result["turn"] as? [String: Any],
               let turnID = turn["id"] as? String else { throw CodexWakeError.invalidResponse }
-        // Persist the attempt only after the App Server confirms that it
-        // accepted the turn. Explicit rejections can then be retried safely.
-        onTurnSubmission()
         try server.waitForTurn(turnID)
+        // An accepted turn is not necessarily a successful wake. Persist only
+        // after the App Server reports terminal success so failed turns remain
+        // eligible for the scheduler's safe retry policy.
+        onTurnCompletedSuccessfully()
     }
 }
 

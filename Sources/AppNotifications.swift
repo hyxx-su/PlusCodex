@@ -109,34 +109,41 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    private func threadUserInfo(_ activity: ThreadActivity) -> [String: Any] {
+        var info: [String: Any] = ["threadID": activity.id]
+        // Retries must check the original task, even after this chat starts a new turn.
+        if let scope = ThreadNotificationPreferences.scope(for: activity) { info["notificationScope"] = scope }
+        return info
+    }
+
     func completed(_ activity: ThreadActivity) {
         guard activity.id != CodexWakeSettings().threadID else { return }
-        guard ThreadNotificationPreferences.shared.enabled(activity.id) else { return }
+        guard ThreadNotificationPreferences.shared.enabled(activity) else { return }
         guard notificationSettings.isEnabled(.completion) else { return }
         let content = UNMutableNotificationContent()
         content.title = L10n.text("Codex 작업 완료")
         content.body = activity.title
         content.sound = notificationSettings.sound
-        content.userInfo = ["threadID": activity.id]
+        content.userInfo = threadUserInfo(activity)
         submit(UNNotificationRequest(identifier: "completion-\(activity.id)-\(UUID().uuidString)",
                                      content: content, trigger: nil))
     }
 
     func failed(_ activity: ThreadActivity) {
-        guard ThreadNotificationPreferences.shared.enabled(activity.id) else { return }
+        guard ThreadNotificationPreferences.shared.enabled(activity) else { return }
         guard notificationSettings.isEnabled(.failure) else { return }
         let content = UNMutableNotificationContent()
         content.title = L10n.text("Codex 작업 실패")
         let title = activity.title.isEmpty ? L10n.text("Codex 채팅") : activity.title
         content.body = L10n.text("%@ 작업을 완료하지 못했습니다. 작업 내용을 확인하세요.", title)
         content.sound = notificationSettings.sound
-        content.userInfo = ["threadID": activity.id]
+        content.userInfo = threadUserInfo(activity)
         submit(UNNotificationRequest(identifier: "failure-\(activity.id)-\(UUID().uuidString)",
                                      content: content, trigger: nil))
     }
 
     func attentionNeeded(_ event: ThreadAttentionEvent) {
-        guard ThreadNotificationPreferences.shared.enabled(event.activity.id) else { return }
+        guard ThreadNotificationPreferences.shared.enabled(event.activity) else { return }
         let kind: NotificationKind
         let titleKey: String
         let bodyKey: String
@@ -166,7 +173,8 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
             ? L10n.text(bodyKey, L10n.text("Codex 채팅"))
             : L10n.text(bodyKey, activity.title)
         content.sound = notificationSettings.sound
-        content.userInfo = ["threadID": activity.id, "notificationKind": kind.rawValue]
+        content.userInfo = threadUserInfo(activity)
+        content.userInfo["notificationKind"] = kind.rawValue
         if let identity = event.requestIdentity { content.userInfo["requestIdentity"] = identity }
         submit(UNNotificationRequest(identifier: "attention-\(activity.id)-\(UUID().uuidString)",
                                      content: content, trigger: nil))
@@ -382,8 +390,8 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
                     guard let id = request.content.userInfo["threadID"] as? String,
                           self.isAttentionRequestCurrent?(id, request.content.userInfo["requestIdentity"] as? String) == true else { return }
                 }
-                if let id = request.content.userInfo["threadID"] as? String,
-                   !ThreadNotificationPreferences.shared.enabled(id) { return }
+                guard ThreadNotificationPreferences.shared.enabled(
+                    scope: request.content.userInfo["notificationScope"] as? String) else { return }
                 self.submit(request, attempt: attempt + 1)
             }
         }

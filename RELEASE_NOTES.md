@@ -1,3 +1,35 @@
+# PlusCodex v1.1.4
+
+- Codex 자동 깨우기는 요청 접수만으로 성공 처리하지 않고 실제 작업 완료를 확인한 뒤 해당 주기를 기록합니다. 명확하게 실패한 작업은 기존 15분 재시도를 사용하며, 전송 후 응답이 불명확한 경우에는 중복 전송 방지를 위한 보수적인 대기를 유지합니다.
+- 사용량 조회에서 초기화 예상 시각이 뒤로 이동하더라도 이미 예약된 깨우기 시각은 계속 미뤄지지 않도록 수정했습니다. 기능을 켤 때 알려진 일정을 저장하고, 전송 직전에는 초기화 예정 시각 이후의 최신 사용량과 사용 가능 여부를 다시 확인합니다.
+- 앱 재실행과 장시간 중단 후 깨우기 일정을 복구합니다. 성공 직후 앱이 종료되어 다음 조회를 받지 못한 경우에도 마지막 실행 기록을 기준으로 다음 일정을 복원하며, 놓친 주기는 한 번만 보충 시도합니다.
+- 메뉴를 열어 둔 상태에서 작업 정보가 갱신될 때 기존 행을 재사용합니다. 갱신 시각만 바뀌는 조회는 아이콘과 애니메이션을 다시 그리지 않아 주기적인 깜빡임을 줄였습니다.
+- 완료된 작업을 읽어 행이 사라지면 열린 메뉴의 높이도 함께 줄어듭니다. 작업 화살표와 제목의 세로 위치를 알림 버튼에 맞췄습니다.
+- 작업 알림 끄기는 대화방 전체가 아닌 현재 작업에만 적용됩니다. 같은 대화방의 다음 작업은 기본적으로 알림이 켜지며, 현재 작업의 설정은 완료와 앱 재실행 후에도 유지됩니다. 이전 버전의 대화방 단위 음소거는 새 작업에 상속하지 않습니다.
+
+## English
+
+- Automatic Codex wake records a successful cycle only after the turn completes, rather than when the request is accepted. Explicit failures retain the 15-minute retry; ambiguous responses after submission retain conservative waiting to prevent duplicate sends.
+- A later reset estimate from usage refreshes no longer postpones an already scheduled wake. Enabling the feature persists the known schedule, while sending still requires fresh post-deadline usage and available quota.
+- Wake schedules recover after relaunch and extended downtime, including shutdown immediately after a successful turn before the next usage refresh. Missed cycles trigger only one catch-up attempt.
+- Open menus reuse existing task rows. Timestamp-only updates no longer redraw icons or restart animations, reducing periodic flicker.
+- The open menu shrinks when acknowledged tasks disappear. Task arrows and titles are vertically aligned with notification controls.
+- Muting applies to the current turn instead of the whole conversation. The next turn defaults to notifications on; the current turn's choice survives completion and relaunch. Legacy conversation-wide mute settings are not inherited by new turns.
+
+## 설치 및 업데이트
+
+기존 정식 버전은 앱의 업데이트 기능으로 `v1.1.4`를 설치할 수 있습니다. 수동 설치는 [PlusCodex-1.1.4.dmg](https://github.com/hyxx-su/PlusCodex/releases/download/v1.1.4/PlusCodex-1.1.4.dmg)를 열고 PlusCodex를 Applications로 옮기세요. 기존 설정은 유지되지만, 작업 알림 음소거는 위의 작업별 정책으로 변경됩니다.
+
+Apple Silicon Mac과 macOS 14 이상을 지원합니다. 이 배포본은 ad-hoc 서명되어 있으며 Apple Developer ID 서명·공증은 없습니다. PlusCodex는 OpenAI의 공식 앱이 아닙니다.
+
+## 검증 범위 / Validation
+
+전체 자동 검증(`bash test.sh`)과 DMG 무결성, Sparkle 업데이트 피드·ZIP 공개키 서명 및 길이를 검증합니다. 자동 깨우기는 Mac이 종료되거나 잠든 동안 실행할 수 없으며, 복귀 후 PlusCodex 실행·Codex 로그인·최신 사용량 확인이 필요합니다. 실제 다른 기기의 절전 복귀와 알림 전달은 별도 실기 확인이 필요합니다. 메뉴 진입 시 업데이트 확인 동작은 유지했습니다.
+
+Validation covers the full automated suite (`bash test.sh`), DMG integrity, and public-key signatures and lengths of the Sparkle feed and ZIP. Automatic wake cannot run while the Mac is shut down or asleep; recovery requires PlusCodex running, Codex authentication, and fresh usage. Sleep recovery and notification delivery on other devices still require device testing. Update checks on menu open remain unchanged.
+
+---
+
 # PlusCodex v1.1.3
 
 - 사용량과 작업 완료·읽음 기록을 계정별로 분리했습니다. 계정 전환 중 이전 계정의 늦은 조회 결과가 새 계정 화면에 반영되지 않으며, 읽은 완료 항목이 앱 재실행 뒤 다시 나타나는 현상을 줄였습니다.

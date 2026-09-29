@@ -87,7 +87,8 @@ import AppKit
         let earlierReset = due.addingTimeInterval(-20 * 60)
         let largeCorrection = due.addingTimeInterval(3 * 60 * 60)
         precondition(CodexWakeSchedule.revisedReset(now: now, targetReset: staleReset,
-            currentReset: correctedReset) == correctedReset)
+            currentReset: correctedReset) == nil,
+            "A later forecast must not postpone an unprocessed wake, even before its deadline")
         precondition(CodexWakeSchedule.revisedReset(now: now, targetReset: staleReset,
             currentReset: earlierReset) == earlierReset)
         precondition(CodexWakeSchedule.revisedReset(now: due, targetReset: staleReset,
@@ -263,7 +264,7 @@ import AppKit
                     previousThreadID: ProcessInfo.processInfo.environment["PLUSCODEX_WAKE_TEST_THREAD_ID"],
                     shouldProceed: { true },
                     onThreadPrepared: { preparedThreadID = $0 },
-                    onTurnSubmission: { submitted = true })
+                    onTurnCompletedSuccessfully: { submitted = true })
                 precondition(preparedThreadID != nil && submitted)
                 print("PASS: live Codex wake turn completed in \(preparedThreadID!)")
             } catch {

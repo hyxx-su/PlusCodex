@@ -534,7 +534,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func updateActivityView() {
         if stateScreenHeight != nil {
-            if !menuTracking { activityItem?.isHidden = true }
+            if !menuTracking, activityItem?.isHidden == false { activityItem?.isHidden = true }
             return
         }
         let visible = readReceipts.visibleRows(activities)
@@ -550,9 +550,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             (activityItem?.view as? ThreadActivityView)?.update(activities: visible, connected: activityConnected,
                                                              incompatible: activityCompatibilityIssue)
         }
-        activityItem?.view?.alphaValue = activityConnected ? 1 : 0.55
-        activityItem?.view?.toolTip = activityConnected ? nil : L10n.text("작업 상태 연결 복구 중 · 마지막 확인 정보")
-        if !menuTracking { activityItem?.isHidden = false }
+        let rowView = activityItem?.view
+        let alpha: CGFloat = activityConnected ? 1 : 0.55
+        if rowView?.alphaValue != alpha { rowView?.alphaValue = alpha }
+        let toolTip = activityConnected ? nil : L10n.text("작업 상태 연결 복구 중 · 마지막 확인 정보")
+        if rowView?.toolTip != toolTip { rowView?.toolTip = toolTip }
+        if !menuTracking, activityItem?.isHidden == true { activityItem?.isHidden = false }
     }
 
     func applicationWillTerminate(_ notification: Notification) { networkMonitor.cancel() }

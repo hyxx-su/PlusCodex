@@ -30,7 +30,10 @@ enum CodexWakeSchedule {
         guard let currentReset else { return nil }
         guard let targetReset else { return currentReset }
         guard now < targetReset else { return nil }
-        guard abs(currentReset.timeIntervalSince(targetReset)) > 1 else { return nil }
+        // A repeatedly revised forecast must not keep postponing a pending
+        // wake. Earlier deadlines are useful; later ones belong to a future
+        // cycle until this reservation has actually been processed.
+        guard currentReset.timeIntervalSince(targetReset) < -1 else { return nil }
         return currentReset
     }
 }
@@ -60,6 +63,8 @@ final class CodexWakeScheduler {
         // the request is in flight, a relaunch must not submit a duplicate.
         settings.nextAttemptAt = now.addingTimeInterval(CodexWakeSettings.interval)
         inFlight = true
+        NSLog("PlusCodex wake started: scheduled=%.0f observed=%.0f",
+              cycle.timeIntervalSince1970, now.timeIntervalSince1970)
         DispatchQueue.global(qos: .utility).async { [weak self] in
             var submissionStarted = false
             var submitted = false
@@ -82,8 +87,9 @@ final class CodexWakeScheduler {
                                                       }
                                                   }
                                               },
-                                              onTurnSubmission: {
+                                              onTurnCompletedSuccessfully: {
                                                   submitted = true
+                                                  NSLog("PlusCodex wake completed: scheduled=%.0f", cycle.timeIntervalSince1970)
                                                   DispatchQueue.main.sync {
                                                       if CodexAuthRevision.current() == authRevision,
                                                          self?.settings.accountIdentity == accountIdentity {
@@ -126,31 +132,40 @@ final class CodexWakeScheduler {
     /// Planning is synchronous and transport-free. The cycle deadline and the
     /// retry/reservation date are independent, persisted values.
     func prepareAttempt(quota: Quota?, offline: Bool, quotaFetchedAt: Date?, now: Date) -> Date? {
-        guard settings.enabled, !offline, let fetchedAt = quotaFetchedAt, fetchedAt <= now,
+        guard settings.enabled, !offline,
+              quotaFetchedAt.map({ $0 <= now }) ?? true,
               let window = quota?.windows.first(where: { $0.windowDurationMins == 300 }),
               let seconds = window.resetsAt, seconds.isFinite else { return nil }
         let currentReset = Date(timeIntervalSince1970: seconds)
-        // Older versions stored the next cycle only as a five-hour fallback
-        // after success. Recover that pending cycle before reading a newer one.
-        if settings.scheduledResetAt == nil, settings.completedResetAt == nil,
-           settings.lastAttemptAt != nil, let legacyDue = settings.nextAttemptAt {
-            settings.scheduledResetAt = legacyDue
+        // Recover the next deadline even if the Mac shut down immediately after
+        // success, before another usage read could book it. A missed interval
+        // results in one catch-up attempt, not a replay of every missed cycle.
+        if settings.scheduledResetAt == nil, let lastAttempt = settings.lastAttemptAt {
+            if settings.completedResetAt == nil, let legacyDue = settings.nextAttemptAt {
+                settings.scheduledResetAt = legacyDue
+            } else {
+                settings.scheduledResetAt = lastAttempt.addingTimeInterval(CodexWakeSettings.interval)
+            }
         }
         if settings.scheduledResetAt == nil {
             guard currentReset > (settings.completedResetAt ?? .distantPast),
                   currentReset > (settings.lastAttemptAt ?? .distantPast),
                   currentReset.timeIntervalSince(now) > -CodexWakeSettings.interval else { return nil }
             settings.scheduledResetAt = currentReset
-        } else if let revised = CodexWakeSchedule.revisedReset(
+        } else if currentReset > (settings.completedResetAt ?? .distantPast),
+                  currentReset > (settings.lastAttemptAt ?? .distantPast),
+                  let revised = CodexWakeSchedule.revisedReset(
             now: now, targetReset: settings.scheduledResetAt, currentReset: currentReset) {
             settings.scheduledResetAt = revised
         }
         guard let cycle = settings.scheduledResetAt else { return nil }
         let due = max(cycle, settings.nextAttemptAt ?? .distantPast,
                       settings.lastAttemptAt?.addingTimeInterval(CodexWakeSettings.interval) ?? .distantPast)
+        // Settings changes and timer ticks can persist a plan from known usage,
+        // but only a new successful read at/after the deadline can authorize sending.
         guard window.usedPercent.isFinite, window.usedPercent >= 0, window.usedPercent < 100,
               CodexWakeSchedule.shouldSubmit(now: now, due: due, targetReset: cycle,
-                                             currentReset: currentReset, fetchedAt: fetchedAt) else { return nil }
+                                             currentReset: currentReset, fetchedAt: quotaFetchedAt) else { return nil }
         return cycle
     }
 }

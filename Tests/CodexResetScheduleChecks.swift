@@ -87,6 +87,63 @@ import Foundation
         precondition(restarted.prepareAttempt(quota: quota(next), offline: false,
             quotaFetchedAt: due, now: due) == due)
         precondition(wake.scheduledResetAt == due)
+
+        let recoverySuite = "\(suite).wake-recovery"
+        let recoveryDefaults = UserDefaults(suiteName: recoverySuite)!
+        defer { recoveryDefaults.removePersistentDomain(forName: recoverySuite) }
+        let recoveryWake = CodexWakeSettings(defaults: recoveryDefaults)
+        recoveryWake.selectAccount(account.email!)
+        recoveryWake.setEnabled(true)
+        let recoveryScheduler = CodexWakeScheduler(settings: recoveryWake)
+        // Enabling wake between polls must save the known deadline immediately.
+        precondition(recoveryScheduler.prepareAttempt(quota: quota(due), offline: false,
+            quotaFetchedAt: nil, now: base) == nil)
+        precondition(recoveryWake.scheduledResetAt == due)
+        let recoverySchedule = CodexResetSchedule(defaults: recoveryDefaults)
+        _ = recoverySchedule.update(quota(due), account: account, now: base)
+        // Two identical later estimates pass the shared stability heuristic.
+        // They still must not push the already reserved wake from :33 to :44.
+        let shifted = due.addingTimeInterval(11 * 60)
+        for offset in [60.0, 120.0] {
+            let observed = base.addingTimeInterval(offset)
+            let correctedQuota = recoverySchedule.update(quota(shifted), account: account, now: observed)
+            precondition(recoveryScheduler.prepareAttempt(quota: correctedQuota, offline: false,
+                quotaFetchedAt: observed, now: observed) == nil)
+            precondition(recoveryWake.scheduledResetAt == due)
+        }
+        let resumedAt = due.addingTimeInterval(12 * 60)
+        let postSleepQuota = quota(resumedAt.addingTimeInterval(CodexWakeSettings.interval))
+        let resumedWake = CodexWakeSettings(defaults: recoveryDefaults)
+        let resumedScheduler = CodexWakeScheduler(settings: resumedWake)
+        precondition(resumedScheduler.prepareAttempt(quota: postSleepQuota, offline: true,
+            quotaFetchedAt: resumedAt, now: resumedAt) == nil)
+        precondition(resumedScheduler.prepareAttempt(quota: postSleepQuota, offline: false,
+            quotaFetchedAt: nil, now: resumedAt) == nil)
+        precondition(resumedScheduler.prepareAttempt(quota: postSleepQuota, offline: false,
+            quotaFetchedAt: base, now: resumedAt) == nil)
+        precondition(resumedWake.scheduledResetAt == due)
+        precondition(resumedScheduler.prepareAttempt(quota: postSleepQuota, offline: false,
+            quotaFetchedAt: resumedAt, now: resumedAt) == due,
+            "After sleep or restart, a fresh read must recover the missed reservation")
+        resumedWake.recordAttempt(at: resumedAt, cycleResetAt: due)
+        // Simulate power-off immediately after success, before the next poll.
+        precondition(resumedWake.scheduledResetAt == nil)
+        let nextDue = resumedAt.addingTimeInterval(CodexWakeSettings.interval)
+        let nextBoot = resumedAt.addingTimeInterval(24 * 60 * 60)
+        let nextBootQuota = quota(nextBoot.addingTimeInterval(CodexWakeSettings.interval))
+        let nextBootWake = CodexWakeSettings(defaults: recoveryDefaults)
+        let nextBootScheduler = CodexWakeScheduler(settings: nextBootWake)
+        precondition(nextBootScheduler.prepareAttempt(quota: nextBootQuota, offline: false,
+            quotaFetchedAt: nextBoot, now: nextBoot) == nextDue,
+            "A successful cycle must leave a recoverable next deadline across shutdown")
+        nextBootWake.recordAttempt(at: nextBoot, cycleResetAt: nextDue)
+        precondition(nextBootScheduler.prepareAttempt(quota: nextBootQuota, offline: false,
+            quotaFetchedAt: nextBoot, now: nextBoot) == nil,
+            "Catch-up must send once, without replaying every missed five-hour interval")
+        // A cached completed window must not replace the newly recovered cycle.
+        _ = nextBootScheduler.prepareAttempt(quota: quota(nextDue), offline: false,
+            quotaFetchedAt: nil, now: nextBoot)
+        precondition(nextBootWake.scheduledResetAt == nextBoot.addingTimeInterval(CodexWakeSettings.interval))
         print("PASS: moving deadlines, stable corrections, shared cycles, retry isolation, relaunch and duplicate guards")
     }
 }

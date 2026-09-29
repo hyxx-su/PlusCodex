@@ -44,7 +44,8 @@ private final class ThreadNotificationButton: NSButton {
         image?.isTemplate = true
         contentTintColor = rowColor
         setAccessibilityValue(state == .on ? "켜짐" : "꺼짐")
-        toolTip = state == .on ? "알림 켜짐 · 클릭하여 끄기" : "알림 꺼짐 · 클릭하여 켜기"
+        toolTip = !isEnabled ? L10n.text("작업 상태 확인 불가")
+            : state == .on ? "알림 켜짐 · 클릭하여 끄기" : "알림 꺼짐 · 클릭하여 켜기"
         needsDisplay = true
     }
 }
@@ -113,7 +114,7 @@ final class ThreadActivityButton: NSButton {
         self.activity = activity
         self.onOpened = onOpened
         notificationButton = ThreadNotificationButton(
-            isOn: ThreadNotificationPreferences.shared.enabled(activity.id),
+            isOn: ThreadNotificationPreferences.shared.enabled(activity),
             title: "\(activity.title) 알림")
         super.init(frame: frame)
         isBordered = false
@@ -123,6 +124,7 @@ final class ThreadActivityButton: NSButton {
         setAccessibilityLabel("\(activity.statusLabel), \(activity.title)")
         toolTip = activity.statusLabel
         wantsLayer = true
+        notificationButton.isEnabled = ThreadNotificationPreferences.scope(for: activity) != nil
         notificationButton.rowColor = activity.isRunning ? .secondaryLabelColor : .labelColor
         notificationButton.updateAppearance()
         notificationButton.target = self
@@ -178,18 +180,36 @@ final class ThreadActivityButton: NSButton {
     }
 
     func update(activity: ThreadActivity) {
-        notificationButton.state = ThreadNotificationPreferences.shared.enabled(activity.id) ? .on : .off
-        notificationButton.rowColor = activity.isRunning ? .secondaryLabelColor : .labelColor
-        notificationButton.setAccessibilityLabel("\(activity.title) 알림")
-        notificationButton.updateAppearance()
-        guard self.activity != activity else { return }
-        let runningChanged = self.activity.isRunning != activity.isRunning || self.activity.stateConfirmed != activity.stateConfirmed
+        let previous = self.activity
+        let notificationState: NSControl.StateValue = ThreadNotificationPreferences.shared.enabled(activity) ? .on : .off
+        let canToggleNotification = ThreadNotificationPreferences.scope(for: activity) != nil
+        let rowColor: NSColor = activity.isRunning ? .secondaryLabelColor : .labelColor
+        let notificationAppearanceChanged = notificationButton.state != notificationState
+            || !notificationButton.rowColor.isEqual(rowColor)
+            || notificationButton.isEnabled != canToggleNotification
+        let presentationChanged = previous.title != activity.title
+            || previous.statusLabel != activity.statusLabel
+            || previous.isRunning != activity.isRunning
+            || previous.stateConfirmed != activity.stateConfirmed
         self.activity = activity
+        if notificationAppearanceChanged {
+            notificationButton.isEnabled = canToggleNotification
+            notificationButton.state = notificationState
+            notificationButton.rowColor = rowColor
+            notificationButton.updateAppearance()
+            needsLayout = true
+        }
+        if previous.title != activity.title {
+            notificationButton.setAccessibilityLabel("\(activity.title) 알림")
+        }
+        guard presentationChanged else { return }
         setAccessibilityLabel("\(activity.statusLabel), \(activity.title)")
         toolTip = activity.statusLabel
         needsLayout = true
         needsDisplay = true
-        if runningChanged { updateShimmer() }
+        if previous.isRunning != activity.isRunning || previous.stateConfirmed != activity.stateConfirmed {
+            updateShimmer()
+        }
     }
 
     private func updateShimmer() {
@@ -208,7 +228,7 @@ final class ThreadActivityButton: NSButton {
         super.layout()
         notificationButton.frame = NSRect(x: bounds.width - 30, y: 6, width: 22, height: 22)
         shimmerOverlay.frame = bounds
-        let titleFrame = NSRect(x: 36, y: 8, width: max(0, bounds.width - 78), height: 18)
+        let titleFrame = NSRect(x: 36, y: 10, width: max(0, bounds.width - 78), height: 18)
         let symbolSize = notificationButton.image?.size ?? NSSize(width: 11, height: 11)
         let symbolFrame = NSRect(
             x: notificationButton.frame.midX - symbolSize.width / 2,
@@ -245,14 +265,14 @@ final class ThreadActivityButton: NSButton {
         arrow.curve(to: NSPoint(x: 9.4, y: 10.5), controlPoint1: NSPoint(x: 8.3, y: 10.5), controlPoint2: NSPoint(x: 8.6, y: 10.2))
         arrow.close()
         var inset = AffineTransform()
-        inset.translate(x: 6, y: 0)
+        inset.translate(x: 6, y: 2)
         arrow.transform(using: inset)
         arrow.lineWidth = 1.1
         arrow.lineJoinStyle = .round
         arrow.stroke()
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
-        (activity.title as NSString).draw(in: NSRect(x: 36, y: 8, width: max(0, bounds.width - 78), height: 18), withAttributes: [
+        (activity.title as NSString).draw(in: NSRect(x: 36, y: 10, width: max(0, bounds.width - 78), height: 18), withAttributes: [
             .font: NSFont.systemFont(ofSize: 11),
             .foregroundColor: color, .paragraphStyle: paragraph
         ])
@@ -269,7 +289,7 @@ final class ThreadActivityButton: NSButton {
     }
 
     @objc private func toggleNotifications() {
-        ThreadNotificationPreferences.shared.setEnabled(notificationButton.state == .on, for: activity.id)
+        ThreadNotificationPreferences.shared.setEnabled(notificationButton.state == .on, for: activity)
         notificationButton.updateAppearance()
         needsLayout = true
     }
@@ -303,15 +323,18 @@ final class ThreadActivityView: NSView {
 
     private let connectionLabel = NSTextField(labelWithString: "")
 
-    /// Reuse rows while tracking, but collapse the area when no tasks remain.
+    /// Keep the menu stable while tracking, but shrink promptly when rows are removed.
     func update(activities: [ThreadActivity], preserveHeight: Bool = false, connected: Bool = true, incompatible: Bool = false) {
         let allConfirmed = connected && !incompatible && activities.allSatisfy(\.stateConfirmed)
         let statusChanged = connectionLabel.isHidden != allConfirmed
-        connectionLabel.isHidden = allConfirmed
-        connectionLabel.stringValue = incompatible ? L10n.text("Codex 연결 형식 미지원 · 앱 업데이트를 확인하세요")
+        let connectionStatus = incompatible ? L10n.text("Codex 연결 형식 미지원 · 앱 업데이트를 확인하세요")
             : L10n.text("작업 상태 연결 복구 중 · 마지막 확인 정보")
+        let statusTextChanged = connectionLabel.stringValue != connectionStatus
+        if statusChanged { connectionLabel.isHidden = allConfirmed }
+        if statusTextChanged { connectionLabel.stringValue = connectionStatus }
         let statusHeight: CGFloat = allConfirmed ? 0 : 22
         let incoming = Set(activities.map(\.id))
+        let previousOrder = orderedIDs
         let animate = window != nil && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         for id in Array(buttons.keys) where !incoming.contains(id) {
             guard let button = buttons.removeValue(forKey: id) else { continue }
@@ -327,6 +350,7 @@ final class ThreadActivityView: NSView {
             orderedIDs = orderedIDs.filter { incoming.contains($0) }
             orderedIDs += activities.map(\.id).filter { !orderedIDs.contains($0) }
         } else { orderedIDs = activities.map(\.id) }
+        let orderChanged = orderedIDs != previousOrder
         for activity in activities {
             if let button = buttons[activity.id] { button.update(activity: activity) }
             else {
@@ -342,21 +366,41 @@ final class ThreadActivityView: NSView {
                 }
             }
         }
-        if activities.isEmpty || !preserveHeight || bounds.height == 0 || statusChanged {
-            let height: CGFloat = activities.isEmpty ? 0 : 8 + CGFloat(min(activities.count, 5)) * 34
-            setFrameSize(NSSize(width: 300, height: height + statusHeight))
+        var viewSizeChanged = false
+        let rowsHeight: CGFloat = activities.isEmpty ? 0 : 8 + CGFloat(min(activities.count, 5)) * 34
+        let targetSize = NSSize(width: 300, height: rowsHeight + statusHeight)
+        let shouldShrinkWhileTracking = preserveHeight && targetSize.height < frame.height
+        if activities.isEmpty || !preserveHeight || bounds.height == 0 || statusChanged || shouldShrinkWhileTracking {
+            if frame.size != targetSize {
+                setFrameSize(targetSize)
+                viewSizeChanged = true
+            }
         }
-        connectionLabel.frame = NSRect(x: 12, y: 3, width: 276, height: 18)
-        scroll.frame = NSRect(x: 12, y: 4 + statusHeight, width: 276, height: max(0, bounds.height - 8 - statusHeight))
-        document.setFrameSize(NSSize(width: 276, height: max(scroll.bounds.height, CGFloat(orderedIDs.count) * 34)))
-        scroll.hasVerticalScroller = CGFloat(orderedIDs.count) * 34 > scroll.bounds.height
+        let connectionFrame = NSRect(x: 12, y: 3, width: 276, height: 18)
+        if connectionLabel.frame != connectionFrame { connectionLabel.frame = connectionFrame }
+        let scrollFrame = NSRect(x: 12, y: 4 + statusHeight, width: 276,
+                                 height: max(0, bounds.height - 8 - statusHeight))
+        let scrollFrameChanged = scroll.frame != scrollFrame
+        if scrollFrameChanged { scroll.frame = scrollFrame }
+        let documentSize = NSSize(width: 276, height: max(scroll.bounds.height, CGFloat(orderedIDs.count) * 34))
+        let documentSizeChanged = document.frame.size != documentSize
+        if documentSizeChanged { document.setFrameSize(documentSize) }
+        let needsScroller = CGFloat(orderedIDs.count) * 34 > scroll.bounds.height
+        let scrollerChanged = scroll.hasVerticalScroller != needsScroller
+        if scrollerChanged { scroll.hasVerticalScroller = needsScroller }
         for (index, id) in orderedIDs.enumerated() {
-            buttons[id]?.frame = NSRect(x: 0, y: CGFloat(index) * 34, width: 276, height: 34)
+            let targetFrame = NSRect(x: 0, y: CGFloat(index) * 34, width: 276, height: 34)
+            if let button = buttons[id], button.frame != targetFrame { button.frame = targetFrame }
         }
-        scroll.contentView.scroll(to: NSPoint(x: 0, y: min(scroll.contentView.bounds.minY,
-            max(0, document.bounds.height - scroll.contentView.bounds.height))))
-        scroll.reflectScrolledClipView(scroll.contentView)
-        needsDisplay = true
+        let currentOrigin = scroll.contentView.bounds.origin
+        let targetOrigin = NSPoint(x: 0, y: min(currentOrigin.y,
+            max(0, document.bounds.height - scroll.contentView.bounds.height)))
+        let scrollPositionChanged = currentOrigin != targetOrigin
+        if scrollPositionChanged { scroll.contentView.scroll(to: targetOrigin) }
+        if scrollFrameChanged || documentSizeChanged || scrollerChanged || scrollPositionChanged {
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
+        if statusChanged || statusTextChanged || orderChanged || viewSizeChanged { needsDisplay = true }
         refreshHover()
     }
 
