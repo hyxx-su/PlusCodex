@@ -3,6 +3,16 @@ import AppKit
 @main struct AppearanceSoundChecks {
     static func main() {
         _ = NSApplication.shared
+        var lightIcon: NSImage?
+        NSAppearance(named: .aqua)!.performAsCurrentDrawingAppearance {
+            lightIcon = CodexStatusIcon.image(size: 18, offline: false)
+            precondition(lightIcon != nil)
+            precondition(lightIcon === CodexStatusIcon.image(size: 18, offline: false))
+            precondition(lightIcon !== CodexStatusIcon.image(size: 18, offline: true))
+        }
+        NSAppearance(named: .darkAqua)!.performAsCurrentDrawingAppearance {
+            precondition(lightIcon !== CodexStatusIcon.image(size: 18, offline: false))
+        }
         let parent = NSView()
         let view = NSView()
         view.wantsLayer = true

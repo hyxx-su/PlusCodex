@@ -92,10 +92,8 @@ final class CodexWakeScheduler {
                                                   submitted = true
                                                   NSLog("PlusCodex wake completed: scheduled=%.0f", cycle.timeIntervalSince1970)
                                                   DispatchQueue.main.sync {
-                                                      if CodexAuthRevision.current() == authRevision,
-                                                         self?.settings.accountIdentity == accountIdentity {
-                                                          self?.settings.recordAttempt(at: Date(), cycleResetAt: cycle)
-                                                      }
+                                                      self?.settings.recordResult(account: accountIdentity,
+                                                          completedAt: Date(), cycle: cycle, failure: nil, retryAt: nil)
                                                   }
                                               },
                                               onTurnStartRequested: { submissionStarted = true },
@@ -110,6 +108,7 @@ final class CodexWakeScheduler {
                                               })
             } catch CodexWakeError.cancelled {
                 // The user switched the feature off before the turn was sent.
+                shouldRetry = !submissionStarted
             } catch {
                 failureMessage = error.localizedDescription
                 NSLog("PlusCodex wake message failed: %@", error.localizedDescription)
@@ -119,16 +118,10 @@ final class CodexWakeScheduler {
                 shouldRetry = !submitted && (!submissionStarted || definiteRejection)
             }
             DispatchQueue.main.async {
-                if CodexAuthRevision.current() == authRevision,
-                   self?.settings.accountIdentity == accountIdentity {
-                    self?.settings.lastFailure = failureMessage
-                }
-                if shouldRetry, self?.settings.enabled == true,
-                   CodexAuthRevision.current() == authRevision,
-                   self?.settings.accountIdentity == accountIdentity {
-                    // A known pre-submission failure used no model quota; retry
-                    // later without repeatedly starting Codex every minute.
-                    self?.settings.nextAttemptAt = Date().addingTimeInterval(15 * 60)
+                if !submitted {
+                    self?.settings.recordResult(account: accountIdentity, completedAt: nil,
+                        cycle: cycle, failure: failureMessage,
+                        retryAt: shouldRetry ? Date().addingTimeInterval(15 * 60) : nil)
                 }
                 self?.inFlight = false
             }
@@ -150,6 +143,22 @@ final class CodexWakeScheduler {
                   previous.map({ fetchedAt.timeIntervalSince($0.fetchedAt) >= 30 }) ?? true else { return nil }
             settings.observation = .init(fetchedAt: fetchedAt, resetAt: currentReset,
                                          usedPercent: window.usedPercent)
+            if window.usedPercent > 0 { settings.hasObservedUsage = true }
+        }
+        // Bootstrap a previously unused account without waiting for a moving
+        // five-hour forecast. This is a one-time activation policy, not proof
+        // of a reset. An existing success/reservation always takes precedence.
+        if !settings.hasObservedUsage, settings.lastAttemptAt == nil, settings.completedResetAt == nil,
+           (settings.nextAttemptAt == nil || settings.nextAttemptAt! <= now),
+           let fetchedAt = quotaFetchedAt, let previous,
+           fetchedAt.timeIntervalSince(previous.fetchedAt) >= 30,
+           fetchedAt.timeIntervalSince(previous.fetchedAt) <= 120,
+           previous.usedPercent == 0, window.usedPercent == 0,
+           previous.resetAt > previous.fetchedAt, currentReset > now,
+           quota?.windows.allSatisfy({ $0.usedPercent.isFinite && $0.usedPercent >= 0 && $0.usedPercent < 100 }) == true {
+            let cycle = min(settings.scheduledResetAt ?? previous.fetchedAt, previous.fetchedAt)
+            settings.scheduledResetAt = cycle
+            return cycle
         }
         // Recover the next deadline even if the Mac shut down immediately after
         // success, before another usage read could book it. A missed interval

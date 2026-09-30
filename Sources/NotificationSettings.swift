@@ -342,6 +342,13 @@ final class NotificationSettings {
             completion(.failure(SoundError.unreadable)); return
         }
         conversionQueue.async {
+            // Read generation on its owning queue. Superseded queued work must
+            // complete its callback without decoding and rewriting the audio.
+            let current = DispatchQueue.main.sync { self.conversionGeneration == generation }
+            guard current else {
+                DispatchQueue.main.async { completion(.success(false)) }
+                return
+            }
             let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".caf")
             let result = Result { () throws -> Data in
                 defer { try? FileManager.default.removeItem(at: temporary) }

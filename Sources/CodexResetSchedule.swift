@@ -3,7 +3,7 @@ import Foundation
 /// Stabilizes the five-hour deadline once per completed usage read, before it
 /// reaches either notifications or wake scheduling. UI usage stays unmodified.
 final class CodexResetSchedule {
-    private struct State: Codable {
+    private struct State: Codable, Equatable {
         var anchor: Double
         var candidate: Double?
         var candidateSince: Double?
@@ -32,12 +32,14 @@ final class CodexResetSchedule {
             resolvedAccount = email
         }
         guard let identity = resolvedAccount else { return quota }
+        var needsPersistence = false
         func stabilize(_ window: QuotaWindow?) -> QuotaWindow? {
             guard var window, window.windowDurationMins == 300,
                   let reported = window.resetsAt, reported.isFinite else { return window }
             let stateKey = identity + ":300"
             let time = now.timeIntervalSince1970
             var state = states[stateKey] ?? State(anchor: reported, lastObservedAt: time - 1)
+            let previousState = states[stateKey]
             let previous = state.anchor
             if time > state.lastObservedAt {
                 if time >= state.anchor && reported > time && reported - state.anchor >= 5 * 60 * 60 - 10 * 60 {
@@ -65,6 +67,12 @@ final class CodexResetSchedule {
                 state.lastObservedAt = time
             }
             states[stateKey] = state
+            // Poll timestamps alone do not change a reservation. Persist only
+            // deadline/candidate transitions; preserve monotonic checks in RAM.
+            if previousState?.anchor != state.anchor || previousState?.candidate != state.candidate
+                || previousState?.candidateSince != state.candidateSince {
+                needsPersistence = true
+            }
             window = QuotaWindow(usedPercent: window.usedPercent,
                                  windowDurationMins: window.windowDurationMins,
                                  resetsAt: state.anchor, customLabel: window.customLabel,
@@ -77,7 +85,7 @@ final class CodexResetSchedule {
         }
         let result = Quota(primary: stabilize(quota.primary), secondary: stabilize(quota.secondary),
                            additional: quota.additional?.compactMap { stabilize($0) })
-        if let data = try? JSONEncoder().encode(states) { defaults.set(data, forKey: key) }
+        if needsPersistence, let data = try? JSONEncoder().encode(states) { defaults.set(data, forKey: key) }
         return result
     }
 }

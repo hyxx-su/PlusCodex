@@ -50,15 +50,20 @@ final class CodexWakeSettings {
         let usedPercent: Double
     }
 
+    var hasObservedUsage: Bool {
+        get { defaults.bool(forKey: scoped("codexWake.hasObservedUsage")) }
+        set { defaults.set(newValue, forKey: scoped("codexWake.hasObservedUsage")) }
+    }
+
     var observation: Observation? {
         get {
-            defaults.data(forKey: "codexWake.observation.v1").flatMap {
+            defaults.data(forKey: scoped("codexWake.observation.v1")).flatMap {
                 try? JSONDecoder().decode(Observation.self, from: $0)
             }
         }
         set {
             defaults.set(newValue.flatMap { try? JSONEncoder().encode($0) },
-                         forKey: "codexWake.observation.v1")
+                         forKey: scoped("codexWake.observation.v1"))
         }
     }
 
@@ -80,8 +85,43 @@ final class CodexWakeSettings {
 
     private let defaults: UserDefaults
 
+    // Keep each account's ledger in its own namespace; chat history and user
+    // preferences remain shared. Base64 avoids ambiguous separator keys.
+    private func scoped(_ key: String, account: String? = nil) -> String {
+        guard let identity = account ?? accountIdentity else { return key }
+        return "codexWake.accounts.v2." + Data(identity.utf8).base64EncodedString() + "." + key
+    }
+
+    private static let ledgerKeys = [Key.lastAttemptAt, Key.completedResetAt,
+        Key.nextAttemptAt, Key.scheduledResetAt, "codexWake.lastFailure", "codexWake.observation.v1"]
+
+    func recordResult(account: String?, completedAt: Date?, cycle: Date,
+                      failure: String?, retryAt: Date?) {
+        guard let account else { return }
+        defaults.set(failure, forKey: scoped("codexWake.lastFailure", account: account))
+        if let completedAt {
+            defaults.set(completedAt, forKey: scoped(Key.lastAttemptAt, account: account))
+            defaults.set(cycle, forKey: scoped(Key.completedResetAt, account: account))
+            for key in [Key.nextAttemptAt, Key.scheduledResetAt, "codexWake.observation.v1"] {
+                defaults.removeObject(forKey: scoped(key, account: account))
+            }
+        } else if let retryAt {
+            defaults.set(retryAt, forKey: scoped(Key.nextAttemptAt, account: account))
+        }
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        if let account = accountIdentity,
+           !defaults.bool(forKey: scoped("migrated", account: account)) {
+            for key in Self.ledgerKeys {
+                if let value = defaults.object(forKey: key) {
+                    defaults.set(value, forKey: scoped(key, account: account))
+                }
+            }
+            defaults.set(true, forKey: scoped("migrated", account: account))
+            if let observation, observation.usedPercent > 0 { hasObservedUsage = true }
+        }
         if !defaults.bool(forKey: Key.wakeUpDefaultApplied) {
             // Older builds saved their initial "안녕" value even when the user
             // only closed Settings. Treat that legacy value as the old default.
@@ -94,8 +134,8 @@ final class CodexWakeSettings {
 
     var enabled: Bool { defaults.bool(forKey: Key.enabled) }
     var lastFailure: String? {
-        get { defaults.string(forKey: "codexWake.lastFailure") }
-        set { defaults.set(newValue, forKey: "codexWake.lastFailure") }
+        get { defaults.string(forKey: scoped("codexWake.lastFailure")) }
+        set { defaults.set(newValue, forKey: scoped("codexWake.lastFailure")) }
     }
     var modelID: String { defaults.string(forKey: Key.modelID) ?? "gpt-6-luna" }
     var modelName: String { defaults.string(forKey: Key.modelName) ?? "gpt-6-luna" }
@@ -107,16 +147,16 @@ final class CodexWakeSettings {
     // Ignore a previously saved Medium/High choice from older builds.
     var effort: String { "low" }
     var threadID: String? { defaults.string(forKey: Key.threadID) }
-    var lastAttemptAt: Date? { defaults.object(forKey: Key.lastAttemptAt) as? Date }
-    var completedResetAt: Date? { defaults.object(forKey: Key.completedResetAt) as? Date }
+    var lastAttemptAt: Date? { defaults.object(forKey: scoped(Key.lastAttemptAt)) as? Date }
+    var completedResetAt: Date? { defaults.object(forKey: scoped(Key.completedResetAt)) as? Date }
     var accountIdentity: String? { defaults.string(forKey: Key.account) }
     var nextAttemptAt: Date? {
-        get { defaults.object(forKey: Key.nextAttemptAt) as? Date }
-        set { defaults.set(newValue, forKey: Key.nextAttemptAt) }
+        get { defaults.object(forKey: scoped(Key.nextAttemptAt)) as? Date }
+        set { defaults.set(newValue, forKey: scoped(Key.nextAttemptAt)) }
     }
     var scheduledResetAt: Date? {
-        get { defaults.object(forKey: Key.scheduledResetAt) as? Date }
-        set { defaults.set(newValue, forKey: Key.scheduledResetAt) }
+        get { defaults.object(forKey: scoped(Key.scheduledResetAt)) as? Date }
+        set { defaults.set(newValue, forKey: scoped(Key.scheduledResetAt)) }
     }
 
     func setEnabled(_ value: Bool) {
@@ -124,10 +164,7 @@ final class CodexWakeSettings {
         defaults.set(value, forKey: Key.enabled)
         lastFailure = nil
         observation = nil
-        // Re-evaluate the current five-hour window when re-enabled, but retain
-        // the last attempt so switching off and on cannot send twice at once.
-        nextAttemptAt = nil
-        scheduledResetAt = nil
+        // Do not erase a possible in-flight reservation by toggling the feature.
     }
 
     @discardableResult
@@ -147,24 +184,15 @@ final class CodexWakeSettings {
     }
 
     func selectAccount(_ identity: String) {
-        if let previous = defaults.string(forKey: Key.account), previous != identity {
-            lastFailure = nil
-            observation = nil
-            // The wake chat belongs to the shared local history. Keep its ID
-            // across sign-ins, but never reuse the previous account's schedule.
-            for key in [Key.lastAttemptAt, Key.completedResetAt, Key.nextAttemptAt,
-                        Key.scheduledResetAt] {
-                defaults.removeObject(forKey: key)
-            }
-        }
         defaults.set(identity, forKey: Key.account)
+        defaults.set(true, forKey: scoped("migrated"))
     }
 
     func recordAttempt(at date: Date, cycleResetAt: Date? = nil) {
         lastFailure = nil
         observation = nil
-        defaults.set(date, forKey: Key.lastAttemptAt)
-        if let cycleResetAt { defaults.set(cycleResetAt, forKey: Key.completedResetAt) }
+        defaults.set(date, forKey: scoped(Key.lastAttemptAt))
+        if let cycleResetAt { defaults.set(cycleResetAt, forKey: scoped(Key.completedResetAt)) }
         nextAttemptAt = cycleResetAt == nil ? date.addingTimeInterval(Self.interval) : nil
         scheduledResetAt = nil
     }

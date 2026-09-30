@@ -1,3 +1,37 @@
+# PlusCodex v1.1.6
+
+- 작업 상태 수신 시 채팅 본문과 도구 출력 전체를 객체로 변환하던 처리를 줄였습니다. 제목·진행 상태·읽음·최신 작업·승인 대기 등 메뉴바에 필요한 정보만 해석하고, 장기 실행 수신 루프의 임시 객체와 수신 버퍼를 정리해 메모리 부담을 낮췄습니다.
+- 작업 상태의 변경 순서가 어긋나거나 승인 요청 목록을 복구할 때, 응답을 받기 전에 전체 채팅을 반복 요청하지 않도록 보완했습니다. 완료 작업의 기존 읽음 확인 주기와 메뉴바를 연 상태의 실시간 갱신은 유지합니다.
+- Codex 깨우기의 예약·시도·성공·실패·사용량 비교 기록을 계정별로 분리했습니다. 한 계정의 깨우기 성공이나 재시도 대기가 다른 계정의 실행을 막지 않으며, 전송 중 계정이 바뀌어도 결과는 전송을 시작한 계정에 기록합니다. 깨우기 채팅과 사용자 설정은 계속 공유합니다.
+- 깨우기 기록이 없는 계정에서 5시간 사용량 0%가 두 정상 조회로 확인되면 최초 깨우기를 판단하도록 보완했습니다. 이미 사용 중인 계정과 한도가 소진된 계정은 이 초기 실행 대상에서 제외하며, 재실행·설정 전환 후에도 중복 전송 방지 기록을 유지합니다.
+- 알림음 설정을 연속으로 변경할 때 대기 중인 오래된 음원 변환을 건너뜁니다. 상태 아이콘은 크기·테마별로 재사용하고, 읽기 전용 작업 데이터베이스 연결과 초기화 시각 저장도 불필요한 반복 작업을 줄였습니다. 메뉴 진입 시 업데이트 확인 동작은 유지했습니다.
+
+## English
+
+- Reduced temporary memory use in task monitoring by decoding only menu-bar metadata rather than materializing complete message bodies and tool outputs. Temporary objects and receive buffers are released during the long-running receive loop.
+- Coalesced full-history recovery requests while a response is outstanding, including revision gaps and approval-list recovery. Existing read-state refresh timing and live updates while the menu is open are preserved.
+- Isolated wake reservations, attempts, results, and usage observations by account. One account's wake history no longer blocks another account, and an in-flight result is recorded for the account that started the send. The wake chat and user preferences remain shared.
+- Added an initial wake decision for accounts without wake history after two successful reads confirm zero five-hour usage. Active or exhausted accounts are excluded, and duplicate-send protection survives relaunches and setting changes.
+- Skip superseded queued sound conversions, reuse status icons by size and appearance, retain the read-only task database connection, and avoid unnecessary reset-schedule writes. Update checks on menu open remain unchanged.
+
+## 설치 및 업데이트
+
+기존 정식 버전은 앱의 업데이트 기능으로 `v1.1.6`을 설치할 수 있습니다. 수동 설치는 [PlusCodex-1.1.6.dmg](https://github.com/hyxx-su/PlusCodex/releases/download/v1.1.6/PlusCodex-1.1.6.dmg)를 열고 PlusCodex를 Applications로 옮기세요. 기존 설정과 저장된 깨우기 채팅은 유지됩니다.
+
+Apple Silicon Mac과 macOS 14 이상을 지원합니다. 이 배포본은 ad-hoc 서명되어 있으며 Apple Developer ID 서명·공증은 없습니다. PlusCodex는 OpenAI의 공식 앱이 아닙니다.
+
+## 검증 범위 / Validation
+
+계정별 깨우기 기록·주기 판단·중복 방지, 음원 변환·테마별 아이콘, 선택적 IPC 해석, 작업 시작·완료·읽음·알림 상태의 관련 회귀 테스트와 실제 진행 중인 작업의 수신을 확인했습니다. 배포 파일은 DMG 무결성과 Sparkle 업데이트 피드·ZIP의 서명 및 길이를 검증합니다.
+
+메모리 개선은 짧은 실제 실행과 가상 대용량 데이터 반복 해석으로 확인한 범위이며, 장시간 사용과 모든 대형 채팅에서 메모리 누수가 완전히 해결됐다고 보장하지 않습니다. 실제 5시간 예약 실행·장시간 잠자기 후 복귀·계정 전환을 조합한 검증은 완료되지 않았습니다. Mac이 꺼지거나 잠든 동안에는 실행되지 않으며, 복귀 후 앱 실행·로그인·정상 사용량 조회가 필요합니다.
+
+Validation covers targeted regressions for account-scoped wake history, scheduling and duplicate guards, audio conversion, appearance-aware icons, projected IPC decoding, task lifecycle/read state, notifications, and receipt of a real running task. Release artifacts are checked for DMG integrity and Sparkle feed/ZIP signatures and lengths.
+
+Memory observations cover short real runs and synthetic large-document decoding; they do not establish a complete fix across prolonged use and every large chat. Combined real five-hour scheduling, long sleep/wake, and account-switch scenarios have not been fully validated. Execution requires an awake Mac, a running app, authentication, and successful usage reads.
+
+---
+
 # PlusCodex v1.1.5
 
 - Codex 깨우기는 기존 사용량 조회의 원본 응답과 이전 관측값을 비교합니다. 예약 이후 최소 30초 간격의 두 정상 조회에서 사용량 0%와 미래 초기화 시각이 확인될 때 전송하며, 잔량이 있다는 이유만으로 실행하지 않습니다. 시간이 계속 밀리는 빈 주기는 기존 예약을 유지합니다.

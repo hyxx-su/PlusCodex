@@ -14,9 +14,14 @@ import Foundation
         }
         let schedule = CodexResetSchedule(defaults: defaults)
         _ = schedule.update(quota(due), account: account, now: base)
+        let savedSchedule = defaults.data(forKey: "codexResetSchedule.v1")
+        _ = schedule.update(quota(due), account: account, now: base.addingTimeInterval(1))
+        precondition(defaults.data(forKey: "codexResetSchedule.v1") == savedSchedule,
+                     "Unchanged deadlines must not rewrite the persisted ledger")
         let wake = CodexWakeSettings(defaults: defaults)
         wake.setEnabled(true)
         wake.selectAccount(account.email!)
+        wake.hasObservedUsage = true
         let scheduler = CodexWakeScheduler(settings: wake)
         _ = scheduler.prepareAttempt(quota: quota(due), offline: false, quotaFetchedAt: base, now: base)
         for minute in 1...9 {
@@ -96,6 +101,7 @@ import Foundation
         defer { recoveryDefaults.removePersistentDomain(forName: recoverySuite) }
         let recoveryWake = CodexWakeSettings(defaults: recoveryDefaults)
         recoveryWake.selectAccount(account.email!)
+        recoveryWake.hasObservedUsage = true
         recoveryWake.setEnabled(true)
         let recoveryScheduler = CodexWakeScheduler(settings: recoveryWake)
         // Enabling wake between polls must save the known deadline immediately.

@@ -161,7 +161,8 @@ import AppKit
         precondition(wake.scheduledResetAt == nil)
         wake.setEnabled(false)
         wake.setEnabled(true)
-        precondition(wake.nextAttemptAt == nil && wake.lastAttemptAt == now)
+        precondition(wake.nextAttemptAt == now.addingTimeInterval(CodexWakeSettings.interval)
+                     && wake.lastAttemptAt == now)
         precondition(CodexWakeSchedule.initialDate(now: now.addingTimeInterval(60),
                                                    lastAttemptAt: wake.lastAttemptAt,
                                                    quota: nil) == now.addingTimeInterval(CodexWakeSettings.interval))

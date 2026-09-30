@@ -360,6 +360,9 @@ final class ThreadActivityMonitor {
     private var socketFD: Int32 = -1
     private var clientID = ""
     private var pending = Data()
+    private var snapshotRequests: [String: Date] = [:]
+    private var candidateDatabase: OpaquePointer?
+    private var candidateDatabaseIdentity: String?
     private var discardedFrameBytesRemaining = 0
     private var followed = Set<String>()
     private var activities: [String: ThreadActivity] = [:]
@@ -394,6 +397,7 @@ final class ThreadActivityMonitor {
         awaitingSnapshots.formUnion(activities.keys)
         followed.removeAll()
         pendingReadActivities.removeAll()
+        snapshotRequests.removeAll()
     }
     private var attentionTracker = AttentionTracker()
     private var pendingReadActivities: [String: ThreadActivity] = [:]
@@ -523,7 +527,9 @@ final class ThreadActivityMonitor {
                           "params": ["clientType": "codex-quota"]])
                 var refreshAt = Date.distantPast
                 let initializationDeadline = Date().addingTimeInterval(10)
+                var bytes = [UInt8](repeating: 0, count: 65536)
                 while true {
+                    try autoreleasepool {
                     synchronizeAccount()
                     if clientID.isEmpty && Date() >= initializationDeadline { throw ActivityError.connection }
                     if !clientID.isEmpty && Date() >= refreshAt {
@@ -536,9 +542,8 @@ final class ThreadActivityMonitor {
                     if result < 0 { throw ActivityError.connection }
                     if result == 0 {
                         if attentionTracker.hasPendingFallback { publish(connected: true) }
-                        continue
+                        return
                     }
-                    var bytes = [UInt8](repeating: 0, count: 65536)
                     let count = Darwin.read(socketFD, &bytes, bytes.count)
                     guard count > 0 else { throw ActivityError.connection }
                     pending.append(contentsOf: bytes.prefix(count))
@@ -563,14 +568,19 @@ final class ThreadActivityMonitor {
                             continue
                         }
                         guard pending.count >= length + 4 else { break }
-                        let frame = Data(pending.dropFirst(4).prefix(length))
-                        pending.removeFirst(length + 4)
-                        if let message = try JSONSerialization.jsonObject(with: frame) as? [String: Any] {
-                            try handle(message)
+                        try autoreleasepool {
+                            let frame = Data(pending.dropFirst(4).prefix(length))
+                            pending.removeFirst(length + 4)
+                            if pending.isEmpty { pending = Data() }
+                            try handle(ActivityIPCDecoder.decode(frame))
                         }
+                    }
                     }
                 }
             } catch {
+                if let candidateDatabase { sqlite3_close(candidateDatabase) }
+                candidateDatabase = nil
+                candidateDatabaseIdentity = nil
                 if socketFD >= 0 { Darwin.close(socketFD) }
                 socketFD = -1
                 clientID = ""
@@ -581,6 +591,7 @@ final class ThreadActivityMonitor {
                 owners.removeAll()
                 revisions.removeAll()
                 pendingReadActivities.removeAll()
+                snapshotRequests.removeAll()
                 publish(connected: false)
                 if case ActivityError.protocolMismatch = error {
                     RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) { self.onCompatibilityChanged?(true) }
@@ -643,30 +654,52 @@ final class ThreadActivityMonitor {
                   "params": ["conversationId": id, "hostId": "local", "following": enabled]])
     }
 
+    /// A revision gap can affect every arriving patch until its snapshot arrives.
+    /// Send only one recovery request in that interval, not one full history per patch.
+    private func requestSnapshot(_ id: String, now: Date = Date()) throws {
+        if let requested = snapshotRequests[id], now.timeIntervalSince(requested) < 30 { return }
+        try follow(id, enabled: false)
+        try follow(id, enabled: true)
+        snapshotRequests[id] = now
+    }
+
     private static var codexHome: URL {
         ProcessInfo.processInfo.environment["CODEX_HOME"].map { URL(fileURLWithPath: $0) }
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
     }
 
     private func refreshCandidates() throws {
-        var database: OpaquePointer?
         let path = Self.codexHome.appendingPathComponent("state_5.sqlite").path
-        guard sqlite3_open_v2(path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-            if let database { sqlite3_close(database) }
-            throw ActivityError.connection
+        let attributes = try FileManager.default.attributesOfItem(atPath: path)
+        guard let inode = attributes[.systemFileNumber] as? NSNumber,
+              let device = attributes[.systemNumber] as? NSNumber else { throw ActivityError.connection }
+        let identity = "\(device):\(inode)"
+        // Reuse the read-only connection, but reopen if the desktop replaces
+        // its database. Statements are finalized each poll, releasing WAL reads.
+        if candidateDatabaseIdentity != identity {
+            if let candidateDatabase { sqlite3_close(candidateDatabase) }
+            candidateDatabase = nil
+            candidateDatabaseIdentity = nil
         }
-        defer { sqlite3_close(database) }
-        sqlite3_busy_timeout(database, 500)
+        if candidateDatabase == nil {
+            guard sqlite3_open_v2(path, &candidateDatabase, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+                throw ActivityError.connection
+            }
+            candidateDatabaseIdentity = identity
+            sqlite3_busy_timeout(candidateDatabase, 500)
+        }
+        let database = candidateDatabase
         var statement: OpaquePointer?
         let sql = "SELECT id FROM threads WHERE archived = 0 ORDER BY recency_at_ms DESC LIMIT 100"
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else { throw ActivityError.protocolMismatch }
         defer { sqlite3_finalize(statement) }
         var candidates = Set(activities.values.filter(\.isVisible).map(\.id))
+        var recentIDs = Set<String>()
         var step = sqlite3_step(statement)
         while step == SQLITE_ROW {
             if let value = sqlite3_column_text(statement, 0) {
                 let id = String(cString: value)
-                if UUID(uuidString: id) != nil { candidates.insert(id) }
+                if UUID(uuidString: id) != nil { candidates.insert(id); recentIDs.insert(id) }
             }
             step = sqlite3_step(statement)
         }
@@ -678,7 +711,7 @@ final class ThreadActivityMonitor {
             throw ActivityError.protocolMismatch
         }
         defer { sqlite3_finalize(retained) }
-        for id in Array(activities.keys) {
+        for id in activities.keys.filter({ !recentIDs.contains($0) }) {
             sqlite3_reset(retained)
             sqlite3_clear_bindings(retained)
             let outcome = id.withCString { pointer -> Int32 in
@@ -705,17 +738,22 @@ final class ThreadActivityMonitor {
         // Refresh outstanding completed rows from the owner's authoritative snapshot.
         // Keep the previous state until it arrives; absence is not completion evidence.
         let now = Date()
+        snapshotRequests = snapshotRequests.filter { candidates.contains($0.key) }
         let recoveryDue = now.timeIntervalSince(lastReadRefresh) >= 30
         // Completed unread rows use the existing five-second refresh. Unknown
         // states retain the slower recovery cadence to avoid repeated retries.
         for id in candidates.intersection(followed) where ThreadRecoveryPolicy.shouldRefreshReadState(
             runtime: activities[id]?.runtime, unread: activities[id]?.unread,
             awaitingSnapshot: awaitingSnapshots.contains(id), recoveryDue: recoveryDue) {
-            try follow(id, enabled: false)
-            try follow(id, enabled: true)
+            // Do not request another full history while one is outstanding.
+            // Read broadcasts still apply immediately; a lost response retries.
+            try requestSnapshot(id, now: now)
         }
         if recoveryDue { lastReadRefresh = now }
-        for id in candidates.subtracting(followed) { try follow(id, enabled: true) }
+        for id in candidates.subtracting(followed) {
+            try follow(id, enabled: true)
+            snapshotRequests[id] = now
+        }
         followed = candidates
     }
 
@@ -787,6 +825,7 @@ final class ThreadActivityMonitor {
                 unread: state["hasUnreadTurn"] as? Bool ?? false,
                 updatedAt: state["updatedAt"] as? Double ?? 0)
             activities[id] = activity
+            snapshotRequests.removeValue(forKey: id)
             awaitingSnapshots.remove(id)
             if state["hasUnreadTurn"] as? Bool == false, !activity.isRunning {
                 pendingReadActivities[id] = activity
@@ -796,8 +835,7 @@ final class ThreadActivityMonitor {
         } else if change["type"] as? String == "patches", owners[id] == owner {
             guard let base = change["baseRevision"] as? Int, revisions[id] == base else {
                 awaitingSnapshots.insert(id)
-                try follow(id, enabled: false)
-                try follow(id, enabled: true)
+                try requestSnapshot(id)
                 publish(connected: true)
                 return
             }
@@ -880,8 +918,7 @@ final class ThreadActivityMonitor {
             }
             revisions[id] = revision
             if refreshPendingRequests {
-                try follow(id, enabled: false)
-                try follow(id, enabled: true)
+                try requestSnapshot(id)
                 return
             }
         }
