@@ -15,6 +15,9 @@ struct QuotaStartupChecks {
         }
         precondition(delivered)
         precondition(earlyRemaining == (snapshot.quota.primary ?? snapshot.quota.secondary)?.remaining)
+        if let credits = snapshot.rateLimitResetCredits {
+            print("Reset-credit metadata: available=\(credits.availableCount), details=\(credits.credits != nil)")
+        }
         print(String(format: "PASS: snapshot completed after early usage delivery: %.2fs", Date().timeIntervalSince(start)))
     }
 }

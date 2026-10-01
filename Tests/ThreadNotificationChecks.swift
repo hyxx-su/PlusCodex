@@ -39,6 +39,55 @@ import Foundation
         preferences.setEnabled(false, for: unknown)
         precondition(preferences.enabled(unknown) && preferences.enabled(next),
                      "Missing turn metadata must not create a chat-wide mute")
+
+        let settings = NotificationSettings(defaults: defaults)
+        let inherited = task(thread: "default", turn: "one")
+        let inheritedNext = task(thread: "default", turn: "two")
+        var defaultChanges = 0
+        let observer = NotificationCenter.default.addObserver(forName: .threadNotificationPreferenceChanged,
+                                                               object: nil, queue: nil) { notification in
+            if notification.object == nil { defaultChanges += 1 }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        settings.setEnabled(false, for: .completion)
+        precondition(defaultChanges == 1, "A default change must immediately refresh menu task rows")
+        settings.setEnabled(false, for: .completion)
+        precondition(defaultChanges == 1, "An unchanged default must not refresh task rows again")
+        precondition(!preferences.enabled(inherited) && !preferences.enabled(inheritedNext)
+            && !preferences.enabled(other) && !preferences.enabled(unknown),
+            "Unselected tasks and missing scopes inherit the disabled default")
+        precondition(preferences.enabled(first) && preferences.enabled(next),
+                     "Explicit ON choices remain on when the global default turns off")
+        preferences.setEnabled(true, for: inherited)
+        precondition(preferences.enabled(inherited) && !preferences.enabled(inheritedNext),
+                     "Manual ON overrides the disabled default for only this turn")
+        let originalScope = ThreadNotificationPreferences.scope(for: inherited)
+        let restoredOverride = ThreadNotificationPreferences(defaults: defaults)
+        precondition(restoredOverride.enabled(scope: originalScope)
+            && !restoredOverride.enabled(inheritedNext), "Explicit ON persists after relaunch without leaking to a new turn")
+        preferences.setEnabled(false, for: inherited)
+        settings.setEnabled(true, for: .completion)
+        precondition(!preferences.enabled(inherited) && preferences.enabled(inheritedNext),
+                     "Explicit OFF remains off when the default turns on")
+        preferences.setEnabled(true, for: other) // Store ON even when the default is already ON.
+        settings.setEnabled(false, for: .completion)
+        precondition(preferences.enabled(other) && !preferences.enabled(inheritedNext),
+                     "An explicit choice matching the old default must survive a later default change")
+        let choicesBeforeMissingTurn = defaults.dictionary(forKey: "turnNotificationOverrides.v2") as? [String: Bool]
+        preferences.setEnabled(true, for: unknown)
+        precondition(!preferences.enabled(unknown)
+            && defaults.dictionary(forKey: "turnNotificationOverrides.v2") as? [String: Bool] == choicesBeforeMissingTurn,
+            "A missing turn must neither override the default nor save a chat-wide choice")
+
+        let legacy = task(thread: "legacy", turn: "muted")
+        let legacyScope = ThreadNotificationPreferences.scope(for: legacy)!
+        defaults.set([legacyScope], forKey: "mutedTurnNotifications.v1")
+        settings.setEnabled(true, for: .completion)
+        precondition(!restoredOverride.enabled(legacy), "Previously saved per-turn mutes must still be honored")
+        preferences.setEnabled(true, for: legacy)
+        precondition(restoredOverride.enabled(legacy), "An explicit ON may override a legacy mute")
+        precondition(defaults.stringArray(forKey: "mutedTurnNotifications.v1") == [legacyScope],
+                     "Legacy records must remain intact for rollback")
         let raw: [String: Any] = ["id": 42, "method": "item/commandExecution/requestApproval",
                                  "params": ["command": "echo test", "cwd": "/tmp"]]
         let request = ThreadActivityMonitor.pendingRequests(in: [raw]).first!
@@ -46,6 +95,6 @@ import Foundation
         var completed = raw
         completed["completed"] = true
         precondition(ThreadActivityMonitor.pendingRequests(in: [completed]).isEmpty)
-        print("PASS: new-turn default on, per-turn mute persistence, legacy migration, retry isolation, missing-turn guard, approval classification")
+        print("PASS: inherited task defaults, explicit ON/OFF persistence, new-turn isolation, legacy mutes, retry scopes, missing-turn guards")
     }
 }

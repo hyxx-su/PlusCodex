@@ -72,6 +72,62 @@ import AppKit
         panel.update(quota: quota(5), account: CodexAccount(email: "new@example.invalid", planType: "plus"),
                      updatedAt: Date(), failure: nil)
         precondition(panel.testHookDisplayedPercents == [95], "Account switch must cancel old-account animation")
-        print("PASS: open-menu identity, live quota, task start/completion/read, tracking-mode animation, account switch")
+
+        // The signed test app owns its own defaults domain; preserve it while
+        // exercising the same shared preferences used by production menu rows.
+        let defaults = UserDefaults.standard
+        let preferenceKeys = ["notifications.completion.enabled", "mutedTurnNotifications.v1", "turnNotificationOverrides.v2"]
+        let saved = Dictionary(uniqueKeysWithValues: preferenceKeys.compactMap { key in
+            defaults.object(forKey: key).map { (key, $0) }
+        })
+        defer {
+            for key in preferenceKeys {
+                if let value = saved[key] { defaults.set(value, forKey: key) }
+                else { defaults.removeObject(forKey: key) }
+            }
+        }
+        let settings = NotificationSettings(defaults: defaults)
+        settings.setEnabled(true, for: .completion)
+        func scopedTask(_ title: String) -> ThreadActivity {
+            let turn = UUID().uuidString
+            return ThreadActivity(id: UUID().uuidString, title: title, runtime: "active",
+                latestTurn: ThreadTurnState(key: turn, value: ["turnId": turn, "status": "inProgress"]),
+                unread: false, updatedAt: 1)
+        }
+        let explicitOn = scopedTask("직접 켠 작업")
+        let inherited = scopedTask("기본값 작업")
+        ThreadNotificationPreferences.shared.setEnabled(true, for: explicitOn)
+        let taskView = ThreadActivityView(activities: [explicitOn, inherited])
+        let taskScroll = taskView.subviews.first as! NSScrollView
+        let taskRows = taskScroll.documentView!.subviews.compactMap { $0 as? ThreadActivityButton }
+        let explicitRow = taskRows.first { $0.accessibilityLabel()?.contains(explicitOn.title) == true }!
+        let inheritedRow = taskRows.first { $0.accessibilityLabel()?.contains(inherited.title) == true }!
+        let explicitBell = explicitRow.subviews.compactMap { $0 as? NSButton }.first!
+        let inheritedBell = inheritedRow.subviews.compactMap { $0 as? NSButton }.first!
+        let explicitIcon = explicitBell.image
+        let preferenceObserver = NotificationCenter.default.addObserver(forName: .threadNotificationPreferenceChanged,
+                                                                          object: nil, queue: nil) { _ in
+            taskView.update(activities: [explicitOn, inherited], preserveHeight: true)
+        }
+        defer { NotificationCenter.default.removeObserver(preferenceObserver) }
+        settings.setEnabled(false, for: .completion)
+        precondition(inheritedBell.state == .off && explicitBell.state == .on,
+                     "Changing the default must immediately mute only unselected menu rows")
+        precondition(taskScroll.documentView!.subviews.contains { $0 === inheritedRow }
+            && explicitBell.image === explicitIcon, "Default changes must update existing rows without rebuilding them")
+        inheritedBell.performClick(nil)
+        precondition(inheritedBell.state == .on && ThreadNotificationPreferences.shared.enabled(inherited),
+                     "The actual menu bell must enable a task despite the disabled default")
+        explicitBell.performClick(nil)
+        settings.setEnabled(true, for: .completion)
+        precondition(explicitBell.state == .off && inheritedBell.state == .on,
+                     "Explicit OFF and ON must survive changing the default")
+        settings.setEnabled(false, for: .completion)
+        var nextTurn = inherited
+        nextTurn.latestTurn = ThreadTurnState(key: "next", value: ["turnId": UUID().uuidString, "status": "inProgress"])
+        taskView.update(activities: [explicitOn, nextTurn], preserveHeight: true)
+        precondition(inheritedBell.state == .off && inheritedRow.superview === taskScroll.documentView,
+                     "A new turn must inherit OFF while retaining the same menu row")
+        print("PASS: open-menu identity, live quota, task status, animation, task defaults and manual bell overrides")
     }
 }

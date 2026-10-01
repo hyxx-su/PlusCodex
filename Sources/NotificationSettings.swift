@@ -6,6 +6,7 @@ enum NotificationKind: String, CaseIterable, Hashable {
     case completion
     case quota
     case reset
+    case resetCreditExpiry
     case update
     case approval
     case answer
@@ -15,9 +16,10 @@ enum NotificationKind: String, CaseIterable, Hashable {
 
     var titleKey: String {
         switch self {
-        case .completion: return "작업 완료"
+        case .completion: return "작업 알림"
         case .quota: return "사용량 부족"
         case .reset: return "사용량 초기화"
+        case .resetCreditExpiry: return "초기화권 만료"
         case .update: return "업데이트"
         case .approval: return "승인 요청"
         case .answer: return "답변 요청"
@@ -29,9 +31,10 @@ enum NotificationKind: String, CaseIterable, Hashable {
 
     var descriptionKey: String {
         switch self {
-        case .completion: return "요청한 작업이 완료되면 알림을 받습니다."
+        case .completion: return "새 작업의 완료 알림을 자동으로 활성화합니다."
         case .quota: return "사용량이 부족하거나 모두 소진되면 알림을 받습니다."
         case .reset: return "사용량이 초기화되면 알림을 받습니다."
+        case .resetCreditExpiry: return "초기화권 만료 전날 오전 9시에 알림을 받습니다."
         case .update: return "새로운 버전을 사용할 수 있을 때 알림을 받습니다."
         case .approval: return "작업을 계속하기 위해 승인이 필요할 때 알림을 받습니다."
         case .answer: return "Codex가 질문에 대한 답변을 기다릴 때 알림을 받습니다."
@@ -96,6 +99,8 @@ final class NotificationSettings {
     private let customSoundDisplayNameKey = "notifications.sound.displayName"
     private let customSoundSourceDurationKey = "notifications.sound.sourceDuration"
     private let soundDurationKey = "notifications.sound.duration"
+    private let autoCleanupEnabledKey = "notifications.autoCleanup.enabled"
+    private let autoCleanupStartedAtKey = "notifications.autoCleanup.startedAt"
     private let savedSoundsKey = "notifications.sound.savedSounds"
     private let selectedSavedSoundIDKey = "notifications.sound.selectedSavedID"
     private let managedSoundPrefix = "pluscodex-notification-"
@@ -130,6 +135,29 @@ final class NotificationSettings {
     var previewURL: URL? { customSoundName.flatMap { soundFileURL(named: $0) } }
     var notificationPlaybackDuration: TimeInterval { customSoundName == nil ? 2 : soundDuration }
 
+    var autoCleanupEnabled: Bool {
+        defaults.object(forKey: autoCleanupEnabledKey) as? Bool ?? false
+    }
+
+    var autoCleanupStartedAt: Date? {
+        guard autoCleanupEnabled,
+              let timestamp = defaults.object(forKey: autoCleanupStartedAtKey) as? NSNumber,
+              timestamp.doubleValue.isFinite else { return nil }
+        return Date(timeIntervalSince1970: timestamp.doubleValue)
+    }
+
+    func setAutoCleanupEnabled(_ enabled: Bool, now: Date = Date()) {
+        guard autoCleanupEnabled != enabled else { return }
+        // A new activation must not clear notifications kept while this option was off.
+        if enabled {
+            defaults.set(now.timeIntervalSince1970, forKey: autoCleanupStartedAtKey)
+        } else {
+            defaults.removeObject(forKey: autoCleanupStartedAtKey)
+        }
+        defaults.set(enabled, forKey: autoCleanupEnabledKey)
+        onChange?()
+    }
+
     var maximumSelectableSoundDuration: Int {
         guard let playbackName = defaults.string(forKey: customSoundNameKey),
               customSoundName != nil else {
@@ -153,12 +181,21 @@ final class NotificationSettings {
     }
 
     func isEnabled(_ kind: NotificationKind) -> Bool {
+        Self.isEnabled(kind, defaults: defaults)
+    }
+
+    /// Allows task preferences to read the same default without constructing
+    /// another settings object (and running custom-sound migration again).
+    static func isEnabled(_ kind: NotificationKind, defaults: UserDefaults) -> Bool {
         defaults.object(forKey: key(for: kind)) as? Bool ?? true
     }
 
     func setEnabled(_ enabled: Bool, for kind: NotificationKind) {
         guard isEnabled(kind) != enabled else { return }
-        defaults.set(enabled, forKey: key(for: kind))
+        defaults.set(enabled, forKey: Self.key(for: kind))
+        if kind == .completion {
+            NotificationCenter.default.post(name: .threadNotificationPreferenceChanged, object: nil)
+        }
         onChange?()
     }
 
@@ -596,7 +633,7 @@ final class NotificationSettings {
         }
     }
 
-    private func key(for kind: NotificationKind) -> String {
+    private static func key(for kind: NotificationKind) -> String {
         "notifications.\(kind.rawValue).enabled"
     }
 }

@@ -1,3 +1,35 @@
+# PlusCodex v1.1.7
+
+- 초기화권 만료 알림을 추가했습니다. 확인된 초기화권의 만료 전날 오전 9시(기기 현지 시간)에 알림을 예약하고, 계정 변경·초기화권 사용·만료·설정 변경에 맞춰 예약을 정리합니다. 같은 초기화권의 중복 알림을 방지하며, 초기화권 정보가 없거나 일부만 제공되어도 정상 사용량 조회는 유지합니다.
+- 설정의 `작업 알림`을 새 작업의 완료 알림 기본값으로 적용합니다. 기본값을 꺼도 메뉴바에서 특정 작업의 알림을 켜면 해당 작업의 완료 알림을 받을 수 있습니다. 개별 선택은 해당 작업에 적용되고 다음 작업에는 기본값을 다시 사용합니다.
+- 알림 권한 아래에 `알림 자동 정리` 토글을 추가했습니다. 기본값은 꺼짐이며, 켜면 이후 도착한 알림을 해당 알림의 재생 시간과 짧은 여유 시간이 지난 뒤 정리합니다. 알림센터 기록도 함께 삭제되며, 켜기 전에 있던 기록은 유지합니다. 앱 실행 중 동작하고, 끄면 진행 중인 조회 결과도 삭제에 사용하지 않습니다.
+- 소리 중복 방지 처리에서 만료된 예약의 보조 정보가 계속 쌓일 수 있는 부분을 수정했습니다. 자동 정리는 타이머와 조회를 각각 하나로 제한하고, 오래된 알림은 작업 큐로 넘기기 전에 제외합니다. 설정 검색·스크롤·라이트/다크 모드도 함께 점검했습니다.
+
+## English
+
+- Added reset-credit expiry reminders for 9 AM on the day before expiry in the device's local time. Reservations follow account changes, redemption, expiry, and settings. Duplicate reminders are prevented, and missing or partial credit metadata does not break normal usage reads.
+- The Task notifications setting now controls the default for new tasks. Enabling an individual task in the menu bar permits its completion notification even when the default is off. Per-task choices do not carry over to the next task.
+- Added an optional Auto-clear notifications switch below notification permissions. It defaults to off and removes subsequently delivered notifications after their recorded playback duration plus a short grace period. Notification Center history is also removed; older history is preserved. Cleanup runs while the app is running, and disabling it invalidates outstanding cleanup results.
+- Fixed retention of expired sound-reservation metadata. Automatic cleanup uses one timer and one outstanding query, filtering historical notifications before handing them to the main queue. Settings search, scrolling, and light/dark appearance were also checked.
+
+## 설치 및 업데이트
+
+기존 정식 버전은 앱의 업데이트 기능으로 `v1.1.7`을 설치할 수 있습니다. 수동 설치는 [PlusCodex-1.1.7.dmg](https://github.com/hyxx-su/PlusCodex/releases/download/v1.1.7/PlusCodex-1.1.7.dmg)를 열고 PlusCodex를 Applications로 옮기세요. 기존 설정과 저장된 깨우기 채팅은 유지됩니다.
+
+Apple Silicon Mac과 macOS 14 이상을 지원합니다. 이 배포본은 ad-hoc 서명되어 있으며 Apple Developer ID 서명·공증은 없습니다. PlusCodex는 OpenAI의 공식 앱이 아닙니다.
+
+## 검증 범위 / Validation
+
+검증 대상은 전체 자동 테스트(`bash test.sh`), 10,000회 연속 소리 예약의 메타데이터 정리, 알림 자동 정리의 ON/OFF 전환·실제 도착 시각 기준·중복 조회 방지, 초기화권 만료 일정·계정 변경·예약 취소, 작업별 알림 기본값과 개별 설정, DMG 무결성, Sparkle 업데이트 피드·ZIP의 서명 및 길이입니다.
+
+자동 정리 테스트는 제어된 알림 조회 응답을 사용합니다. 실제 macOS 배너와 소리 재생은 알림 권한·집중 모드·알림 스타일에 영향을 받으며, 장시간 실사용에서의 메모리 안정성과 잠자기 복귀 후 알림 전달은 별도 확인이 필요합니다. 메뉴 진입 시 업데이트 확인 동작은 유지했습니다.
+
+Validation covers the full automated suite, 10,000 consecutive sound reservations, cleanup toggle races and delivery-time handling, reset-credit scheduling and cancellation, per-task notification preferences, DMG integrity, and Sparkle feed/ZIP signatures and byte lengths.
+
+Cleanup tests use controlled notification-query responses. Actual macOS banners and sound playback depend on permissions, Focus, and alert style. These checks do not establish prolonged memory stability or real notification delivery after sleep/wake. Update checks on menu open remain unchanged.
+
+---
+
 # PlusCodex v1.1.6
 
 - 작업 상태 수신 시 채팅 본문과 도구 출력 전체를 객체로 변환하던 처리를 줄였습니다. 제목·진행 상태·읽음·최신 작업·승인 대기 등 메뉴바에 필요한 정보만 해석하고, 장기 실행 수신 루프의 임시 객체와 수신 버퍼를 정리해 메모리 부담을 낮췄습니다.

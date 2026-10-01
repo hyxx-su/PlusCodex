@@ -39,10 +39,37 @@ struct Quota: Decodable {
 struct QuotaResponse: Decodable {
     let rateLimits: Quota?
     let rateLimitsByLimitId: [String: Quota]?
+    let rateLimitResetCredits: RateLimitResetCreditsSummary?
+
+    private enum CodingKeys: String, CodingKey {
+        case rateLimits, rateLimitsByLimitId, rateLimitResetCredits
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        rateLimits = try values.decodeIfPresent(Quota.self, forKey: .rateLimits)
+        rateLimitsByLimitId = try values.decodeIfPresent([String: Quota].self, forKey: .rateLimitsByLimitId)
+        // Optional reward metadata must not make otherwise valid usage unavailable.
+        rateLimitResetCredits = try? values.decodeIfPresent(RateLimitResetCreditsSummary.self,
+                                                          forKey: .rateLimitResetCredits)
+    }
+
     var codex: Quota? {
         if let buckets = rateLimitsByLimitId, !buckets.isEmpty { return buckets["codex"] }
         return rateLimits
     }
+}
+
+struct RateLimitResetCreditsSummary: Decodable {
+    let availableCount: Int
+    let credits: [RateLimitResetCredit]?
+}
+
+struct RateLimitResetCredit: Decodable {
+    let id: String
+    let resetType: String
+    let status: String
+    let expiresAt: Double?
 }
 
 struct CodexAccount: Decodable {
@@ -57,6 +84,7 @@ private struct AccountResponse: Decodable {
 struct QuotaSnapshot {
     let quota: Quota
     let account: CodexAccount?
+    var rateLimitResetCredits: RateLimitResetCreditsSummary? = nil
 }
 
 /// Detects a Codex sign-in change without reading or retaining credentials.
@@ -173,6 +201,6 @@ final class QuotaClient {
         } catch {
             account = nil
         }
-        return QuotaSnapshot(quota: quota, account: account)
+        return QuotaSnapshot(quota: quota, account: account, rateLimitResetCredits: result.rateLimitResetCredits)
     }
 }

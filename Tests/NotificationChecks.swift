@@ -179,6 +179,40 @@ import UserNotifications
         precondition(!AppNotifications.resetRequestMatches(pendingReset, timestamp: 1_800_000_000,
             account: "first@example.com", label: "5시간", sound: "custom|5.0|1.0"),
             "A sound change must update the pending notification")
-        print("PASS: completion, failure, interruption, request kinds, deduplication and foreground banners")
+
+        for kind in NotificationKind.allCases {
+            defaults.set(false, forKey: "notifications.\(kind.rawValue).enabled")
+        }
+        let settings = NotificationSettings(defaults: defaults)
+        let preferences = ThreadNotificationPreferences(defaults: defaults)
+        let notifications = AppNotifications(settings: settings, threadPreferences: preferences)
+        let scope = ThreadNotificationPreferences.scope(for: longTask)!
+        precondition(!notifications.isThreadNotificationEnabled(.completion, scope: scope))
+        preferences.setEnabled(true, for: longTask)
+        precondition(!settings.anyEnabled && preferences.hasEnabledOverrides)
+        precondition(notifications.isThreadNotificationEnabled(.completion, scope: scope),
+                     "An explicitly enabled task must notify even when every global kind is off")
+        for kind in [NotificationKind.failure, .approval, .answer, .mcp, .appApproval] {
+            precondition(!notifications.isThreadNotificationEnabled(kind, scope: scope),
+                         "Explicit task ON must not bypass the independent \(kind.rawValue) setting")
+            defaults.set(true, forKey: "notifications.\(kind.rawValue).enabled")
+            precondition(notifications.isThreadNotificationEnabled(kind, scope: scope))
+        }
+        var newerTask = longTask
+        newerTask.latestTurn = ThreadTurnState(key: "newer", value: ["turnId": "newer", "status": "inProgress"])
+        precondition(!notifications.isThreadNotificationEnabled(.completion,
+            scope: ThreadNotificationPreferences.scope(for: newerTask)), "New turns inherit the current default")
+        preferences.setEnabled(false, for: newerTask)
+        precondition(notifications.isThreadNotificationEnabled(.completion, scope: scope),
+                     "Retries must evaluate the original scope, not the newest turn's mute")
+        preferences.setEnabled(false, for: longTask)
+        defaults.set(true, forKey: "notifications.completion.enabled")
+        for kind in [NotificationKind.completion, .failure, .approval, .answer, .mcp, .appApproval] {
+            precondition(!notifications.isThreadNotificationEnabled(kind, scope: scope),
+                         "Explicit task OFF must suppress both first delivery and retry")
+        }
+        precondition(notifications.isThreadNotificationEnabled(.completion, scope: nil),
+                     "Missing scopes use the global default without inventing an override")
+        print("PASS: completion, failure, interruption, foreground banners, task overrides, kind gates and retry scopes")
     }
 }

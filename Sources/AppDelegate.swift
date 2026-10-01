@@ -271,6 +271,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     switch result {
                 case .success(let snapshot):
                     self.notifications.checkThresholds(snapshot.quota, account: snapshot.account)
+                    self.notifications.scheduleResetCreditExpiry(snapshot.rateLimitResetCredits,
+                                                                  account: snapshot.account)
                     self.quota = snapshot.quota
                     self.account = snapshot.account
                     let refreshedAt = Date()
@@ -431,10 +433,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 refresh()
             }
             render()
-        } else if let item {
-            NSStatusBar.system.removeStatusItem(item)
-            self.item = nil
-            settingsWindow.update(.codex, status: L10n.text("메뉴바에서 꺼짐"))
+        } else {
+            notifications.invalidateResetCreditExpiry()
+            if let item {
+                NSStatusBar.system.removeStatusItem(item)
+                self.item = nil
+                settingsWindow.update(.codex, status: L10n.text("메뉴바에서 꺼짐"))
+            }
         }
         extraProviders.forEach { $0.synchronize() }
         settingsWindow.synchronize()

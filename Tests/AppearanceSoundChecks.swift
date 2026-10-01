@@ -49,6 +49,14 @@ import AppKit
 
         let delivery = NotificationDelivery()
         let now = Date()
+        let sustained = NotificationDelivery()
+        for index in 0..<10_000 {
+            let time = now.addingTimeInterval(Double(index) * 3)
+            precondition(sustained.reserve(identifier: "notification-\(index)", start: time,
+                                           duration: 2, now: time))
+            precondition(sustained.testHookReservationMetadataCount == 1,
+                         "Expired sound metadata must not accumulate without an OS snapshot refresh")
+        }
         let testDelivery = NotificationDelivery()
         precondition(testDelivery.reserve(identifier: "sound-test-old", start: now, duration: 15, now: now))
         testDelivery.cancel("sound-test-old")

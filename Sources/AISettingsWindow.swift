@@ -343,12 +343,15 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
     private weak var releaseButton: FooterLinkLabel?
     private weak var makerButton: FooterLinkLabel?
     private weak var notificationPermissionToggle: NSSwitch?
+    private weak var notificationAutoCleanupToggle: NSSwitch?
     private weak var notificationSoundPicker: LanguagePickerButton?
     private weak var notificationSoundDurationPicker: LanguagePickerButton?
     private weak var notificationSoundDurationDescription: NSTextField?
     private var notificationAlertStyle: UNAlertStyle?
     private weak var notificationScrollView: NSScrollView?
     private weak var notificationPermissionCard: NSView?
+    private weak var notificationCleanupHeader: NSView?
+    private weak var notificationCleanupCard: NSView?
     private weak var notificationOptionsHeader: NSView?
     private weak var notificationOptionsCard: NSView?
     private var notificationTopSoundRows: [(view: NSView, frame: NSRect)] = []
@@ -600,7 +603,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
                 "AI 서비스", "사용량 표시", "사용한 양으로 표시하기"
             ]),
             (2, "알림", "bell", [
-                "알림 설정", "알림 소리", "재생 시간", "음량", "알림 테스트", "테스트 알림을 발송합니다.", "알림 항목", "작업 완료", "사용량 부족",
+                "알림 설정", "알림 소리", "재생 시간", "음량", "알림 테스트", "테스트 알림을 발송합니다.", "알림 자동 정리", "알림 항목", "작업 알림", "사용량 부족",
                 "사용량 초기화", "업데이트", "승인 요청", "답변 요청", "MCP 확인 요청", "앱 승인 요청", "작업 실패"
             ])
         ]
@@ -984,13 +987,41 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         soundTestButton = testButton
         configureNotificationSoundDurationPicker()
 
+        let cleanupHeaderY = permissionCardY + permissionCardHeight + 21
+        let cleanupHeader = label("알림 표시", in: notifications, x: 13, y: cleanupHeaderY,
+                                  width: 437, size: 14, bold: true)
+        notificationCleanupHeader = cleanupHeader
+        let cleanupCard = NSView(frame: NSRect(x: 13, y: cleanupHeaderY + 24,
+                                               width: 437, height: notificationRowHeight))
+        cleanupCard.identifier = NSUserInterfaceItemIdentifier("notification-autoCleanup-card")
+        cleanupCard.wantsLayer = true
+        cleanupCard.setAdaptiveBackgroundColor(NSColor.windowBackgroundColor)
+        cleanupCard.layer?.cornerRadius = 12
+        cleanupCard.layer?.borderWidth = 1
+        cleanupCard.setAdaptiveBorderColor(NSColor.separatorColor)
+        notifications.addSubview(cleanupCard)
+        notificationCleanupCard = cleanupCard
+        label("알림 자동 정리", in: cleanupCard, x: 16, y: 38, width: 350, size: 13, bold: true)
+        let cleanupDescription = NSTextField(labelWithString: L10n.text("표시된 알림을 일정 시간이 지나면 자동으로 지웁니다."))
+        status(cleanupDescription, in: cleanupCard, y: 20, width: 350)
+        cleanupDescription.font = .systemFont(ofSize: 11)
+        localizedFields.append((field: cleanupDescription,
+                                key: "표시된 알림을 일정 시간이 지나면 자동으로 지웁니다."))
+        let cleanupToggle = NSSwitch()
+        placeSwitch(cleanupToggle, in: cleanupCard, centerY: 41)
+        cleanupToggle.identifier = NSUserInterfaceItemIdentifier("notification-autoCleanup")
+        cleanupToggle.target = self
+        cleanupToggle.action = #selector(toggleNotificationAutoCleanup(_:))
+        notificationAutoCleanupToggle = cleanupToggle
+        configureNotificationAutoCleanupAccessibility()
+
         let optionCount = NotificationKind.allCases.count
         // Keep notification rows inside the scrollable settings canvas.
         // Additional rows use a slightly denser rhythm; titles and
         // descriptions retain the same internal alignment as the other rows.
         let optionRowHeight: CGFloat = optionCount > 4 ? 70 : notificationRowHeight
         let optionCardHeight = optionRowHeight * CGFloat(optionCount)
-        let optionHeaderY = permissionCardY + permissionCardHeight + 21
+        let optionHeaderY = cleanupCard.frame.maxY + 21
         let optionHeaderHeight: CGFloat = 24
         let optionCardTop = optionHeaderY + optionHeaderHeight
         let optionHeader = label("알림 항목", in: notifications, x: 13, y: optionHeaderY,
@@ -1145,6 +1176,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         configureWakeModelPicker()
         notificationStatus.stringValue = L10n.text("앱의 알림을 받습니다.")
         notificationPermissionToggle?.setAccessibilityLabel(L10n.text("알림 설정"))
+        configureNotificationAutoCleanupAccessibility()
         notificationSoundPicker?.setAccessibilityLabel(L10n.text("알림 소리"))
         notificationSoundDurationPicker?.setAccessibilityLabel(L10n.text("재생 시간"))
         configureNotificationSoundPicker()
@@ -1337,6 +1369,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         for kind in NotificationKind.allCases {
             notificationToggles[kind]?.state = notificationSettings.isEnabled(kind) ? .on : .off
         }
+        notificationAutoCleanupToggle?.state = notificationSettings.autoCleanupEnabled ? .on : .off
         configureNotificationSoundPicker()
         configureNotificationSoundDurationPicker()
         // Keep the setting description stable. Approval and failure guidance
@@ -1675,6 +1708,16 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         if enabled { ensureNotificationPermission() }
         synchronize()
     }
+    @objc private func toggleNotificationAutoCleanup(_ sender: NSSwitch) {
+        notificationSettings.setAutoCleanupEnabled(sender.state == .on)
+        synchronize()
+    }
+    private func configureNotificationAutoCleanupAccessibility() {
+        notificationAutoCleanupToggle?.setAccessibilityLabel(L10n.text("알림 자동 정리"))
+        let help = L10n.text("알림음 재생 시간이 지나면 알림센터 기록도 삭제됩니다. 앱이 실행 중일 때 적용됩니다.")
+        notificationAutoCleanupToggle?.toolTip = help
+        notificationAutoCleanupToggle?.setAccessibilityHelp(help)
+    }
     @objc private func toggleNotificationPermission(_ sender: NSSwitch) {
         let requestedState = sender.state == .on
         UNUserNotificationCenter.current().getNotificationSettings { [weak self] state in
@@ -1757,6 +1800,8 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
 
     private func prepareNotificationSoundLayout() {
         guard let card = notificationPermissionCard,
+              let cleanupHeader = notificationCleanupHeader,
+              let cleanupCard = notificationCleanupCard,
               let optionHeader = notificationOptionsHeader,
               let optionCard = notificationOptionsCard,
               let document = notificationScrollView?.documentView else { return }
@@ -1777,7 +1822,8 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         notificationConditionalSeparators = separators.filter {
             abs($0.1.minY - 234) < 1 || abs($0.1.minY - 156) < 1
         }.map { (view: $0.0, frame: $0.1) }
-        notificationOptionsBaseFrames = [(optionHeader, optionHeader.frame), (optionCard, optionCard.frame)]
+        notificationOptionsBaseFrames = [(cleanupHeader, cleanupHeader.frame), (cleanupCard, cleanupCard.frame),
+                                        (optionHeader, optionHeader.frame), (optionCard, optionCard.frame)]
 
         notificationExpandedCardHeight = card.frame.height
         let neededDocumentHeight = max(document.superview?.bounds.height ?? 600,

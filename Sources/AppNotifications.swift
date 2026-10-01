@@ -15,6 +15,9 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
 
     private let center = UNUserNotificationCenter.current()
     private let notificationSettings: NotificationSettings
+    private lazy var autoCleanup = NotificationAutoCleanup(settings: notificationSettings)
+    private let threadPreferences: ThreadNotificationPreferences
+    private let resetCreditExpiry: ResetCreditExpiryNotifications
     private var lastResetSnapshot: (quota: Quota, account: CodexAccount?)?
     private var resetTargets: [String: ResetTarget] = [:]
     private var resetSyncInProgress = false
@@ -24,8 +27,11 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
     var onUpdateNotificationOpened: (() -> Void)?
     var isAttentionRequestCurrent: ((String, String?) -> Bool)?
 
-    init(settings: NotificationSettings = NotificationSettings()) {
+    init(settings: NotificationSettings = NotificationSettings(),
+         threadPreferences: ThreadNotificationPreferences = .shared) {
         notificationSettings = settings
+        self.threadPreferences = threadPreferences
+        resetCreditExpiry = ResetCreditExpiryNotifications(settings: settings)
         super.init()
         settings.onChange = { [weak self] in self?.notificationSettingsDidChange() }
     }
@@ -100,10 +106,12 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
 
     func start() {
         center.delegate = self
+        autoCleanup.synchronize()
+        resetCreditExpiry.start()
         // A disabled reset must not leave an old OS request active when the
         // first usage fetch is offline or fails after relaunch.
         if !notificationSettings.isEnabled(.reset) { cancelPendingResetsIfDisabled() }
-        guard notificationSettings.anyEnabled else { return }
+        guard notificationSettings.anyEnabled || threadPreferences.hasEnabledOverrides else { return }
         center.requestAuthorization(options: [.alert, .sound]) { _, error in
             if let error { NSLog("PlusCodex notification authorization: %@", error.localizedDescription) }
         }
@@ -116,10 +124,16 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
         return info
     }
 
+    func isThreadNotificationEnabled(_ kind: NotificationKind, scope: String?) -> Bool {
+        guard threadPreferences.enabled(scope: scope) else { return false }
+        // Completion is the task default, not a master kill switch. Other
+        // notification kinds still require their independently enabled setting.
+        return kind == .completion || notificationSettings.isEnabled(kind)
+    }
+
     func completed(_ activity: ThreadActivity) {
         guard activity.id != CodexWakeSettings().threadID else { return }
-        guard ThreadNotificationPreferences.shared.enabled(activity) else { return }
-        guard notificationSettings.isEnabled(.completion) else { return }
+        guard isThreadNotificationEnabled(.completion, scope: ThreadNotificationPreferences.scope(for: activity)) else { return }
         let content = UNMutableNotificationContent()
         content.title = L10n.text("Codex 작업 완료")
         content.body = activity.title
@@ -130,8 +144,7 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func failed(_ activity: ThreadActivity) {
-        guard ThreadNotificationPreferences.shared.enabled(activity) else { return }
-        guard notificationSettings.isEnabled(.failure) else { return }
+        guard isThreadNotificationEnabled(.failure, scope: ThreadNotificationPreferences.scope(for: activity)) else { return }
         let content = UNMutableNotificationContent()
         content.title = L10n.text("Codex 작업 실패")
         let title = activity.title.isEmpty ? L10n.text("Codex 채팅") : activity.title
@@ -143,7 +156,6 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func attentionNeeded(_ event: ThreadAttentionEvent) {
-        guard ThreadNotificationPreferences.shared.enabled(event.activity) else { return }
         let kind: NotificationKind
         let titleKey: String
         let bodyKey: String
@@ -165,7 +177,7 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
             titleKey = "Codex 앱 승인 필요"
             bodyKey = "%@ 작업에서 연결된 앱의 작업 실행 승인이 필요합니다."
         }
-        guard notificationSettings.isEnabled(kind) else { return }
+        guard isThreadNotificationEnabled(kind, scope: ThreadNotificationPreferences.scope(for: event.activity)) else { return }
         let activity = event.activity
         let content = UNMutableNotificationContent()
         content.title = L10n.text(titleKey)
@@ -203,7 +215,16 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
     func invalidateResetAccount() {
         lastResetSnapshot = nil
         resetTargets.removeAll()
+        invalidateResetCreditExpiry()
         reconcileResets()
+    }
+
+    func scheduleResetCreditExpiry(_ summary: RateLimitResetCreditsSummary?, account: CodexAccount?) {
+        resetCreditExpiry.update(summary, account: account?.email)
+    }
+
+    func invalidateResetCreditExpiry() {
+        resetCreditExpiry.invalidateAccount()
     }
 
     private var resetSoundSignature: String {
@@ -349,6 +370,8 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
     }
 
     private func notificationSettingsDidChange() {
+        autoCleanup.synchronize()
+        resetCreditExpiry.settingsDidChange()
         if let snapshot = lastResetSnapshot {
             scheduleResets(snapshot.quota, account: snapshot.account)
         } else if !notificationSettings.isEnabled(.reset) {
@@ -381,17 +404,16 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
             NSLog("PlusCodex notification failed: %@", error.localizedDescription)
             guard attempt < 2 else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + Double((attempt + 1) * 5)) { [weak self] in
-                guard let self, self.notificationSettings.anyEnabled else { return }
+                guard let self else { return }
                 let kind: NotificationKind = request.identifier.hasPrefix("completion-") ? .completion
                     : request.identifier.hasPrefix("failure-") ? .failure
                     : NotificationKind(rawValue: request.content.userInfo["notificationKind"] as? String ?? "") ?? .approval
-                guard self.notificationSettings.isEnabled(kind) else { return }
+                guard self.isThreadNotificationEnabled(kind,
+                    scope: request.content.userInfo["notificationScope"] as? String) else { return }
                 if request.identifier.hasPrefix("attention-") {
                     guard let id = request.content.userInfo["threadID"] as? String,
                           self.isAttentionRequestCurrent?(id, request.content.userInfo["requestIdentity"] as? String) == true else { return }
                 }
-                guard ThreadNotificationPreferences.shared.enabled(
-                    scope: request.content.userInfo["notificationScope"] as? String) else { return }
                 self.submit(request, attempt: attempt + 1)
             }
         }

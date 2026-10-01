@@ -20,13 +20,17 @@ final class NotificationDelivery {
     }
 
     private func save() {
-        if let data = try? JSONEncoder().encode(sounds) { defaults?.set(data, forKey: stateKey) }
+        guard let defaults else { return }
+        if let data = try? JSONEncoder().encode(sounds) { defaults.set(data, forKey: stateKey) }
     }
 
     func reserve(identifier: String, start: Date, duration: TimeInterval, now: Date = Date()) -> Bool {
         lock.lock()
         defer { save(); lock.unlock() }
         sounds = sounds.filter { $0.value.end > now && $0.key != identifier }
+        // Immediate notifications may run without a pending-request refresh.
+        // Retire their metadata here as well so unique IDs cannot accumulate.
+        modifiedAt = modifiedAt.filter { sounds[$0.key] != nil }
         let interval = DateInterval(start: start, duration: max(1, duration) + 0.5)
         guard !sounds.values.contains(where: { $0.start < interval.end && interval.start < $0.end }) else {
             return false
@@ -42,6 +46,12 @@ final class NotificationDelivery {
         modifiedAt.removeValue(forKey: identifier)
         save()
         lock.unlock()
+    }
+
+    var testHookReservationMetadataCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return modifiedAt.count
     }
 
     func remember(_ requests: [UNNotificationRequest], defaultDuration: TimeInterval,
