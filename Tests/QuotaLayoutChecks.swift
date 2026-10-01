@@ -13,8 +13,9 @@ import AppKit
             precondition(quota.windows.map(\.label) == ["주간"])
             precondition(!(view.accessibilityLabel() ?? "").contains("5시간"))
             view.update(quota: Quota(primary: short, secondary: weekly), account: account, updatedAt: nil, failure: nil)
-            precondition(view.bounds.height == 242, "Keep real limits on every plan")
-            let lastCardBottom = CGFloat(62 + 92 + 84)
+            let count = plan.hasPrefix("pro") ? 1 : 2
+            precondition(view.bounds.height == 58 + CGFloat(count) * 92)
+            let lastCardBottom = CGFloat(62 + (count - 1) * 92 + 84)
             precondition(view.bounds.height - lastCardBottom == 4,
                          "Keep only a small trailing inset before the activity section")
             view.update(quota: Quota(primary: nil, secondary: nil), account: account, updatedAt: nil, failure: nil)
@@ -24,7 +25,8 @@ import AppKit
         let monthly = QuotaWindow(usedPercent: 40, windowDurationMins: 43200, resetsAt: 12345)
         precondition(monthly.displayLabel(planType: "free", isPrimary: true) == "1개월")
         for plan in ["pro", "pro_5x", "pro_20x", "pro-200"] {
-            precondition(monthly.displayLabel(planType: plan, isPrimary: true) == "주간")
+            precondition(monthly.displayLabel(planType: plan, isPrimary: true) == "1개월",
+                         "Never change the meaning of a server window to match a plan")
         }
         precondition(short.displayLabel(planType: "plus", isPrimary: true) == "5시간")
         precondition(weekly.displayLabel(planType: "free", isPrimary: false) == "주간")

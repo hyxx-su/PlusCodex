@@ -337,7 +337,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if menuTracking && !allowingTrackedUpdateTransition {
             if let panel = dashboardItem?.view as? QuotaMenuView {
                 panel.update(quota: quota, account: account, updatedAt: updatedAt,
-                             failure: failure, preserveHeight: true)
+                             failure: failure)
             }
             updateActivityView()
             return

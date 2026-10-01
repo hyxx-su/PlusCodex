@@ -193,6 +193,7 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func scheduleResets(_ quota: Quota, account: CodexAccount?) {
+        let quota = quota.effectiveQuota(account: account)
         // Refresh, launch, sleep recovery and network recovery share this path.
         // The notification center, not process memory, is the source of truth.
         lastResetSnapshot = (quota, account)

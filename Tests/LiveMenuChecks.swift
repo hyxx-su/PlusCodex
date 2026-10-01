@@ -21,6 +21,26 @@ import AppKit
         delegate.testHookRenderForMenu()
         precondition(delegate.testHookDashboardView === panel)
         precondition(panel.accessibilityLabel()!.contains("60%"))
+        let weekly = QuotaWindow(usedPercent: 20, windowDurationMins: 10080, resetsAt: nil)
+        let plus = Quota(primary: quota(40).primary, secondary: weekly, planType: "plus")
+        var pro = plus
+        pro.planType = "pro_20x"
+        delegate.testHookSetQuota(plus)
+        delegate.testHookRenderForMenu()
+        let expanded = menu.size.height
+        precondition(panel.bounds.height == 242)
+        delegate.testHookSetQuota(pro)
+        delegate.testHookRenderForMenu()
+        precondition(delegate.testHookDashboardView === panel && delegate.testHookMenu === menu)
+        precondition(panel.bounds.height == 150 && menu.size.height == expanded - 92,
+                     "An open menu must shrink when the five-hour limit disappears")
+        precondition(!panel.accessibilityLabel()!.contains("5시간") && panel.accessibilityLabel()!.contains("주간"))
+        precondition(panel.testHookDisplayedPercents == [80], "Do not animate a removed five-hour bar into the weekly bar")
+        delegate.testHookSetQuota(plus)
+        delegate.testHookRenderForMenu()
+        precondition(menu.size.height == expanded && panel.accessibilityLabel()!.contains("5시간"))
+        delegate.testHookSetQuota(quota(40))
+        delegate.testHookRenderForMenu()
         var task = ThreadActivity(id: UUID().uuidString, title: "실시간 작업", runtime: "active", unread: false, updatedAt: 1)
         delegate.testHookSetActivities([task])
         precondition(list.frame.height == 42 && menu.size.height > emptyMenuHeight,

@@ -188,6 +188,14 @@ final class CodexWakeSettings {
         defaults.set(true, forKey: scoped("migrated"))
     }
 
+    /// Drop obsolete deadlines, not the shared chat or successful-send history.
+    func clearPendingSchedule() {
+        for key in [Key.nextAttemptAt, Key.scheduledResetAt, "codexWake.observation.v1", "codexWake.lastFailure"] {
+            let key = scoped(key)
+            if defaults.object(forKey: key) != nil { defaults.removeObject(forKey: key) }
+        }
+    }
+
     func recordAttempt(at date: Date, cycleResetAt: Date? = nil) {
         lastFailure = nil
         observation = nil

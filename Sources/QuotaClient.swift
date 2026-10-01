@@ -24,7 +24,6 @@ struct QuotaWindow: Decodable {
         guard isPrimary else { return label }
         let plan = planType?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if plan == "free" { return L10n.text("1개월") }
-        if plan == "pro" || plan.hasPrefix("pro_") || plan.hasPrefix("pro-") { return L10n.text("주간") }
         return label
     }
 }
@@ -33,7 +32,26 @@ struct Quota: Decodable {
     let primary: QuotaWindow?
     let secondary: QuotaWindow?
     var additional: [QuotaWindow]? = nil
+    var planType: String? = nil
     var windows: [QuotaWindow] { [primary, secondary].compactMap { $0 } + (additional ?? []) }
+
+    /// Prefer the plan attached to the fresh usage bucket over login-token metadata.
+    func resolvedPlan(fallback: String?) -> String? {
+        let plan = planType?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return plan.flatMap { $0.isEmpty || $0 == "unknown" ? nil : $0 } ?? fallback
+    }
+
+    func effectiveQuota(account: CodexAccount?) -> Quota {
+        let plan = resolvedPlan(fallback: account?.planType)?.lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard plan == "pro" || plan.hasPrefix("pro_") || plan.hasPrefix("pro-") else { return self }
+        // Pro has no five-hour window. Never relabel a stale Plus window as weekly.
+        func applicable(_ window: QuotaWindow?) -> QuotaWindow? {
+            window?.windowDurationMins == 300 ? nil : window
+        }
+        return Quota(primary: applicable(primary), secondary: applicable(secondary),
+                     additional: additional?.compactMap(applicable), planType: plan)
+    }
 }
 
 struct QuotaResponse: Decodable {
@@ -191,8 +209,7 @@ final class QuotaClient {
         // A successful response without windows is not evidence of a 5-hour limit
         // (nor of unlimited usage). Still fetch the account and show an empty state.
         let quota = result.codex ?? Quota(primary: nil, secondary: nil)
-        // Publish usable limits before optional identity lookup or process cleanup.
-        onQuota?(quota)
+        // Do not publish raw Plus windows before resolving an in-place plan upgrade.
         // Account details are optional; a failed identity lookup must not hide valid usage.
         let account: CodexAccount?
         do {
@@ -201,6 +218,11 @@ final class QuotaClient {
         } catch {
             account = nil
         }
-        return QuotaSnapshot(quota: quota, account: account, rateLimitResetCredits: result.rateLimitResetCredits)
+        let plan = quota.resolvedPlan(fallback: account?.planType)
+        let resolvedAccount = account != nil || plan != nil
+            ? CodexAccount(email: account?.email, planType: plan) : nil
+        let effective = quota.effectiveQuota(account: resolvedAccount)
+        onQuota?(effective)
+        return QuotaSnapshot(quota: effective, account: resolvedAccount, rateLimitResetCredits: result.rateLimitResetCredits)
     }
 }

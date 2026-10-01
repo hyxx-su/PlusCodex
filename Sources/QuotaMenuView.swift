@@ -31,6 +31,7 @@ final class QuotaMenuView: NSView {
          checkingForUpdates: Bool = false, offline: Bool = false, missingExecutable: Bool = false,
          preservedHeight: CGFloat? = nil,
          provider: AIProvider = .codex, showRemaining: Bool = true) {
+        let quota = provider == .codex ? quota?.effectiveQuota(account: account) : quota
         self.provider = provider
         self.showRemaining = showRemaining
         self.quota = quota
@@ -71,10 +72,12 @@ final class QuotaMenuView: NSView {
     var testHookDisplayedPercents: [Double] { displayedPercents }
 
     func update(quota: Quota?, account: CodexAccount?, updatedAt: Date?, failure: String?, preserveHeight: Bool = false) {
+        let quota = provider == .codex ? quota?.effectiveQuota(account: account) : quota
         let target = quota?.windows.map { Double($0.displayPercent(showRemaining: showRemaining)) } ?? []
         let sameAccount = self.account?.email == account?.email
-        if !sameAccount || target != self.quota?.windows.map({ Double($0.displayPercent(showRemaining: showRemaining)) }) {
-            animatePercents(to: target, allowed: sameAccount)
+        let sameWindows = self.quota?.windows.map(\.windowDurationMins) == quota?.windows.map(\.windowDurationMins)
+        if !sameAccount || !sameWindows || target != self.quota?.windows.map({ Double($0.displayPercent(showRemaining: showRemaining)) }) {
+            animatePercents(to: target, allowed: sameAccount && sameWindows)
         }
         self.quota = quota
         self.account = account

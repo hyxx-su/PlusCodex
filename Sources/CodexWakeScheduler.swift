@@ -43,12 +43,14 @@ enum CodexWakeSchedule {
 final class CodexWakeScheduler {
     private let settings: CodexWakeSettings
     private var inFlight = false
+    private var hasApplicableWindow = true
 
     init(settings: CodexWakeSettings) { self.settings = settings }
 
     /// `quotaFetchedAt` is supplied only by a completed rate-limit read. Timer
     /// ticks may plan a wake, but must never submit using cached usage data.
     func tick(quota: Quota?, offline: Bool, quotaFetchedAt: Date? = nil, now: Date = Date()) {
+        reconcileWindow(quota: quota, fetchedAt: quotaFetchedAt, now: now)
         guard settings.enabled, !offline, !inFlight else { return }
         guard let cycle = prepareAttempt(quota: quota, offline: offline,
                                          quotaFetchedAt: quotaFetchedAt, now: now) else { return }
@@ -77,6 +79,7 @@ final class CodexWakeScheduler {
                                                   guard CodexAuthRevision.current() == authRevision else { return false }
                                                   return DispatchQueue.main.sync {
                                                       self?.settings.enabled == true && self?.settings.accountIdentity == accountIdentity
+                                                          && self?.hasApplicableWindow == true
                                                   }
                                               },
                                               onThreadPrepared: {
@@ -122,6 +125,9 @@ final class CodexWakeScheduler {
                     self?.settings.recordResult(account: accountIdentity, completedAt: nil,
                         cycle: cycle, failure: failureMessage,
                         retryAt: shouldRetry ? Date().addingTimeInterval(15 * 60) : nil)
+                    if self?.settings.accountIdentity == accountIdentity, self?.hasApplicableWindow == false {
+                        self?.settings.clearPendingSchedule()
+                    }
                 }
                 self?.inFlight = false
             }
@@ -131,6 +137,7 @@ final class CodexWakeScheduler {
     /// Planning is synchronous and transport-free. The cycle deadline and the
     /// retry/reservation date are independent, persisted values.
     func prepareAttempt(quota: Quota?, offline: Bool, quotaFetchedAt: Date?, now: Date) -> Date? {
+        reconcileWindow(quota: quota, fetchedAt: quotaFetchedAt, now: now)
         guard settings.enabled, !offline,
               quotaFetchedAt.map({ $0 <= now }) ?? true,
               let window = quota?.windows.first(where: { $0.windowDurationMins == 300 }),
@@ -213,5 +220,13 @@ final class CodexWakeScheduler {
             $0.usedPercent.isFinite && $0.usedPercent >= 0 && $0.usedPercent < 100
         }) == true else { return nil }
         return cycle
+    }
+
+    private func reconcileWindow(quota: Quota?, fetchedAt: Date?, now: Date) {
+        // A timeout/offline tick is not evidence that the account lost its limit.
+        guard let quota, let fetchedAt, fetchedAt <= now,
+              now.timeIntervalSince(fetchedAt) <= 120 else { return }
+        hasApplicableWindow = quota.windows.contains { $0.windowDurationMins == 300 }
+        if !hasApplicableWindow { settings.clearPendingSchedule() }
     }
 }

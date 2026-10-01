@@ -1,3 +1,31 @@
+# PlusCodex v1.1.8
+
+- 로그인 상태에서 Plus에서 Pro로 변경했을 때 사용량 응답에 포함된 최신 플랜 정보를 우선 반영합니다. Pro 계열의 5시간 한도는 표시·초기화 알림 예약에서 제외하고, 정상 조회로 5시간 한도가 없어진 것이 확인되면 깨우기 대기 예약을 정리합니다. 주간 한도와 저장된 깨우기 채팅은 유지합니다.
+- Pro의 첫 번째 한도를 무조건 ‘주간’으로 표시하던 처리를 제거했습니다. 실제 제공되는 한도 주기를 표시하며, Plus로 돌아왔을 때 과거 5시간 초기화 시각이 다시 사용되지 않도록 정리합니다.
+- 메뉴를 열어 둔 상태에서도 5시간 카드가 추가·제거되면 메뉴 높이가 함께 갱신됩니다. 기존 메뉴와 뷰를 유지하며, 서로 다른 주기의 막대가 이어지는 잘못된 애니메이션을 방지합니다.
+
+## English
+
+- Prefer fresh plan metadata returned with usage limits when upgrading from Plus to Pro without signing out. Exclude five-hour windows from Pro usage display and reset reminders, and clear pending wake reservations when a successful read confirms the window is absent. Weekly limits and the saved wake chat are preserved.
+- Removed the unconditional weekly label for the first Pro window. Display the actual reported period and discard obsolete five-hour anchors before returning to Plus.
+- Resize the open menu when usage cards are added or removed without rebuilding the menu or dashboard view. Prevent percentage animations from blending unrelated quota periods.
+
+## 설치 및 업데이트
+
+기존 정식 버전은 게시 후 앱의 업데이트 기능으로 `v1.1.8`을 설치할 수 있습니다. 수동 설치는 [PlusCodex-1.1.8.dmg](https://github.com/hyxx-su/PlusCodex/releases/download/v1.1.8/PlusCodex-1.1.8.dmg)를 열고 PlusCodex를 Applications로 옮기세요. 기존 설정과 저장된 깨우기 채팅은 유지됩니다.
+
+Apple Silicon Mac과 macOS 14 이상을 지원합니다. 이 배포본은 ad-hoc 서명되며 Apple Developer ID 서명·공증은 없습니다. PlusCodex는 OpenAI의 공식 앱이 아닙니다.
+
+## 검증 범위 / Validation
+
+최신 플랜 우선 적용, Pro 변형값 인식, Plus→Pro→Plus 전환 시 한도·초기화 기준·깨우기 예약 정리의 회귀 검사를 통과했습니다. 메뉴 카드 추가·제거와 높이 변경에 대한 회귀 테스트를 추가했습니다.
+
+현재 검증 환경에서는 macOS GUI 테스트가 앱 등록 단계에서 중단되어 전체 테스트와 실제 열린 메뉴의 시각 검증은 완료하지 못했습니다. Pro $100·$200·$500의 실제 계정별 검증 및 실제 알림 전달은 별도 확인이 필요합니다. 메뉴 진입 시 업데이트 확인 동작은 유지했습니다.
+
+Targeted decoding and scheduling regressions passed, including fresh-plan precedence, Pro variants, and Plus→Pro→Plus transitions. Added live-menu card and height regression checks. GUI tests stop during macOS application registration in the current environment, so the full suite and visual verification remain incomplete. Individual live Pro-tier accounts and actual notification delivery still require validation.
+
+---
+
 # PlusCodex v1.1.7
 
 - 초기화권 만료 알림을 추가했습니다. 확인된 초기화권의 만료 전날 오전 9시(기기 현지 시간)에 알림을 예약하고, 계정 변경·초기화권 사용·만료·설정 변경에 맞춰 예약을 정리합니다. 같은 초기화권의 중복 알림을 방지하며, 초기화권 정보가 없거나 일부만 제공되어도 정상 사용량 조회는 유지합니다.

@@ -32,7 +32,12 @@ final class CodexResetSchedule {
             resolvedAccount = email
         }
         guard let identity = resolvedAccount else { return quota }
+        let quota = quota.effectiveQuota(account: account)
+        // A confirmed removal must not resurrect an old anchor on a later downgrade.
         var needsPersistence = false
+        if !quota.windows.contains(where: { $0.windowDurationMins == 300 }) {
+            needsPersistence = states.removeValue(forKey: identity + ":300") != nil
+        }
         func stabilize(_ window: QuotaWindow?) -> QuotaWindow? {
             guard var window, window.windowDurationMins == 300,
                   let reported = window.resetsAt, reported.isFinite else { return window }
@@ -84,7 +89,7 @@ final class CodexResetSchedule {
             return window
         }
         let result = Quota(primary: stabilize(quota.primary), secondary: stabilize(quota.secondary),
-                           additional: quota.additional?.compactMap { stabilize($0) })
+                           additional: quota.additional?.compactMap { stabilize($0) }, planType: quota.planType)
         if needsPersistence, let data = try? JSONEncoder().encode(states) { defaults.set(data, forKey: key) }
         return result
     }

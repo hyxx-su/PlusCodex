@@ -11,6 +11,20 @@ struct QuotaTests {
         assert(legacy.codex?.primary?.label == "5시간")
         assert(legacy.codex?.secondary?.remaining == 45)
         assert(legacy.codex?.secondary?.label == "주간")
+        let stalePlus = CodexAccount(email: "plan@example.invalid", planType: "plus")
+        let upgraded = try decode(#"{"rateLimitsByLimitId":{"codex":{"planType":"pro_20x","primary":{"usedPercent":36,"windowDurationMins":300},"secondary":{"usedPercent":55,"windowDurationMins":10080}}}}"#).codex!
+        assert(upgraded.resolvedPlan(fallback: stalePlus.planType) == "pro_20x")
+        let effective = upgraded.effectiveQuota(account: stalePlus)
+        assert(effective.primary == nil && effective.secondary?.remaining == 45)
+        assert(effective.effectiveQuota(account: stalePlus).windows.count == 1)
+        for plan in ["pro", "pro_5x", "pro_20x", "pro-200", " Pro "] {
+            assert(legacy.codex!.effectiveQuota(account: CodexAccount(email: stalePlus.email, planType: plan)).primary == nil)
+        }
+        assert(legacy.codex!.effectiveQuota(account: nil).primary != nil, "Unknown is not Pro")
+        var downgraded = upgraded
+        downgraded.planType = "plus"
+        assert(downgraded.effectiveQuota(account: CodexAccount(email: stalePlus.email, planType: "pro")).primary != nil,
+               "A fresh Plus bucket overrides stale Pro login metadata")
         let buckets = try decode(#"{"rateLimits":{"primary":{"usedPercent":99}},"rateLimitsByLimitId":{"codex":{"primary":{"usedPercent":20}},"other":{"primary":{"usedPercent":0}}}}"#)
         assert(buckets.codex?.primary?.remaining == 80)
         let missing = try decode(#"{"rateLimits":{"primary":{"usedPercent":99}},"rateLimitsByLimitId":{"other":{"primary":{"usedPercent":0}}}}"#)

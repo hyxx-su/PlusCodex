@@ -86,6 +86,26 @@ import Foundation
         precondition(advanced.primary?.resetsAt == earlier.timeIntervalSince1970)
         restoredSchedule.invalidateAccount()
         precondition(restoredSchedule.resolvedAccount == nil)
+        let transitionAccount = CodexAccount(email: "transition@example.invalid", planType: "plus")
+        let transition = CodexResetSchedule(defaults: defaults)
+        _ = transition.update(quota(due), account: transitionAccount, now: base)
+        let weekly = QuotaWindow(usedPercent: 10, windowDurationMins: 10080, resetsAt: base.addingTimeInterval(86400).timeIntervalSince1970)
+        let proQuota = Quota(primary: quota(due).primary, secondary: weekly, planType: "pro_20x")
+        let proResult = transition.update(proQuota, account: transitionAccount, now: base.addingTimeInterval(1))
+        precondition(proResult.primary == nil && proResult.secondary?.resetsAt == weekly.resetsAt)
+        let newDeadline = due.addingTimeInterval(7200)
+        precondition(transition.update(quota(newDeadline), account: transitionAccount,
+            now: base.addingTimeInterval(2)).primary?.resetsAt == newDeadline.timeIntervalSince1970,
+            "Returning to Plus must not reuse the old five-hour anchor")
+        wake.selectAccount(transitionAccount.email!)
+        wake.recordThreadID("preserved-wake-thread")
+        wake.scheduledResetAt = due
+        wake.nextAttemptAt = due
+        _ = restarted.prepareAttempt(quota: nil, offline: false, quotaFetchedAt: nil, now: base)
+        precondition(wake.scheduledResetAt == due, "A failed lookup must preserve reservations")
+        _ = restarted.prepareAttempt(quota: proResult, offline: false, quotaFetchedAt: base, now: base)
+        precondition(wake.scheduledResetAt == nil && wake.nextAttemptAt == nil && wake.observation == nil)
+        precondition(wake.enabled && wake.threadID == "preserved-wake-thread")
         wake.selectAccount(other.email!)
         precondition(wake.scheduledResetAt == nil && wake.nextAttemptAt == nil && wake.lastAttemptAt == nil)
         // Preserve a legacy post-success fallback even if the server already
