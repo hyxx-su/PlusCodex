@@ -15,7 +15,7 @@ import AppKit
         }
 
         let notes = PatchNote.bundled()
-        precondition(notes.count >= 19 && notes.first?.version == "v1.1.8" && notes.last?.version == "v1.0.0")
+        precondition(notes.count >= 20 && notes.first?.version == "v1.1.9" && notes.last?.version == "v1.0.0")
         precondition(Set(notes.map(\.version)).count == notes.count)
         precondition(notes.allSatisfy { !$0.body.isEmpty && ISO8601DateFormatter().date(from: $0.publishedAt) != nil })
         precondition(notes.allSatisfy { note in
@@ -230,7 +230,7 @@ import AppKit
                 root.layoutSubtreeIfNeeded()
             }
         }
-        print("PASS: 19 shared full-width banners with original aspect ratio, text-only fallback, localized titles/summaries, notification-aligned top spacing, bounded scrolling, independent disclosure, 100 expand/collapse cycles and theme previews")
+        print("PASS: 20 shared full-width banners with original aspect ratio, text-only fallback, localized titles/summaries, notification-aligned top spacing, bounded scrolling, independent disclosure, 100 expand/collapse cycles and theme previews")
     }
 
     private static func descendants(_ view: NSView) -> [NSView] {

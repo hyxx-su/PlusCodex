@@ -1,3 +1,61 @@
+# PlusCodex v1.1.9
+
+이번 업데이트에서는 **작업 상태와 알림 표시를 개선하고, 메뉴바 및 설정 화면의 사용성을 다듬었습니다.**
+
+### 개선된 점
+
+- **작업 상태 및 알림 개선**
+  - 표시할 작업이 없을 때 연결 복구 안내만 남던 현상을 수정했습니다.
+  - 승인이나 입력을 기다리는 작업을 완료로 잘못 판단하지 않도록 보완해, 승인 알림과 작업 완료 알림이 함께 표시되는 경우를 줄였습니다.
+
+- **메뉴바 동작 개선**
+  - 메뉴바 아이콘을 한 번 눌렀을 때 마우스를 움직이고 놓아도 메뉴가 중복으로 열리거나 닫히지 않도록 수정했습니다.
+  - 아이콘을 우클릭하면 제공자 끄기와 함께 **PlusCodex 종료**도 선택할 수 있습니다.
+
+- **설정 및 패치노트 개선**
+  - 설정에 버전별 패치노트 페이지를 추가했습니다. 배너와 업데이트 요약을 표시하고, 항목을 누르면 상세 내용을 펼쳐볼 수 있습니다.
+  - 패치노트 페이지의 위쪽 여백과 스크롤 동작을 알림 페이지에 맞췄습니다.
+  - 디스코드 메뉴 항목을 제공자 메뉴에서 제거하고 설정 하단에 **디스코드 커뮤니티** 버튼을 추가했습니다.
+  - 설정 창의 앱 표시 정책을 정리했습니다. 창을 닫으면 메뉴바 앱 상태로 돌아가며, Dock의 고정·최근 항목은 macOS 설정에 따라 남을 수 있습니다.
+
+- **표시 및 접근성 개선**
+  - 영어 사용량 화면에서 `Remaining` 문구가 두 줄로 나뉘던 문제를 수정했습니다.
+  - 마우스를 올렸을 때 나타나던 불필요한 설명을 줄이고 필요한 안내는 접근성 설명으로 유지했습니다.
+
+## English
+
+This update improves task-state and notification handling, menu-bar interaction, and the settings experience.
+
+### Improvements
+
+- **Task state and notifications**
+  - Removed the recovery-only status shown when there are no tasks.
+  - Approval/input waits and unconfirmed task states are no longer treated as completion, reducing overlapping approval and completion alerts.
+- **Menu-bar behavior**
+  - Fixed press/drag/release handling so a single click does not reopen or dismiss the menu twice.
+  - Provider context menus now include **Quit PlusCodex**.
+- **Settings and patch notes**
+  - Added versioned patch notes with a banner, summaries, expandable details, and scrolling aligned with Notifications.
+  - Moved Discord access from provider menus to a **Discord Community** button in the settings footer.
+  - Refined app visibility when settings open and close. Pinned or recent Dock entries remain controlled by macOS.
+- **Display and accessibility**
+  - Prevented English usage labels such as `Remaining` from wrapping onto two lines.
+  - Removed unnecessary hover tooltips while retaining useful accessibility descriptions.
+
+## 설치 및 업데이트
+
+기존 버전은 앱의 업데이트 확인 기능으로 v1.1.9를 설치할 수 있습니다. 수동 설치는 [PlusCodex-1.1.9.dmg](https://github.com/hyxx-su/PlusCodex/releases/download/v1.1.9/PlusCodex-1.1.9.dmg)를 열고 PlusCodex를 Applications 폴더로 옮겨 주세요. 업데이트 후에도 기존 설정과 저장된 깨우기 채팅은 유지됩니다.
+
+Apple Silicon Mac과 macOS 14 이상을 지원합니다. 이 배포본은 ad-hoc 서명되며 Apple Developer ID 서명·공증은 적용되지 않았습니다. PlusCodex는 OpenAI의 공식 앱이 아닙니다.
+
+## 검증
+
+전체 자동 테스트 33개를 통과했습니다. 작업 상태, 승인·완료 알림, 메뉴바 클릭 동작, Dock 표시 정책, 패치노트의 한국어·영어 표시와 스크롤 회귀 검사를 포함합니다. 최종 DMG 무결성, 앱 코드 서명, Sparkle 업데이트 피드·ZIP의 공개키 서명과 파일 길이도 확인했습니다.
+
+다른 Mac에서의 실제 설치·업데이트, macOS 알림 전달, 장시간 메모리 안정성 및 잠자기 복귀 후 예약 실행은 별도 실사용 확인이 필요합니다. Dock의 고정 앱이나 최근 사용 항목 표시는 macOS 설정의 영향을 받을 수 있습니다.
+
+---
+
 # PlusCodex v1.1.8
 
 - 로그인 상태에서 Plus에서 Pro로 변경했을 때 사용량 응답에 포함된 최신 플랜 정보를 우선 반영합니다. Pro 계열의 5시간 한도는 표시·초기화 알림 예약에서 제외하고, 정상 조회로 5시간 한도가 없어진 것이 확인되면 깨우기 대기 예약을 정리합니다. 주간 한도와 저장된 깨우기 채팅은 유지합니다.
