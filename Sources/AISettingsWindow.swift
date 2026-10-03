@@ -82,7 +82,7 @@ private final class PressFeedbackButton: NSButton {
         }
         title = loading ? "" : L10n.text("알림 테스트")
         setAccessibilityLabel(L10n.text(loading ? "알림 테스트 중지" : "알림 테스트"))
-        toolTip = loading ? L10n.text("다시 누르면 알림 테스트를 중지합니다.") : nil
+        setAccessibilityHelp(loading ? L10n.text("다시 누르면 알림 테스트를 중지합니다.") : nil)
     }
 
     override func layout() {
@@ -296,6 +296,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
     private let openClaudeURL: (URL) -> Void
     private let grokAvailability: () -> GrokAvailability.State
     private let openGrokURL: (URL) -> Void
+    private let openDiscordURL: (URL) -> Void
     private let notificationSettings: NotificationSettings
     private let wakeSettings: CodexWakeSettings
     private let login: LoginLaunchController
@@ -306,6 +307,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
     private let wakeMessageField = NSTextField(frame: .zero)
     private let wakeDescription = NSTextField(labelWithString: "")
     var onWakeSettingsChanged: (() -> Void)?
+    var onVisibilityChanged: ((Bool) -> Void)?
     private lazy var searchPopover: SettingsSearchPanel = {
         let panel = SettingsSearchPanel(contentRect: .zero,
                             styleMask: [.borderless],
@@ -340,6 +342,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
     private weak var navigationClearButton: NSButton?
     private weak var navigationEmptyState: NSTextField?
     private weak var closeButton: NSButton?
+    private weak var discordButton: NSButton?
     private weak var releaseButton: FooterLinkLabel?
     private weak var makerButton: FooterLinkLabel?
     private weak var notificationPermissionToggle: NSSwitch?
@@ -378,6 +381,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
     private var localizedFields: [(field: NSTextField, key: String)] = []
     private var navigationKeys: [String] = []
     private var pages: [NSView] = []
+    private var patchNotesView: PatchNotesView?
     private var navigation: [NSButton] = []
     private var navigationTitles: [String] = []
     private var navigationSearchRows: [(button: NSButton, categoryIndex: Int,
@@ -398,12 +402,14 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
          claudeAvailability: @escaping () -> ClaudeAvailability.State = { ClaudeAvailability.current() },
          openClaudeURL: @escaping (URL) -> Void = { _ = NSWorkspace.shared.open($0) },
          grokAvailability: @escaping () -> GrokAvailability.State = { GrokAvailability.current() },
-         openGrokURL: @escaping (URL) -> Void = { _ = NSWorkspace.shared.open($0) }) {
+         openGrokURL: @escaping (URL) -> Void = { _ = NSWorkspace.shared.open($0) },
+         openDiscordURL: @escaping (URL) -> Void = { _ = NSWorkspace.shared.open($0) }) {
         self.settings = settings
         self.claudeAvailability = claudeAvailability
         self.openClaudeURL = openClaudeURL
         self.grokAvailability = grokAvailability
         self.openGrokURL = openGrokURL
+        self.openDiscordURL = openDiscordURL
         self.notificationSettings = notificationSettings
         self.wakeSettings = wakeSettings
         self.login = login
@@ -527,7 +533,8 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         divider.boxType = .separator
         root.addSubview(divider)
 
-        let categories = [("일반", "gearshape"), ("AI 표시", "sparkles"), ("알림", "bell")]
+        let categories = [("일반", "gearshape"), ("AI 표시", "sparkles"), ("알림", "bell"),
+                          ("패치노트", "doc.text")]
         var notificationDocument: NSView?
         let notificationDocumentHeight: CGFloat = 840
         for (index, category) in categories.enumerated() {
@@ -589,7 +596,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
                 page.addSubview(scroll)
                 notificationDocument = document
                 notificationScrollView = scroll
-            } else {
+            } else if index != 3 {
                 label(category.0, in: page, x: 13, y: 389, width: 437, size: 18, bold: true)
             }
         }
@@ -605,7 +612,8 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
             (2, "알림", "bell", [
                 "알림 설정", "알림 소리", "재생 시간", "음량", "알림 테스트", "테스트 알림을 발송합니다.", "알림 자동 정리", "알림 항목", "작업 알림", "사용량 부족",
                 "사용량 초기화", "업데이트", "승인 요청", "답변 요청", "MCP 확인 요청", "앱 승인 요청", "작업 실패"
-            ])
+            ]),
+            (3, "패치노트", "doc.text", ["업데이트 내역"])
         ]
         var searchRowY: CGFloat = 289
         func addNavigationSearchRow(titleKey: String, categoryIndex: Int,
@@ -740,9 +748,6 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         wakeDescription.stringValue = L10n.text("사용량이 초기화될 때마다 Codex를 자동으로 깨웁니다.")
         status(wakeDescription, in: wakeCard, y: 176, width: 280)
         wakeDescription.font = .systemFont(ofSize: 11)
-        wakeDescription.toolTip = L10n.language == .korean
-            ? "Codex 사용량이 소모됩니다. 채팅 재사용이 거절되면 새 채팅을 생성합니다."
-            : "Uses Codex quota. Creates a replacement chat when reuse is explicitly rejected."
         placeSwitch(wakeToggle, in: wakeCard, centerY: 197)
         wakeToggle.identifier = NSUserInterfaceItemIdentifier("codexWakeEnabled")
         wakeToggle.target = self
@@ -1075,6 +1080,22 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
                 for view in page.subviews { view.frame.origin.y += verticalOffset }
             }
         }
+        let patchNotes = PatchNotesView(frame: pages[3].bounds)
+        pages[3].addSubview(patchNotes)
+        patchNotesView = patchNotes
+        let discord = NSButton(title: L10n.text("디스코드 커뮤니티"), target: self,
+                               action: #selector(openDiscordCommunity))
+        discord.bezelStyle = .rounded
+        discord.controlSize = .small
+        discord.font = .systemFont(ofSize: 11)
+        discord.image = StatusMenuBuilder.discordIcon()
+        discord.imagePosition = .imageLeft
+        discord.imageScaling = .scaleProportionallyDown
+        discord.identifier = NSUserInterfaceItemIdentifier("settings-discord")
+        root.addSubview(discord)
+        discordButton = discord
+        configureDiscordButton()
+
         let footerColor = NSColor.labelColor.adaptiveAlpha(0.35)
         let footerFont = NSFont.systemFont(ofSize: 10)
         let releaseTitle = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
@@ -1095,7 +1116,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         release.isSelectable = false
         release.alignment = .left
         release.frame = NSRect(x: footerX, y: 14, width: releaseWidth, height: 18)
-        release.toolTip = "https://github.com/hyxx-su/PlusCodex/releases/latest"
+        release.setAccessibilityHelp("https://github.com/hyxx-su/PlusCodex/releases/latest")
         release.setAccessibilityLabel(L10n.text("릴리즈 보기"))
         release.onClick = { [weak self] in self?.openReleasePage() }
         root.addSubview(release)
@@ -1119,7 +1140,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         maker.alignment = .left
         maker.frame = NSRect(x: footerX + releaseWidth + footerGap + separatorWidth + footerGap,
                              y: 14, width: makerWidth, height: 18)
-        maker.toolTip = "https://github.com/hyxx-su"
+        maker.setAccessibilityHelp("https://github.com/hyxx-su")
         maker.setAccessibilityLabel(L10n.text("내 GitHub 계정"))
         maker.onClick = { [weak self] in self?.openMakerPage() }
         root.addSubview(maker)
@@ -1144,6 +1165,10 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         notificationSoundPopover?.close()
         notificationStyleGuidancePopover?.close()
         cancelSoundTestNotification()
+        // willClose arrives before AppKit removes the window. Hide it before
+        // releasing the regular-app presentation so Dock sees no settings window.
+        window?.orderOut(nil)
+        onVisibilityChanged?(false)
     }
 
     @objc private func languageDidChange() { reloadLocalization() }
@@ -1155,6 +1180,8 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         notificationStyleGuidancePopover?.close()
         window?.title = L10n.text("설정")
         closeButton?.setAccessibilityLabel(L10n.text("닫기"))
+        configureDiscordButton()
+        patchNotesView?.reloadLocalization()
         releaseButton?.setAccessibilityLabel(L10n.text("릴리즈 보기"))
         makerButton?.setAccessibilityLabel(L10n.text("내 GitHub 계정"))
         navigationSearchField?.placeholderString = L10n.text("설정 검색")
@@ -1167,6 +1194,9 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         navigationTitles = navigationKeys.map { L10n.text($0) }
         for (index, button) in navigation.enumerated() {
             button.setAccessibilityLabel(L10n.text(navigationKeys[index]))
+        }
+        for row in navigationSearchRows {
+            row.button.setAccessibilityLabel(L10n.text(row.titleKey))
         }
         languagePicker.setAccessibilityLabel(L10n.text("언어"))
         wakeToggle.setAccessibilityLabel(L10n.text("자동으로 깨우기"))
@@ -1314,12 +1344,25 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         guard let url = URL(string: "https://github.com/hyxx-su/PlusCodex/releases/latest") else { return }
         NSWorkspace.shared.open(url)
     }
+    private func configureDiscordButton() {
+        guard let button = discordButton else { return }
+        button.title = L10n.text("디스코드 커뮤니티")
+        button.setAccessibilityLabel(button.title)
+        let width = min(186, max(96, ceil(button.intrinsicContentSize.width) + 12))
+        button.frame = NSRect(x: (210 - width) / 2, y: 42, width: width, height: 24)
+    }
+    @objc private func openDiscordCommunity() {
+        guard let url = URL(string: "https://discord.gg/jR87pagNRG") else { return }
+        openDiscordURL(url)
+    }
     @objc private func openMakerPage() {
         guard let url = URL(string: "https://github.com/hyxx-su") else { return }
         NSWorkspace.shared.open(url)
     }
     func present() {
         resetNavigationSearch()
+        // The app must become a regular app before AppKit activates this window.
+        onVisibilityChanged?(true)
         synchronize(); refreshNotifications(); NSApp.activate(ignoringOtherApps: true)
         showWindow(nil); window?.makeKeyAndOrderFront(nil)
         scrollNotificationsToTop()
@@ -1337,9 +1380,12 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
             } ?? "—"
             wakeDescription.stringValue = L10n.language == .korean
                 ? "깨우기 실패 · 다음 시도 \(next)" : "Wake failed · Next attempt \(next)"
-            wakeDescription.toolTip = failure
+            wakeDescription.setAccessibilityHelp(failure)
         } else {
             wakeDescription.stringValue = L10n.text("사용량이 초기화될 때마다 Codex를 자동으로 깨웁니다.")
+            wakeDescription.setAccessibilityHelp(L10n.language == .korean
+                ? "Codex 사용량이 소모됩니다. 채팅 재사용이 거절되면 새 채팅을 생성합니다."
+                : "Uses Codex quota. Creates a replacement chat when reuse is explicitly rejected.")
         }
         configureWakeModelPicker()
         updatePickerSelection()
@@ -1715,7 +1761,6 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
     private func configureNotificationAutoCleanupAccessibility() {
         notificationAutoCleanupToggle?.setAccessibilityLabel(L10n.text("알림 자동 정리"))
         let help = L10n.text("알림음 재생 시간이 지나면 알림센터 기록도 삭제됩니다. 앱이 실행 중일 때 적용됩니다.")
-        notificationAutoCleanupToggle?.toolTip = help
         notificationAutoCleanupToggle?.setAccessibilityHelp(help)
     }
     @objc private func toggleNotificationPermission(_ sender: NSSwitch) {

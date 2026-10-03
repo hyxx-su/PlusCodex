@@ -9,9 +9,20 @@ private final class UpdateStateFixture: NSCoder {
     override func decodeBool(forKey key: String) -> Bool { key == "SPUUserUpdateStateUserInitiated" }
 }
 
+private final class StatusMenuActionTarget: NSObject {
+    var activations = 0
+    weak var lastSender: NSStatusBarButton?
+
+    @objc func activate(_ sender: NSStatusBarButton) {
+        activations += 1
+        lastSender = sender
+    }
+}
+
 @main struct PresentationChecks {
     static func main() throws {
         _ = NSApplication.shared
+        assertStatusMenuInput()
         let suite = "PlusCodex.presentation.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -68,6 +79,30 @@ private final class UpdateStateFixture: NSCoder {
         precondition(choice == .dismiss)
         driver.dismissUpdateInstallation()
         print("PASS: compact settings in both appearances; Korean native update window, install/skip/later controls and explicit choice")
+    }
+
+    private static func assertStatusMenuInput() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        defer { NSStatusBar.system.removeStatusItem(item) }
+        let button = item.button!
+        let target = StatusMenuActionTarget()
+        let action = #selector(StatusMenuActionTarget.activate(_:))
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        button.configureMenuTracking(target: target, action: action)
+
+        let expected: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown]
+        let configured = UInt(button.sendAction(on: expected))
+        precondition(configured == expected.rawValue,
+                     "Status menu must open only on press, never on drag or release")
+        precondition(button.target === target && button.action == action)
+
+        // Programmatic/accessibility activation must remain usable without a mouse event.
+        button.performClick(nil)
+        precondition(target.activations == 1 && target.lastSender === button)
+        button.configureMenuTracking(target: target, action: action)
+        button.performClick(nil)
+        precondition(target.activations == 2, "Reconfiguration must not duplicate the target action")
+        print("PASS: status menus subscribe only to left/right mouse-down; programmatic activation dispatches once")
     }
 
     private static func snapshot(_ view: NSView, appearance: NSAppearance.Name, path: String) throws {

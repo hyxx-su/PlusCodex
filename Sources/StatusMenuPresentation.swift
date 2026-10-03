@@ -1,5 +1,15 @@
 import AppKit
 
+extension NSStatusBarButton {
+    func configureMenuTracking(target: AnyObject, action: Selector) {
+        self.target = target
+        self.action = action
+        // Open on press so AppKit owns the subsequent drag/release menu tracking.
+        // A release must not dispatch another status-button action.
+        sendAction(on: [.leftMouseDown, .rightMouseDown])
+    }
+}
+
 extension NSMenu {
     /// A status button inherits the wallpaper-driven menu-bar appearance, which can
     /// be dark even in Light Mode. Present in screen coordinates so AppKit does

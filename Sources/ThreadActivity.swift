@@ -140,17 +140,24 @@ struct CompletionTracker {
         var results: [ThreadTurnResult] = []
         for activity in rows {
             let prior = previous[activity.id]
-            let becameIdle = prior?.runtime == "active" && activity.runtime == "idle"
+            let waitingForInput = activity.isWaitingForApproval || !activity.pendingRequests.isEmpty
+            let becameIdle = prior?.isRunning == true && activity.runtime == "idle" && !activity.isRunning
             if let turn = activity.latestTurn {
-                let observedRunningTurn = prior?.latestTurn?.id == turn.id
+                let key = activity.id + ":" + turn.id
+                let sameTurn = prior?.latestTurn?.id == turn.id
+                let observedRunningTurn = sameTurn
                     && prior?.latestTurn?.status == "inProgress"
-                    || (activity.unread && savedTurns[activity.id + ":" + turn.id]?.running == true)
+                    || ((activity.unread || sameTurn) && savedTurns[key]?.running == true)
                 let firstObservedRecentTerminalTurn = prior?.latestTurn?.id != turn.id
                     && turn.startedAtMs >= sessionStartedAtMs
                     && turn.startedAtMs <= now.timeIntervalSince1970 * 1000
                     && now.timeIntervalSince1970 * 1000 - turn.startedAtMs <= 120_000
                     && ["completed", "failed", "interrupted"].contains(turn.status)
+                // Runtime and turn patches can arrive separately. An outstanding
+                // request is not completion, even if a terminal turn is present.
+                let terminalResolved = !waitingForInput && (turn.status != "completed" || !activity.isRunning)
                 if (observedRunningTurn || becameIdle || firstObservedRecentTerminalTurn)
+                    && terminalResolved
                     && !notifiedTurnIDs[activity.id, default: []].contains(turn.id) {
                     switch turn.status {
                     case "completed":
@@ -164,9 +171,12 @@ struct CompletionTracker {
                     default: break
                     }
                 }
-                let key = activity.id + ":" + turn.id
-                let running = turn.status == "inProgress"
                 let notified = notifiedTurnIDs[activity.id, default: []].contains(turn.id)
+                // Preserve observed work until the conflicting input/runtime
+                // state clears, so an open (already-read) chat still notifies once.
+                let running = turn.status == "inProgress"
+                    || (!notified && (observedRunningTurn || becameIdle || firstObservedRecentTerminalTurn)
+                        && !terminalResolved && ["completed", "failed"].contains(turn.status))
                 if savedTurns[key]?.running != running || savedTurns[key]?.notified != notified {
                     savedTurns[key] = TurnRecord(thread: activity.id, turn: turn.id, running: running,
                                                  notified: notified, savedAt: now)
@@ -918,7 +928,11 @@ final class ThreadActivityMonitor {
             }
             revisions[id] = revision
             if refreshPendingRequests {
+                // Indexed request patches do not carry a complete request list.
+                // Await its snapshot before either attention or completion is inferred.
+                awaitingSnapshots.insert(id)
                 try requestSnapshot(id)
+                publish(connected: true)
                 return
             }
         }
@@ -976,7 +990,8 @@ final class ThreadActivityMonitor {
             if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
             return $0.id < $1.id
         }
-        let connected = connected && (awaitingSnapshots.isEmpty || !rows.isEmpty)
+        // Snapshot recovery belongs to each row's stateConfirmed flag. It must
+        // not turn a healthy transport into a disconnection when no row is visible.
         guard rows != lastPublished || connected != lastConnected else { return }
         lastPublished = rows
         lastConnected = connected

@@ -182,6 +182,10 @@ final class QuotaMenuView: NSView {
         return count == 0 ? 124 : 58 + CGFloat(count) * 92
     }
 
+    // Keep the same right edge, but reserve enough room for English labels
+    // between the title (ending at x=144) and the percentage (starting at x=228).
+    static let cardStatusTextFrame = NSRect(x: 151, y: 14, width: 72, height: 16)
+
     private func card(_ window: QuotaWindow?, title: String, y: CGFloat, displayedPercent: Double?) {
         let rect = NSRect(x: 12, y: y, width: 276, height: 84)
         NSColor.labelColor.withAlphaComponent(0.025).setFill()
@@ -194,8 +198,11 @@ final class QuotaMenuView: NSView {
         let remaining = window?.displayPercent(showRemaining: showRemaining)
         let tint: NSColor = stale || remaining == nil ? .secondaryLabelColor : .labelColor
         text(title, x: 24, y: y + 11, size: 12, weight: .semibold, width: 120)
-        text(stale ? L10n.text("이전 조회") : L10n.text(showRemaining ? "남음" : "사용됨"), x: 180, y: y + 14, size: 10, color: .secondaryLabelColor,
-             width: 43, align: .right)
+        let statusFrame = Self.cardStatusTextFrame.offsetBy(dx: 0, dy: y)
+        text(stale ? L10n.text("이전 조회") : L10n.text(showRemaining ? "남음" : "사용됨"),
+             x: statusFrame.minX, y: statusFrame.minY, size: 10, color: .secondaryLabelColor,
+             width: statusFrame.width, height: statusFrame.height, align: .right,
+             lineBreak: .byTruncatingTail)
         text(remaining.map { "\($0)%" } ?? "--%", x: 228, y: y + 10, size: 15, weight: .medium,
              color: tint, width: 48, align: .right, numeric: true)
         let track = NSRect(x: 24, y: y + 38, width: 252, height: 6)

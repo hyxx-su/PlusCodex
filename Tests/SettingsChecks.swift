@@ -21,12 +21,44 @@ import ServiceManagement
         status = .requiresApproval
         precondition(!login.requested && login.requiresApproval && login.message.contains("허용"))
         let settings = ProviderSettings(defaults: defaults)
-        let window = AISettingsWindow(settings: settings, login: login,
+        let wakeSettings = CodexWakeSettings(defaults: defaults)
+        var openedDiscordURL: URL?
+        let window = AISettingsWindow(settings: settings, wakeSettings: wakeSettings, login: login,
                                       claudeAvailability: { .availableOrUnknown },
-                                      grokAvailability: { .readyToCheck })
+                                      grokAvailability: { .readyToCheck },
+                                      openDiscordURL: { openedDiscordURL = $0 })
         func descendants(_ view: NSView) -> [NSView] {
             view.subviews + view.subviews.flatMap(descendants)
         }
+        let root = window.window!.contentView!
+        let discord = descendants(root).compactMap { $0 as? NSButton }
+            .first { $0.identifier?.rawValue == "settings-discord" }!
+        precondition(discord.title == "디스코드 커뮤니티" && discord.accessibilityLabel() == "디스코드 커뮤니티")
+        precondition(discord.image?.size == NSSize(width: 12, height: 12))
+        precondition(discord.frame.height <= 24 && discord.frame.midX == 105,
+                     "Keep the Discord button small and centered in the sidebar")
+        let footer = root.subviews.compactMap { $0 as? NSTextField }
+            .first { $0.stringValue == "Copyright 2026 hyxx-su" }!
+        precondition(discord.frame.minY > footer.frame.maxY && discord.frame.maxX < 210,
+                     "The Discord button must sit above the version/copyright footer")
+        let discordPoint = discord.convert(NSPoint(x: discord.bounds.midX, y: discord.bounds.midY), to: nil)
+        let discordHit = root.superview?.hitTest(discordPoint)
+        precondition(discordHit === discord || discordHit?.isDescendant(of: discord) == true)
+        discord.performClick(nil)
+        precondition(openedDiscordURL?.absoluteString == "https://discord.gg/jR87pagNRG")
+        try verifyDiscordLocalization(in: window, button: discord, settings: settings)
+        precondition(descendants(root).allSatisfy { $0.toolTip == nil },
+                     "Settings controls and footer links must not show hover tooltips")
+        wakeSettings.lastFailure = "Wake failure detail"
+        window.synchronize()
+        precondition(descendants(root).allSatisfy { $0.toolTip == nil },
+                     "A failed wake must not restore its old tooltip")
+        let wakeDescription = descendants(root).compactMap { $0 as? NSTextField }
+            .first { $0.accessibilityHelp() == "Wake failure detail" }!
+        wakeSettings.lastFailure = nil
+        window.synchronize()
+        precondition(wakeDescription.toolTip == nil && wakeDescription.accessibilityHelp()?.contains("사용량이 소모") == true,
+                     "Recovery must restore accessible guidance without a hover tooltip")
         let toggles = descendants(window.window!.contentView!).compactMap { $0 as? NSSwitch }
         let providerToggles = toggles.filter { AIProvider(rawValue: $0.identifier?.rawValue ?? "") != nil }
         precondition(providerToggles.count == 3)
@@ -60,7 +92,7 @@ import ServiceManagement
         let cleanupToggle = descendants(expiryWindow.window!.contentView!).compactMap { $0 as? NSSwitch }
             .first { $0.identifier?.rawValue == "notification-autoCleanup" }!
         precondition(cleanupToggle.state == .off && cleanupToggle.accessibilityLabel() == "알림 자동 정리")
-        precondition(cleanupToggle.toolTip?.contains("알림센터 기록") == true)
+        precondition(cleanupToggle.toolTip == nil && cleanupToggle.accessibilityHelp()?.contains("알림센터 기록") == true)
         precondition(descendants(expiryWindow.window!.contentView!).compactMap { $0 as? NSTextField }
             .contains { $0.stringValue == "표시된 알림을 일정 시간이 지나면 자동으로 지웁니다." })
         cleanupToggle.state = .on
@@ -71,6 +103,8 @@ import ServiceManagement
         cleanupToggle.state = .off
         _ = cleanupToggle.sendAction(cleanupToggle.action, to: cleanupToggle.target)
         precondition(!expirySettings.autoCleanupEnabled && expirySettings.autoCleanupStartedAt == nil)
+        precondition(descendants(expiryWindow.window!.contentView!).allSatisfy { $0.toolTip == nil },
+                     "Toggling notification settings must not reintroduce hover tooltips")
         precondition(L10n.translation("알림 자동 정리", language: .english) == "Auto-clear notifications")
         if CommandLine.arguments.contains("--render-auto-cleanup") {
             let root = expiryWindow.window!.contentView!
@@ -144,6 +178,7 @@ import ServiceManagement
                                               claudeAvailability: { .availableOrUnknown },
                                               grokAvailability: { .readyToCheck })
         verifyNotificationControls(in: expandedWindow, expectedCount: 7)
+        precondition(descendants(expandedWindow.window!.contentView!).allSatisfy { $0.toolTip == nil })
         let volumeSlider = descendants(expandedWindow.window!.contentView!).compactMap { $0 as? NSSlider }
             .first { $0.accessibilityLabel() == "음량" }!
         precondition(volumeSlider.minValue == 0 && volumeSlider.maxValue == 200)
@@ -175,12 +210,58 @@ import ServiceManagement
             for (offline, checking) in [(false, true), (true, true), (true, false), (false, false)] {
                 controller.testHookPresentation(quota: quota, fetching: false, checking: checking, offline: offline)
                 precondition(abs(controller.testHookMenu.size.height - height) < 1)
-                precondition(controller.testHookMenu.items.filter { !$0.isHidden }.count == ((offline || checking) ? 1 : 5))
+                precondition(controller.testHookMenu.items.filter { !$0.isHidden }.count == ((offline || checking) ? 1 : 4))
                 let view = controller.testHookMenu.items[0].view!
                 precondition(view.subviews.contains { $0 is QuotaLoadingView } == (offline || checking))
             }
         }
-        print("PASS: login, native switches, notification hit targets, Claude/Grok loading and stable overlays")
+        print("PASS: login, native switches, notification hit targets, Discord footer, Claude/Grok loading and stable overlays")
+    }
+
+    private static func verifyDiscordLocalization(in controller: AISettingsWindow, button: NSButton,
+                                                 settings: ProviderSettings) throws {
+        let defaults = UserDefaults.standard
+        let arguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
+        let appearance = NSApp.appearance
+        let providers = [AIProvider.claude, .grok].map {
+            ProviderStatusController(provider: $0, settings: settings,
+                                     claudeAvailability: { .availableOrUnknown },
+                                     grokAvailability: { .readyToCheck })
+        }
+        defer {
+            defaults.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+            NSApp.appearance = appearance
+            controller.window?.appearance = nil
+            controller.reloadLocalization()
+        }
+        for language in AppLanguage.allCases {
+            var localizedArguments = arguments
+            localizedArguments["appLanguage"] = language.rawValue
+            defaults.setVolatileDomain(localizedArguments, forName: UserDefaults.argumentDomain)
+            controller.reloadLocalization()
+            let title = L10n.translation("디스코드 커뮤니티", language: language)
+            precondition(title == (language == .korean ? "디스코드 커뮤니티" : "Discord community"))
+            precondition(button.title == title && button.accessibilityLabel() == title)
+            precondition(button.toolTip == nil && button.image?.size == NSSize(width: 12, height: 12))
+            let titleWidth = (title as NSString).size(withAttributes: [.font: button.font!]).width
+            precondition(titleWidth + 12 < button.frame.width && button.frame.width <= 186,
+                         "The localized community label and icon must fit inside the sidebar")
+            precondition(button.frame.midX == 105 && button.frame.height == 24)
+            for provider in providers {
+                provider.reloadLocalization()
+                let rows = provider.testHookMenu.items.filter { $0.action != nil }
+                precondition(rows.map(\.title) == [L10n.text("설정"), L10n.text("PlusCodex 종료")],
+                             "Provider menus must not restore Discord after a language change")
+                precondition(rows.map(\.keyEquivalent) == [",", "q"])
+            }
+            if CommandLine.arguments.contains("--render-discord-footer") {
+                for theme in [NSAppearance.Name.aqua, .darkAqua] {
+                    NSApp.appearance = NSAppearance(named: theme)
+                    try snapshot(controller.window!.contentView!, appearance: theme,
+                                 path: "build/settings-discord-\(language.rawValue)-\(theme.rawValue).png")
+                }
+            }
+        }
     }
 
     private static func snapshot(_ view: NSView, appearance: NSAppearance.Name, path: String) throws {

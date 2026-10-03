@@ -11,6 +11,8 @@ import AppKit
         let offlineLoader = offline.subviews.compactMap { $0 as? QuotaLoadingView }.first!
         let offlineLink = offlineLoader.subviews.compactMap { $0 as? IssueReportButton }.first!
         precondition(offlineLoader.bounds.contains(offlineLink.frame))
+        precondition(offlineLink.toolTip == nil && offlineLink.accessibilityHelp() == "GitHub 이슈 작성 페이지 열기",
+                     "Issue reporting guidance must stay accessible without a hover tooltip")
         precondition(offlineLink.focusRingType != .none)
         var opened: URL?
         offlineLink.openURL = { opened = $0 }

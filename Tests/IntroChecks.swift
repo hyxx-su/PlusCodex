@@ -24,7 +24,7 @@ import AppKit
                              "Full menu height changed")
                 precondition(stateScreen ? panel.frame.height > height : panel.frame.height == height)
                 precondition(delegate.testHookMenu!.items.filter { !$0.isHidden }.count == (stateScreen ? 1 : visible))
-                precondition(delegate.testHookMenu!.items.filter { ["디스코드", "PlusCodex 종료", "설정"].contains($0.title) }.allSatisfy { $0.isHidden == stateScreen })
+                precondition(delegate.testHookMenu!.items.filter { ["PlusCodex 종료", "설정"].contains($0.title) }.allSatisfy { $0.isHidden == stateScreen })
                 let loader = panel.subviews.compactMap { $0 as? QuotaLoadingView }.first
                 precondition((loader != nil) == (offline || checking))
                 if let loader {
@@ -66,7 +66,7 @@ import AppKit
         cachedDelegate.testHookSetActivities([ThreadActivity(id: UUID().uuidString, title: "작업",
             runtime: "active", unread: false, updatedAt: 0)])
         cachedDelegate.testHookSetFailure("조회 시간 초과")
-        precondition(cachedDelegate.testHookMenuItemCount == 5,
+        precondition(cachedDelegate.testHookMenuItemCount == 4,
                      "최근 사용량 조회가 실패해도 진행 중인 작업을 숨기면 안 됩니다")
         precondition((cachedDelegate.testHookDashboardView as? QuotaMenuView)?.showsFailureScreen == false)
         cachedDelegate.testHookSetUpdatedAt(Date().addingTimeInterval(-11 * 60))

@@ -24,7 +24,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var activityCompatibilityIssue = false
     private var activityItem: NSMenuItem?
     private var dashboardItem: NSMenuItem?
-    private var discordItem: NSMenuItem?
     private var quitItem: NSMenuItem?
     private var separatorItem: NSMenuItem?
     private var builtItems: StatusMenuBuilder.Items?
@@ -54,6 +53,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.onWakeSettingsChanged = { [weak self] in
             guard let self else { return }
             self.wakeScheduler.tick(quota: self.quota, offline: self.offline)
+        }
+        controller.onVisibilityChanged = { visible in
+            if visible {
+                NSApp.setActivationPolicy(.regular)
+                NSApp.unhideWithoutActivation()
+            } else {
+                // Hide before withdrawing the Dock entry so pending foreground
+                // activation cannot restore the just-closed settings window.
+                // The menu-bar process and its existing status items stay alive.
+                NSApp.hide(nil)
+                NSApp.setActivationPolicy(.accessory)
+            }
         }
         return controller
     }()
@@ -329,8 +340,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             button.setAccessibilityLabel(unavailable ? unavailableTitle
                 : showingPreviousUsage ? L10n.text("이전 조회") + " · " + usageAccessibility : usageAccessibility)
             let usageTitle = L10n.text("Codex · %@ 잔여 %@", primary?.displayLabel(planType: account?.planType, isPrimary: quota?.primary != nil) ?? L10n.text("사용 한도"), percent)
-            button.toolTip = unavailable ? unavailableTitle
-                : showingPreviousUsage ? L10n.text("이전 조회") + " · " + usageTitle : usageTitle
+            button.setAccessibilityHelp(unavailable ? unavailableTitle
+                : showingPreviousUsage ? L10n.text("이전 조회") + " · " + usageTitle : usageTitle)
         }
         // While tracking, mutate existing content only. Native menu restructuring
         // is deferred to close; update-check transitions keep their existing path.
@@ -376,22 +387,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let dashboardItem, let built = builtItems {
             dashboardItem.view = panel
             StatusMenuBuilder.apply(intro: stateScreen, activity: built.activity,
-                                    separator: built.separator, discord: built.discord, quit: built.quit)
+                                    separator: built.separator, quit: built.quit)
             updateActivityView()
             return
         }
         let built = StatusMenuBuilder.make(intro: intro, dashboardView: panel, delegate: self,
-                                           target: self, discordAction: #selector(openDiscord),
-                                           quitAction: #selector(quitApp))
+                                           target: self, quitAction: #selector(quitApp))
         builtItems = built
         let settings = NSMenuItem(title: L10n.text("설정"), action: #selector(openSettings), keyEquivalent: ",")
         settings.image = nil
         settings.target = self
-        built.menu.insertItem(settings, at: built.menu.items.count - 1)
+        built.menu.insertItem(settings, at: built.menu.index(of: built.quit))
         settingsItem = settings
         dashboardItem = built.dashboard
         activityItem = built.activity
-        discordItem = built.discord
         quitItem = built.quit
         separatorItem = built.separator
         updateActivityView()
@@ -400,10 +409,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func quitApp() { NSApp.terminate(nil) }
 
-    @objc private func openDiscord() {
-        NSWorkspace.shared.open(URL(string: "https://discord.gg/jR87pagNRG")!)
-    }
-
     @objc private func openSettings() {
         checkCodexLoginChange()
         extraProviders.forEach { $0.synchronize() }
@@ -411,7 +416,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func languageDidChange() {
-        if let discordItem { StatusMenuBuilder.configureDiscord(discordItem) }
         quitItem?.title = L10n.text("PlusCodex 종료")
         settingsItem?.title = L10n.text("설정")
         extraProviders.forEach { $0.reloadLocalization() }
@@ -427,9 +431,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if item == nil {
                 item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
                 item?.autosaveName = "CodexQuota"
-                item?.button?.target = self
-                item?.button?.action = #selector(statusClicked)
-                item?.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+                item?.button?.configureMenuTracking(target: self, action: #selector(statusClicked))
                 refresh()
             }
             render()
@@ -465,7 +467,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 fallbackItem = status
             }
             let title = L10n.text("PlusCodex 설정")
-            fallbackItem?.button?.toolTip = title
             fallbackItem?.button?.setAccessibilityLabel(title)
         } else if let fallbackItem {
             NSStatusBar.system.removeStatusItem(fallbackItem)
@@ -475,12 +476,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func statusClicked() {
         guard let button = item?.button else { return }
-        if NSApp.currentEvent?.type == .rightMouseUp {
-            let context = NSMenu()
-            let disable = NSMenuItem(title: L10n.text("Codex 끄기"), action: #selector(disableCodex), keyEquivalent: "")
-            disable.target = self
-            context.addItem(disable)
-            context.popUpFollowingSystemAppearance(from: button)
+        if NSApp.currentEvent?.type == .rightMouseDown {
+            contextMenu().popUpFollowingSystemAppearance(from: button)
         } else {
             // Prepare the existing full-size checking screen before AppKit starts menu tracking.
             if !offline { updater.checkOnMenuOpen() }
@@ -488,6 +485,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             render()
             builtItems?.menu.popUpFollowingSystemAppearance(from: button)
         }
+    }
+
+    private func contextMenu() -> NSMenu {
+        StatusMenuBuilder.makeContextMenu(disableTitle: L10n.text("Codex 끄기"), target: self,
+                                           disableAction: #selector(disableCodex), quitAction: #selector(quitApp))
     }
 
     @objc private func disableCodex() {
@@ -527,10 +529,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func testHookMenuWillOpen(_ menu: NSMenu) { menuWillOpen(menu) }
     func testHookRenderForMenu() { render() }
     var testHookDashboardView: NSView? { dashboardItem?.view }
+    var testHookSettingsWindow: AISettingsWindow { settingsWindow }
+    var testHookContextMenu: NSMenu { contextMenu() }
     var testHookMenu: NSMenu? { builtItems?.menu }
     var testHookMenuItemCount: Int {
         guard let built = builtItems else { return 0 }
-        return [built.dashboard, built.activity, built.separator, built.discord, built.quit]
+        return [built.dashboard, built.activity, built.separator, built.quit]
             .filter { !$0.isHidden }.count
     }
     func testHookSetQuota(_ value: Quota?) { quota = value }
@@ -558,8 +562,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let rowView = activityItem?.view
         let alpha: CGFloat = activityConnected ? 1 : 0.55
         if rowView?.alphaValue != alpha { rowView?.alphaValue = alpha }
-        let toolTip = activityConnected ? nil : L10n.text("작업 상태 연결 복구 중 · 마지막 확인 정보")
-        if rowView?.toolTip != toolTip { rowView?.toolTip = toolTip }
         if !menuTracking, activityItem?.isHidden == true { activityItem?.isHidden = false }
     }
 

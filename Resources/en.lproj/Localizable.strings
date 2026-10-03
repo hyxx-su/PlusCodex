@@ -2,6 +2,13 @@
 "닫기" = "Close";
 "모델" = "Model";
 "AI 표시" = "AI providers";
+"패치노트" = "Patch notes";
+"업데이트 내역" = "Update history";
+"패치노트 (현재 버전: %@)" = "Patch notes (Current version: %@)";
+"%@ 패치노트" = "%@ patch notes";
+"PlusCodex %@ 패치노트" = "PlusCodex %@ patch notes";
+"버전을 누르면 업데이트 내용을 펼치거나 접습니다." = "Select a version to expand or collapse its update details.";
+"패치노트를 불러올 수 없습니다." = "Could not load patch notes.";
 "자동 실행" = "Launch at login";
 "로그인 시 PlusCodex 자동 실행" = "Launch PlusCodex at login";
 "알림" = "Notifications";
@@ -78,7 +85,7 @@
 "응용 프로그램 폴더에 설치한 뒤 켜주세요." = "Install PlusCodex in the Applications folder before enabling it.";
 "Mac에 로그인할 때 PlusCodex를 실행합니다." = "Start PlusCodex when you log in.";
 "지금 새로고침" = "Refresh now";
-"디스코드" = "Discord";
+"디스코드 커뮤니티" = "Discord community";
 "작업 상태 연결 복구 중 · 마지막 확인 정보" = "Reconnecting task status · Last known information";
 "PlusCodex 종료" = "Quit PlusCodex";
 "PlusCodex 설정" = "PlusCodex Settings";

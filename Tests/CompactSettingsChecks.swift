@@ -14,7 +14,7 @@ struct CompactSettingsChecks {
         let root = controller.window!.contentView!
         assert(root.frame.size == NSSize(width: 680, height: 600))
         let pages = root.subviews.filter { $0.frame.width == 469 }
-        assert(pages.count == 3)
+        assert(pages.count == 4)
         for page in pages {
             assert(page.frame.height == 600)
             for view in page.subviews {

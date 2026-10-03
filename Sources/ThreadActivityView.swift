@@ -44,8 +44,8 @@ private final class ThreadNotificationButton: NSButton {
         image?.isTemplate = true
         contentTintColor = rowColor
         setAccessibilityValue(state == .on ? "켜짐" : "꺼짐")
-        toolTip = !isEnabled ? L10n.text("작업 상태 확인 불가")
-            : state == .on ? "알림 켜짐 · 클릭하여 끄기" : "알림 꺼짐 · 클릭하여 켜기"
+        setAccessibilityHelp(!isEnabled ? L10n.text("작업 상태 확인 불가")
+            : state == .on ? "알림 켜짐 · 클릭하여 끄기" : "알림 꺼짐 · 클릭하여 켜기")
         needsDisplay = true
     }
 }
@@ -122,7 +122,6 @@ final class ThreadActivityButton: NSButton {
         target = self
         action = #selector(openThread)
         setAccessibilityLabel("\(activity.statusLabel), \(activity.title)")
-        toolTip = activity.statusLabel
         wantsLayer = true
         notificationButton.isEnabled = ThreadNotificationPreferences.scope(for: activity) != nil
         notificationButton.rowColor = activity.isRunning ? .secondaryLabelColor : .labelColor
@@ -204,7 +203,6 @@ final class ThreadActivityButton: NSButton {
         }
         guard presentationChanged else { return }
         setAccessibilityLabel("\(activity.statusLabel), \(activity.title)")
-        toolTip = activity.statusLabel
         needsLayout = true
         needsDisplay = true
         if previous.isRunning != activity.isRunning || previous.stateConfirmed != activity.stateConfirmed {
@@ -325,14 +323,15 @@ final class ThreadActivityView: NSView {
 
     /// Keep the menu stable while tracking, but shrink promptly when rows are removed.
     func update(activities: [ThreadActivity], preserveHeight: Bool = false, connected: Bool = true, incompatible: Bool = false) {
-        let allConfirmed = connected && !incompatible && activities.allSatisfy(\.stateConfirmed)
-        let statusChanged = connectionLabel.isHidden != allConfirmed
+        let showConnectionStatus = !activities.isEmpty
+            && (!connected || incompatible || !activities.allSatisfy(\.stateConfirmed))
+        let statusChanged = connectionLabel.isHidden == showConnectionStatus
         let connectionStatus = incompatible ? L10n.text("Codex 연결 형식 미지원 · 앱 업데이트를 확인하세요")
             : L10n.text("작업 상태 연결 복구 중 · 마지막 확인 정보")
         let statusTextChanged = connectionLabel.stringValue != connectionStatus
-        if statusChanged { connectionLabel.isHidden = allConfirmed }
+        if statusChanged { connectionLabel.isHidden = !showConnectionStatus }
         if statusTextChanged { connectionLabel.stringValue = connectionStatus }
-        let statusHeight: CGFloat = allConfirmed ? 0 : 22
+        let statusHeight: CGFloat = showConnectionStatus ? 22 : 0
         let incoming = Set(activities.map(\.id))
         let previousOrder = orderedIDs
         let animate = window != nil && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion

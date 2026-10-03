@@ -47,6 +47,65 @@ import AppKit
         let claude = QuotaMenuView(quota: cached, updatedAt: now, failure: "조회 시간 초과", provider: .claude)
         precondition(!claude.showsFailureScreen && claude.bounds.height == 242,
                      "Recent Claude usage is retained during a transient lookup failure")
-        print("PASS: missing windows, real limits on all plans, dynamic height")
+        let statusFrame = QuotaMenuView.cardStatusTextFrame
+        precondition(statusFrame.minX > 144 && statusFrame.maxX == 223 && statusFrame.maxX < 228,
+                     "Status labels must stay between the title and percentage without moving their right edge")
+        precondition(statusFrame.maxY < 38, "Status labels must not overlap the progress bar")
+        let statusFont = NSFont.systemFont(ofSize: 10)
+        for language in AppLanguage.allCases {
+            for key in ["남음", "사용됨", "이전 조회"] {
+                let label = L10n.translation(key, language: language) as NSString
+                let size = label.size(withAttributes: [.font: statusFont])
+                precondition(size.width <= statusFrame.width && size.height <= statusFrame.height,
+                             "\(language.rawValue) \(label) must fit on one line without truncation")
+            }
+        }
+        if CommandLine.arguments.contains("--render-card-localizations") {
+            try renderCardLocalizations(quota: cached)
+        }
+        print("PASS: missing windows, real limits on all plans, dynamic height, single-line localized status")
+    }
+
+    private static func renderCardLocalizations(quota: Quota) throws {
+        let defaults = UserDefaults.standard
+        let arguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
+        let appearance = NSApp.appearance
+        defer {
+            defaults.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+            NSApp.appearance = appearance
+        }
+        for language in AppLanguage.allCases {
+            var localizedArguments = arguments
+            localizedArguments["appLanguage"] = language.rawValue
+            defaults.setVolatileDomain(localizedArguments, forName: UserDefaults.argumentDomain)
+            for theme in [NSAppearance.Name.aqua, .darkAqua] {
+                NSApp.appearance = NSAppearance(named: theme)
+                for mode in ["remaining", "used", "cached"] {
+                    let view = QuotaMenuView(quota: quota,
+                        account: CodexAccount(email: "test@example.com", planType: "plus"),
+                        updatedAt: Date(), failure: mode == "cached" ? "Lookup timed out" : nil,
+                        showRemaining: mode != "used")
+                    let window = NSWindow(contentRect: view.bounds, styleMask: .borderless,
+                                          backing: .buffered, defer: false)
+                    window.appearance = NSAppearance(named: theme)
+                    window.contentView = view
+                    view.layoutSubtreeIfNeeded()
+                    let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
+                    view.cacheDisplay(in: view.bounds, to: bitmap)
+                    let image = NSImage(size: view.bounds.size)
+                    image.lockFocus()
+                    NSColor(calibratedWhite: theme == .aqua ? 0.98 : 0.12, alpha: 1).setFill()
+                    view.bounds.fill()
+                    let content = NSImage(size: view.bounds.size)
+                    content.addRepresentation(bitmap)
+                    content.draw(in: view.bounds)
+                    image.unlockFocus()
+                    let opaque = NSBitmapImageRep(data: image.tiffRepresentation!)!
+                    let path = "build/quota-layout-\(language.rawValue)-\(mode)-\(theme.rawValue).png"
+                    try opaque.representation(using: .png, properties: [:])!
+                        .write(to: URL(fileURLWithPath: path))
+                }
+            }
+        }
     }
 }

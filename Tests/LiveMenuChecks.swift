@@ -13,9 +13,27 @@ import AppKit
         let menu = delegate.testHookMenu!
         let panel = delegate.testHookDashboardView as! QuotaMenuView
         let list = menu.items.compactMap { $0.view as? ThreadActivityView }.first!
+        let actionRows = menu.items.filter { $0.action != nil }
+        precondition(actionRows.map(\.title) == ["설정", "PlusCodex 종료"] && menu.items.count == 5,
+                     "Only Settings and Quit must remain after removing Discord: \(actionRows.map(\.title))")
+        precondition(actionRows.map(\.keyEquivalent) == [",", "q"],
+                     "Removing Discord must retain Settings and Quit shortcuts")
+        func descendants(_ view: NSView) -> [NSView] {
+            [view] + view.subviews.flatMap(descendants)
+        }
+        func assertNoTooltips() {
+            precondition(menu.items.allSatisfy { $0.toolTip == nil })
+            precondition(menu.items.compactMap(\.view).flatMap(descendants).allSatisfy { $0.toolTip == nil },
+                         "Menu content and controls must not show hover tooltips")
+        }
+        assertNoTooltips()
         let height = list.frame.height
         precondition(height == 0, "No task must reserve no visible area")
         let emptyMenuHeight = menu.size.height
+        delegate.testHookSetActivities([], connected: false)
+        precondition(list.frame.height == 0 && menu.size.height == emptyMenuHeight,
+                     "An empty recovering connection must not add a banner or menu space")
+        delegate.testHookSetActivities([], connected: true)
         delegate.testHookSetMenuTracking(true)
         delegate.testHookSetQuota(quota(40))
         delegate.testHookRenderForMenu()
@@ -43,6 +61,7 @@ import AppKit
         delegate.testHookRenderForMenu()
         var task = ThreadActivity(id: UUID().uuidString, title: "실시간 작업", runtime: "active", unread: false, updatedAt: 1)
         delegate.testHookSetActivities([task])
+        assertNoTooltips()
         precondition(list.frame.height == 42 && menu.size.height > emptyMenuHeight,
                      "A new task must expand the existing menu content")
         let scroll = list.subviews.first as! NSScrollView
@@ -79,6 +98,16 @@ import AppKit
                      "Reading one of two tasks must shrink the open menu by one row")
         delegate.testHookSetActivities([])
         precondition(menu.size.height == emptyMenuHeight)
+        var recovering = otherTask
+        recovering.stateConfirmed = false
+        delegate.testHookSetActivities([recovering], connected: true)
+        assertNoTooltips()
+        precondition(list.frame.height == 64, "A recovering row must retain its status banner")
+        delegate.testHookSetActivities([], connected: false)
+        assertNoTooltips()
+        precondition(list.frame.height == 0 && menu.size.height == emptyMenuHeight,
+                     "Removing the last recovering row must shrink the open menu immediately")
+        delegate.testHookSetActivities([], connected: true)
 
         let window = NSWindow(contentRect: panel.frame, styleMask: .borderless, backing: .buffered, defer: false)
         window.contentView = panel
@@ -138,7 +167,10 @@ import AppKit
         inheritedBell.performClick(nil)
         precondition(inheritedBell.state == .on && ThreadNotificationPreferences.shared.enabled(inherited),
                      "The actual menu bell must enable a task despite the disabled default")
+        precondition(inheritedBell.toolTip == nil && inheritedBell.accessibilityHelp()?.contains("클릭하여 끄기") == true,
+                     "Bell state help must remain accessible without a hover popup")
         explicitBell.performClick(nil)
+        precondition(explicitBell.toolTip == nil && explicitBell.accessibilityHelp()?.contains("클릭하여 켜기") == true)
         settings.setEnabled(true, for: .completion)
         precondition(explicitBell.state == .off && inheritedBell.state == .on,
                      "Explicit OFF and ON must survive changing the default")

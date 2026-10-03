@@ -144,6 +144,7 @@ import UserNotifications
         precondition(attention.update([waiting], connected: true, now: 5).isEmpty)
         precondition(attention.update([waiting], connected: true, now: 5.6).count == 1,
                      "An approval flag without a request list still notifies")
+        checkPendingInputCompletion()
 
         precondition(AppNotifications.foregroundPresentationOptions.contains(.banner))
         precondition(AppNotifications.foregroundPresentationOptions.contains(.sound))
@@ -214,5 +215,98 @@ import UserNotifications
         precondition(notifications.isThreadNotificationEnabled(.completion, scope: nil),
                      "Missing scopes use the global default without inventing an override")
         print("PASS: completion, failure, interruption, foreground banners, task overrides, kind gates and retry scopes")
+    }
+
+    private static func checkPendingInputCompletion() {
+        for kind in [ThreadAttentionKind.approval, .appApproval, .answer, .mcp] {
+            var completion = CompletionTracker()
+            var attention = AttentionTracker()
+            var row = ThreadActivity(id: UUID().uuidString, title: "입력 대기", runtime: "active",
+                                     unread: false, updatedAt: 1)
+            precondition(completion.update([row], connected: true).isEmpty)
+            row.runtime = "idle"
+            row.pendingRequests = [PendingThreadRequest(identity: "request", kind: kind)]
+            precondition(completion.update([row], connected: true).isEmpty,
+                         "An idle runtime with pending \(kind) must not also notify completion")
+            precondition(attention.update([row], connected: true, now: 0).count == 1)
+            precondition(completion.update([row], connected: true).isEmpty)
+            row.pendingRequests.removeAll()
+            row.runtime = "active"
+            precondition(completion.update([row], connected: true).isEmpty,
+                         "Resolving input must not complete a still-running task")
+            row.runtime = "idle"
+            precondition(completion.update([row], connected: true).count == 1)
+            precondition(completion.update([row], connected: true).isEmpty)
+        }
+
+        for runtime in ["waitingOnApproval", "waitingForPermission"] {
+            var completion = CompletionTracker()
+            var row = ThreadActivity(id: UUID().uuidString, title: "승인 상태", runtime: "active",
+                                     unread: false, updatedAt: 1)
+            _ = completion.update([row], connected: true)
+            row.runtime = runtime
+            precondition(completion.update([row], connected: true).isEmpty)
+            row.runtime = "idle"
+            row.activeFlags = [runtime]
+            precondition(completion.update([row], connected: true).isEmpty,
+                         "Approval flags must take precedence over an idle runtime")
+            row.activeFlags.removeAll()
+            precondition(completion.update([row], connected: true).count == 1)
+            precondition(completion.update([row], connected: true).isEmpty)
+        }
+
+        // A terminal patch may precede request removal, even in an already-read chat.
+        for terminal in ["completed", "failed", "interrupted"] {
+            var completion = CompletionTracker()
+            var row = ThreadActivity(id: UUID().uuidString, title: "터미널 패치", runtime: "active",
+                                     latestTurn: ThreadTurnState(key: "turn", value: [
+                                        "turnId": "turn", "status": "inProgress", "turnStartedAtMs": 1
+                                     ]), unread: false, updatedAt: 1)
+            precondition(completion.update([row], connected: true).isEmpty)
+            row.runtime = "idle"
+            row.latestTurn?.status = terminal
+            row.pendingRequests = [PendingThreadRequest(identity: "approval", kind: .approval)]
+            precondition(completion.update([row], connected: true).isEmpty)
+            precondition(completion.update([row], connected: true).isEmpty,
+                         "Repeated terminal snapshots must remain deferred while approval is pending")
+            precondition(completion.update([], connected: false).isEmpty)
+            row.pendingRequests.removeAll()
+            let results = completion.update([row], connected: true)
+            if terminal == "interrupted" {
+                precondition(results.isEmpty, "Cancelling approval is not successful completion")
+            } else {
+                precondition(results.count == 1,
+                             "A resolved terminal result must not be lost for an already-read chat")
+                switch results[0].kind {
+                case .completed: precondition(terminal == "completed")
+                case .failed: precondition(terminal == "failed")
+                }
+            }
+            precondition(completion.update([row], connected: true).isEmpty)
+        }
+
+        var completion = CompletionTracker()
+        var row = ThreadActivity(id: UUID().uuidString, title: "상태 패치 순서", runtime: "active",
+                                 latestTurn: ThreadTurnState(key: "turn", value: [
+                                    "turnId": "turn", "status": "inProgress", "turnStartedAtMs": 1
+                                 ]), unread: false, updatedAt: 1)
+        _ = completion.update([row], connected: true)
+        row.latestTurn?.status = "completed"
+        precondition(completion.update([row], connected: true).isEmpty,
+                     "A completed history patch must wait for the runtime to stop")
+        row.runtime = "idle"
+        precondition(completion.update([row], connected: true).count == 1)
+        precondition(completion.update([row], connected: true).isEmpty)
+
+        var recentCompletion = CompletionTracker()
+        let start = Date().addingTimeInterval(1)
+        row.latestTurn = ThreadTurnState(key: "recent", value: ["turnId": "recent", "status": "completed",
+            "turnStartedAtMs": start.timeIntervalSince1970 * 1000])
+        row.pendingRequests = [PendingThreadRequest(identity: "app-approval", kind: .appApproval)]
+        precondition(recentCompletion.update([row], connected: true, now: start).isEmpty)
+        row.pendingRequests.removeAll()
+        precondition(recentCompletion.update([row], connected: true, now: start.addingTimeInterval(1)).count == 1,
+                     "A recent terminal snapshot must defer, not discard, its completion")
+        precondition(recentCompletion.update([row], connected: true, now: start.addingTimeInterval(2)).isEmpty)
     }
 }

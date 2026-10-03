@@ -127,10 +127,25 @@ struct ActivityChecks {
         precondition(populated.frame.height == 42)
         precondition(populated.subviews.first is NSScrollView)
         empty.update(activities: [], connected: false)
-        precondition(empty.frame.height > 0)
-        precondition(empty.subviews.compactMap { $0 as? NSTextField }.contains { !$0.isHidden && !$0.stringValue.isEmpty })
+        precondition(empty.frame.height == 0,
+                     "An empty list must not reserve a connection recovery banner")
+        precondition(empty.subviews.compactMap { $0 as? NSTextField }.allSatisfy(\.isHidden))
+        empty.update(activities: [], preserveHeight: true, connected: false, incompatible: true)
+        precondition(empty.frame.height == 0,
+                     "Even an incompatible connection must not expand an empty task section")
         empty.update(activities: [], connected: true)
         precondition(empty.frame.height == 0)
+        populated.update(activities: [uncertain], connected: true)
+        precondition(populated.frame.height == 64,
+                     "Per-task snapshot recovery must stay visible on a healthy connection")
+        precondition(populated.subviews.compactMap { $0 as? NSTextField }.contains { !$0.isHidden })
+        populated.update(activities: [], preserveHeight: true, connected: false)
+        precondition(populated.frame.height == 0,
+                     "Removing the last recovering task must also remove its banner immediately")
+        populated.update(activities: [activity], connected: false)
+        precondition(populated.frame.height == 64, "A disconnected nonempty list still warns")
+        populated.update(activities: [activity], connected: true)
+        precondition(populated.frame.height == 42)
         let scroll = populated.subviews.first as! NSScrollView
         let originalRow = scroll.documentView!.subviews.first!
         activity.runtime = "idle"

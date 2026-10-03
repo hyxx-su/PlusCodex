@@ -7,10 +7,12 @@ for file in Sources/*.swift; do
     [[ "$file" == Sources/main.swift ]] || SOURCES+=("$file")
 done
 # QuotaStartupChecks requires a real authenticated account and is intentionally opt-in.
-for name in ReliabilityChecks AppearanceSoundChecks CLIInstallationChecks QuotaTests QuotaAlertChecks QuotaLayoutChecks IssueReportChecks NotificationChecks NotificationAutoCleanupChecks ResetCreditExpiryChecks NotificationSoundChecks MenuBuilderChecks IntroChecks ActivityChecks ActivityIPCChecks LiveMenuChecks ThreadNotificationChecks UpdateLoadingChecks UpdaterChecks ProviderChecks ClaudeFallbackChecks SettingsChecks BackgroundKeychainChecks PresentationChecks CodexWakeChecks CodexWakeBridgeChecks CodexResetScheduleChecks CodexWakeAccountChecks UsageDisplayChecks StatusWindowChecks CompactSettingsChecks; do
+for name in ReliabilityChecks AppearanceSoundChecks CLIInstallationChecks QuotaTests QuotaAlertChecks QuotaLayoutChecks IssueReportChecks NotificationChecks NotificationAutoCleanupChecks ResetCreditExpiryChecks NotificationSoundChecks MenuBuilderChecks IntroChecks ActivityChecks ActivityIPCChecks LiveMenuChecks ThreadNotificationChecks UpdateLoadingChecks UpdaterChecks ProviderChecks ClaudeFallbackChecks SettingsChecks SettingsDockChecks BackgroundKeychainChecks PresentationChecks CodexWakeChecks CodexWakeBridgeChecks CodexResetScheduleChecks CodexWakeAccountChecks UsageDisplayChecks StatusWindowChecks CompactSettingsChecks PatchNotesChecks; do
     TEST_APP="$PWD/build/$name.app"
     mkdir -p "$TEST_APP/Contents/MacOS" "$TEST_APP/Contents/Resources"
     cp Info.plist "$TEST_APP/Contents/Info.plist"
+    cp Resources/PatchNotes.json "$TEST_APP/Contents/Resources/PatchNotes.json"
+    cp Resources/PatchNotesBanner.png "$TEST_APP/Contents/Resources/PatchNotesBanner.png"
     ditto Resources/ko.lproj "$TEST_APP/Contents/Resources/ko.lproj"
     ditto Resources/en.lproj "$TEST_APP/Contents/Resources/en.lproj"
     /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier local.pluscodex.tests.$name" "$TEST_APP/Contents/Info.plist"

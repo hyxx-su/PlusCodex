@@ -23,7 +23,7 @@ final class IssueReportButton: NSButton {
             .underlineStyle: NSUnderlineStyle.single.rawValue
         ], range: NSRange(location: (prompt as NSString).length, length: (link as NSString).length))
         attributedTitle = title
-        toolTip = L10n.text("GitHub 이슈 작성 페이지 열기")
+        setAccessibilityHelp(L10n.text("GitHub 이슈 작성 페이지 열기"))
         setAccessibilityLabel(prompt + link)
     }
 

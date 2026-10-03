@@ -45,15 +45,11 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
         menu.addItem(separator)
         actions = [separator]
         for (title, selector, shortcut) in [
-            (L10n.text("디스코드"), #selector(discordClicked), ""),
             (L10n.text("설정"), #selector(settingsClicked), ","),
             (L10n.text("PlusCodex 종료"), #selector(quit), "q")
         ] {
             let row = NSMenuItem(title: title, action: selector, keyEquivalent: shortcut)
             row.target = self
-            if selector == #selector(discordClicked) {
-                StatusMenuBuilder.configureDiscord(row)
-            }
             menu.addItem(row)
             actions.append(row)
         }
@@ -101,9 +97,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
             if item == nil {
                 let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
                 status.autosaveName = "PlusCodex.\(provider.rawValue)"
-                status.button?.target = self
-                status.button?.action = #selector(clicked)
-                status.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+                status.button?.configureMenuTracking(target: self, action: #selector(clicked))
                 item = status
             }
             render()
@@ -118,10 +112,9 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
     }
 
     func reloadLocalization() {
-        guard actions.count >= 4 else { return }
-        StatusMenuBuilder.configureDiscord(actions[1])
-        actions[2].title = L10n.text("설정")
-        actions[3].title = L10n.text("PlusCodex 종료")
+        guard actions.count >= 3 else { return }
+        actions[1].title = L10n.text("설정")
+        actions[2].title = L10n.text("PlusCodex 종료")
         // Recompute the current status text as well; otherwise a status
         // emitted before the language change can remain in the old language.
         synchronize()
@@ -261,15 +254,15 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
 
     @objc private func clicked() {
         guard let button = item?.button else { return }
-        if NSApp.currentEvent?.type == .rightMouseUp {
-            let context = NSMenu()
-            let disable = NSMenuItem(title: L10n.text("%@ 끄기", provider.name), action: #selector(disable), keyEquivalent: "")
-            disable.target = self
-            context.addItem(disable)
-            context.popUpFollowingSystemAppearance(from: button)
+        if NSApp.currentEvent?.type == .rightMouseDown {
+            contextMenu().popUpFollowingSystemAppearance(from: button)
         } else {
             menu.popUpFollowingSystemAppearance(from: button)
         }
+    }
+    private func contextMenu() -> NSMenu {
+        StatusMenuBuilder.makeContextMenu(disableTitle: L10n.text("%@ 끄기", provider.name), target: self,
+                                           disableAction: #selector(disable), quitAction: #selector(quit))
     }
     func menuWillOpen(_ menu: NSMenu) {
         menuTracking = true
@@ -285,12 +278,10 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
         DispatchQueue.main.async { self.settings.setEnabled(false, for: self.provider) }
     }
     @objc private func settingsClicked() { onSettings?() }
-    @objc private func discordClicked() {
-        NSWorkspace.shared.open(URL(string: "https://discord.gg/jR87pagNRG")!)
-    }
     @objc private func quit() { NSApp.terminate(nil) }
 
     var testHookMenu: NSMenu { menu }
+    var testHookContextMenu: NSMenu { contextMenu() }
     var testHookHasStatusItem: Bool { item != nil }
     var testHookStatusItemVisible: Bool { hasVisibleStatusItem }
     func testHookPresentation(quota: Quota?, fetching: Bool, checking: Bool, offline: Bool) {
