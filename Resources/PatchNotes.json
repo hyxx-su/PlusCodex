@@ -1,5 +1,41 @@
 [
   {
+    "version": "v1.2.0-beta.1",
+    "publishedAt": "2026-10-14T12:24:13Z",
+    "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.2.0-beta.1",
+    "body": "# PlusCodex v1.2.0-beta.1\n\n이번 베타에서는 **작업 상태와 알림 동작을 개선하고, 사용량 표시와 패치노트 화면을 정리했습니다.**\n\nPlusCodex의 **v1.0.0~v1.9.9는 베타 버전**입니다. 이번 버전도 기능·안정성·사용성을 확인하고 개선하는 베타 업데이트입니다.\n\n### 개선된 점\n\n- **작업 상태·알림 개선**\n  - 처음 연결할 때 작업 정보를 받지 못한 경우 다시 확인해, 진행 중인 작업이 목록에서 누락되는 문제를 보완했습니다.\n  - 완료된 작업을 읽으면 해당 작업의 알림도 알림센터에서 정리됩니다.\n  - 다른 작업이나 읽음 확인 이후 도착한 알림이 함께 삭제되지 않도록 처리했습니다.\n  - 진행 중인 작업의 화살표 아이콘에도 표시 애니메이션을 적용하고, 알림 버튼은 효과에서 제외했습니다.\n\n- **사용량 표시 개선**\n  - 메뉴 너비를 줄여 화면을 간결하게 정리했습니다.\n  - 사용량 카드 오른쪽 아래에 초기화까지 남은 시간을 표시하며, 초기화 시각보다 연한 색상으로 구분합니다.\n  - Codex의 Pro 등급을 **Pro 100 · Pro 200 · Pro 500**으로 표시합니다.\n\n- **패치노트 화면 개선**\n  - 정사각형 이미지 옆에 제목·핵심 요약·릴리즈 날짜를 배치했습니다.\n  - 이미지 하단에 반투명 검정 배경과 흰색 버전을 표시합니다.\n  - 요약과 상세 내용을 짧은 개조식으로 정리하고, 선택한 앱 언어에 따라 한국어 또는 영어만 표시합니다.\n  - 하나의 항목을 열면 이전 항목이 자동으로 닫힙니다.\n  - 펼치기·접기에 약 0.3초의 높이·투명도 전환 애니메이션을 적용했습니다.\n  - 본문을 클릭하거나 선택할 때 글자 크기와 줄 간격이 바뀌는 문제를 수정했습니다.\n  - 상세 내용 아래의 불필요한 여백을 줄였습니다.\n\n## 설치 및 업데이트\n\n기존 버전은 **앱의 업데이트 확인 기능**을 통해 v1.2.0-beta.1로 업데이트할 수 있습니다. 베타 버전이지만 기존 업데이트 경로를 유지하기 위해 GitHub의 Latest 릴리즈로 제공합니다.\n\n수동 설치는 [PlusCodex-1.2.0-beta.1.dmg](https://github.com/hyxx-su/PlusCodex/releases/download/v1.2.0-beta.1/PlusCodex-1.2.0-beta.1.dmg)를 다운로드한 뒤 PlusCodex를 Applications 폴더로 옮겨 주세요.\n\n업데이트해도 **기존 설정과 저장된 깨우기 채팅은 유지됩니다.**\n\nmacOS의 **‘동작 줄이기’** 설정이 켜져 있으면 패치노트 전환 애니메이션을 생략합니다.\n\n### 지원 환경\n\n- Apple Silicon Mac\n- macOS 14 이상\n\nPlusCodex는 OpenAI의 공식 앱이 아닙니다.\n이 배포본은 ad-hoc 서명 빌드이며 **Apple Developer ID 서명·공증은 적용되지 않았습니다.** Sparkle 업데이트 서명은 업데이트 파일의 출처와 무결성을 검증하지만, Apple 공증을 대체하지 않습니다.\n\n## 검증 및 알려진 제한 사항\n\n작업 상태 복구·읽음 알림 정리·사용량 표시·패치노트의 언어별 표시와 선택 서식·단일 펼치기·연속 클릭·애니메이션을 검증합니다. 배포 검증에는 전체 자동 테스트, DMG 무결성, 앱 코드 서명과 Sparkle 업데이트 피드·ZIP의 공개키 서명 및 파일 길이가 포함됩니다.\n\n다만 **세 Pro 등급의 실제 계정별 동작, 장시간 예약 알림 전달, 실제 알림센터에서의 읽음 연동 삭제, 다른 Mac에서의 설치·업데이트**는 추가 확인이 필요합니다.\n",
+    "summary": {
+      "ko": "• 작업 알림·사용량 표시 개선\n• 패치노트 카드·전환 효과 개선",
+      "en": "• Task alerts and quota display\n• Patch-note cards and transitions"
+    },
+    "highlights": {
+      "ko": [
+        "작업 정보 누락 시 초기 상태 재확인",
+        "읽은 작업의 알림 정리 및 다른 작업 알림 보호",
+        "메뉴 너비 축소 및 초기화까지 남은 시간 표시",
+        "Codex Pro 100·Pro 200·Pro 500 등급 표시",
+        "작업 화살표의 표시 효과 적용 — 알림 버튼 제외",
+        "정사각형 썸네일·버전·요약·날짜 카드 배치",
+        "앱 언어에 따른 짧은 개조식 상세 내용",
+        "한 항목만 펼치는 방식 및 부드러운 전환 효과",
+        "본문 클릭·선택 시 글꼴·문단 간격 유지",
+        "본문 하단 여백 정리"
+      ],
+      "en": [
+        "Initial task-state recovery after missing metadata",
+        "Read-task alert cleanup with protection for other tasks",
+        "Compact menu width and time remaining until reset",
+        "Codex Pro 100, Pro 200 and Pro 500 labels",
+        "Task-arrow status effects, excluding the notification button",
+        "Square thumbnails with versions, summaries and release dates",
+        "Concise details in the selected app language",
+        "Single-open accordion with smooth transitions",
+        "Stable fonts and paragraph spacing during text selection",
+        "Reduced spacing below expanded details"
+      ]
+    }
+  },
+  {
     "body": "# PlusCodex v1.1.9\n\n- 작업이 없는데 연결 복구 안내만 남는 표시를 정리했습니다. 승인·입력 요청을 기다리거나 상태 확인 중인 작업을 완료로 잘못 판단하지 않도록 보완해 승인 알림과 작업 완료 알림이 겹치는 경우를 줄였습니다.\n- 메뉴바 아이콘을 누른 뒤 마우스를 움직이고 놓을 때 메뉴가 중복으로 열리거나 닫히는 문제를 수정했습니다. 우클릭 메뉴에 `PlusCodex 종료`를 추가했습니다.\n- 설정에 버전별 패치노트를 추가했습니다. 배너와 업데이트 요약을 표시하고, 항목을 누르면 상세 내용을 펼쳐 볼 수 있습니다. 페이지 여백과 스크롤 동작도 알림 설정 페이지에 맞췄습니다.\n- 디스코드 메뉴 항목을 제공자 메뉴에서 제거하고 설정 하단에 `디스코드 커뮤니티` 버튼을 추가했습니다. 설정을 열고 닫을 때 앱 표시 정책을 조정해 메뉴바 앱 상태로 돌아갑니다. Dock의 고정·최근 항목은 macOS 설정에 따라 남을 수 있습니다.\n- 영어 사용량 화면의 `Remaining` 문구 줄바꿈을 수정하고, 마우스를 올렸을 때 불필요하게 뜨는 설명을 제거했습니다. 필요한 정보는 접근성 설명으로 유지합니다.\n\n## English\n\n- Removed the recovery-only status shown when there are no tasks. Approval/input waits and unconfirmed task states are no longer treated as completion, reducing overlapping approval and completion alerts.\n- Fixed menu-bar press/drag/release handling so one click does not reopen or dismiss the menu twice. Added `Quit PlusCodex` to provider context menus.\n- Added versioned patch notes in Settings with a banner, summaries, expandable details, and scrolling aligned with Notifications.\n- Removed Discord from provider menus and added a `Discord Community` button to the settings footer. Refined app visibility when settings open and close; pinned or recent Dock entries remain controlled by macOS.\n- Prevented English usage labels such as `Remaining` from wrapping. Removed unnecessary hover tooltips while retaining accessibility descriptions.",
     "publishedAt": "2026-10-03T17:26:33Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.1.9",

@@ -15,7 +15,9 @@ import AppKit
         }
 
         let notes = PatchNote.bundled()
-        precondition(notes.count >= 20 && notes.first?.version == "v1.1.9" && notes.last?.version == "v1.0.0")
+        let currentVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as! String
+        precondition(notes.count >= 21 && notes.first?.version == "v" + currentVersion
+            && notes.last?.version == "v1.0.0")
         precondition(Set(notes.map(\.version)).count == notes.count)
         precondition(notes.allSatisfy { !$0.body.isEmpty && ISO8601DateFormatter().date(from: $0.publishedAt) != nil })
         precondition(notes.allSatisfy { note in
