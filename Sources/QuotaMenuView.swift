@@ -2,11 +2,13 @@ import AppKit
 
 /// Presentation-only menu content; the menu retains native refresh and quit actions.
 final class QuotaMenuView: NSView {
+    static let panelWidth: CGFloat = 280
     private var quota: Quota?
     private var account: CodexAccount?
     private var updatedAt: Date?
     private var displayedPercents: [Double] = []
     private var animationTimer: Timer?
+    private var countdownTimer: Timer?
     private(set) var failure: String?
     let showsFailureScreen: Bool
     let intro: Bool
@@ -45,7 +47,7 @@ final class QuotaMenuView: NSView {
         self.missingExecutable = missingExecutable
         let baseHeight = preservedHeight ?? Self.panelHeight(quota: quota, intro: intro)
         let height = showsFailureScreen && !offline && !missingExecutable ? max(280, baseHeight) : baseHeight
-        super.init(frame: NSRect(x: 0, y: 0, width: 300, height: height))
+        super.init(frame: NSRect(x: 0, y: 0, width: Self.panelWidth, height: height))
         displayedPercents = quota?.windows.map { Double($0.displayPercent(showRemaining: showRemaining)) } ?? []
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
@@ -69,6 +71,10 @@ final class QuotaMenuView: NSView {
     }
 
     required init?(coder: NSCoder) { nil }
+    deinit {
+        countdownTimer?.invalidate()
+        animationTimer?.invalidate()
+    }
     var testHookDisplayedPercents: [Double] { displayedPercents }
 
     func update(quota: Quota?, account: CodexAccount?, updatedAt: Date?, failure: String?, preserveHeight: Bool = false) {
@@ -87,15 +93,15 @@ final class QuotaMenuView: NSView {
         let naturalHeight = Self.panelHeight(quota: quota, intro: false)
         let height = preserveHeight ? max(bounds.height, naturalHeight) : naturalHeight
         if bounds.height != height {
-            setFrameSize(NSSize(width: 300, height: height))
+            setFrameSize(NSSize(width: Self.panelWidth, height: height))
             needsDisplay = true
         }
         let windows = quota?.windows ?? []
         setAccessibilityLabel(([L10n.text(showRemaining ? "%@ 남은 사용량" : "%@ 사용량", provider.name)] + windows.enumerated().map { index, window in
             L10n.text(showRemaining ? "%@ %d%% 남음" : "%@ %d%% 사용됨", provider == .codex ? window.displayLabel(planType: account?.planType, isPrimary: index == 0 && quota?.primary != nil) : window.label, window.displayPercent(showRemaining: showRemaining))
         } + [failure ?? ""]).joined(separator: ", "))
-        setNeedsDisplay(NSRect(x: 116, y: 12, width: 168, height: 38))
-        setNeedsDisplay(NSRect(x: 12, y: 62, width: 276, height: max(62, bounds.height - 62)))
+        setNeedsDisplay(NSRect(x: 116, y: 12, width: Self.panelWidth - 132, height: 38))
+        setNeedsDisplay(NSRect(x: 12, y: 62, width: Self.panelWidth - 24, height: max(62, bounds.height - 62)))
     }
 
     private func animatePercents(to target: [Double], allowed: Bool) {
@@ -123,11 +129,33 @@ final class QuotaMenuView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        countdownTimer?.invalidate()
+        countdownTimer = nil
         if window == nil {
             animationTimer?.invalidate()
             animationTimer = nil
             displayedPercents = quota?.windows.map { Double($0.displayPercent(showRemaining: showRemaining)) } ?? []
+        } else if !intro && !checkingForUpdates && !offline && !missingExecutable && !showsFailureScreen {
+            // One lightweight timer per visible menu, never per card or background window.
+            let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in self?.needsDisplay = true }
+            countdownTimer = timer
+            RunLoop.main.add(timer, forMode: .common)
+            RunLoop.main.add(timer, forMode: .eventTracking)
         }
+    }
+
+    static func resetCountdown(timestamp: Double?, now: Date = Date(), language: AppLanguage = L10n.language) -> String? {
+        guard let timestamp, timestamp.isFinite else { return nil }
+        let remaining = timestamp - now.timeIntervalSince1970
+        guard remaining.isFinite, remaining > 0 else { return nil }
+        let roundedMinutes = ceil(remaining / 60)
+        guard roundedMinutes < Double(Int.max) else { return nil }
+        let minutes = Int(roundedMinutes)
+        let key = minutes >= 60 ? "%d시간 %d분 남음" : "%d분 남음"
+        let format = L10n.translation(key, language: language)
+        return minutes >= 60
+            ? String(format: format, locale: language.locale, minutes / 60, minutes % 60)
+            : String(format: format, locale: language.locale, minutes)
     }
 
     /// Intro state: `until` is the moment the tiny logo-only panel reverts.
@@ -150,22 +178,23 @@ final class QuotaMenuView: NSView {
                             from: .zero, operation: .sourceOver, fraction: 1,
                             respectFlipped: true, hints: nil)
         }
-        text(provider.name, x: 38, y: 12, size: provider == .claude ? 13 : 16, weight: .bold, width: 108)
+        text(provider.name, x: 38, y: 12, size: provider == .claude ? 13 : 16, weight: .bold, width: 88)
         text(L10n.text(showRemaining ? "남은 사용량" : "사용량"), x: 16, y: 35, size: 10, color: .secondaryLabelColor)
         let accountLabel = account?.email ?? (provider == .claude && quota != nil ? L10n.text("Claude 연결됨")
             : quota == nil && failure == nil ? L10n.text("계정 정보 확인 중") : L10n.text("계정 정보 없음"))
-        text(accountLabel, x: 152, y: 15, size: 10,
+        text(accountLabel, x: Self.panelWidth - 148, y: 15, size: 10,
              color: .secondaryLabelColor, width: 132, height: 14, align: .right,
              lineBreak: .byTruncatingMiddle)
-        text(account?.planType?.capitalized ?? "—", x: 116, y: 32, size: 10,
-             weight: .medium, color: .secondaryLabelColor, width: 168, height: 14, align: .right)
+        let planName = provider == .codex ? account?.codexPlanDisplayName : account?.planType?.capitalized
+        text(planName ?? "—", x: 116, y: 32, size: 10,
+             weight: .medium, color: .secondaryLabelColor, width: Self.panelWidth - 132, height: 14, align: .right)
 
         let windows = quota?.windows ?? []
         if windows.isEmpty {
             let message = failure ?? (quota == nil ? L10n.text("사용량을 확인하고 있어요.")
                 : provider == .claude ? L10n.text("Claude Desktop에서 사용량 비율을 제공하지 않습니다.")
                 : L10n.text("현재 계정에서 제공되는 한도 정보가 없습니다."))
-            text(message, x: 16, y: 70, size: 11, color: .secondaryLabelColor, width: 268, height: 42)
+            text(message, x: 16, y: 70, size: 11, color: .secondaryLabelColor, width: Self.panelWidth - 32, height: 42)
         } else {
             for (index, window) in windows.enumerated() {
                 card(window, title: provider == .codex ? window.displayLabel(planType: account?.planType,
@@ -182,12 +211,11 @@ final class QuotaMenuView: NSView {
         return count == 0 ? 124 : 58 + CGFloat(count) * 92
     }
 
-    // Keep the same right edge, but reserve enough room for English labels
-    // between the title (ending at x=144) and the percentage (starting at x=228).
-    static let cardStatusTextFrame = NSRect(x: 151, y: 14, width: 72, height: 16)
+    // Preserve a single line for localized status labels between the title and percentage.
+    static let cardStatusTextFrame = NSRect(x: panelWidth - 149, y: 14, width: 72, height: 16)
 
     private func card(_ window: QuotaWindow?, title: String, y: CGFloat, displayedPercent: Double?) {
-        let rect = NSRect(x: 12, y: y, width: 276, height: 84)
+        let rect = NSRect(x: 12, y: y, width: Self.panelWidth - 24, height: 84)
         NSColor.labelColor.withAlphaComponent(0.025).setFill()
         NSBezierPath(roundedRect: rect, xRadius: 14, yRadius: 14).fill()
         NSColor.labelColor.withAlphaComponent(0.07).setStroke()
@@ -197,15 +225,15 @@ final class QuotaMenuView: NSView {
         let stale = failure != nil
         let remaining = window?.displayPercent(showRemaining: showRemaining)
         let tint: NSColor = stale || remaining == nil ? .secondaryLabelColor : .labelColor
-        text(title, x: 24, y: y + 11, size: 12, weight: .semibold, width: 120)
+        text(title, x: 24, y: y + 11, size: 12, weight: .semibold, width: 100)
         let statusFrame = Self.cardStatusTextFrame.offsetBy(dx: 0, dy: y)
         text(stale ? L10n.text("이전 조회") : L10n.text(showRemaining ? "남음" : "사용됨"),
              x: statusFrame.minX, y: statusFrame.minY, size: 10, color: .secondaryLabelColor,
              width: statusFrame.width, height: statusFrame.height, align: .right,
              lineBreak: .byTruncatingTail)
-        text(remaining.map { "\($0)%" } ?? "--%", x: 228, y: y + 10, size: 15, weight: .medium,
+        text(remaining.map { "\($0)%" } ?? "--%", x: Self.panelWidth - 72, y: y + 10, size: 15, weight: .medium,
              color: tint, width: 48, align: .right, numeric: true)
-        let track = NSRect(x: 24, y: y + 38, width: 252, height: 6)
+        let track = NSRect(x: 24, y: y + 38, width: Self.panelWidth - 48, height: 6)
         NSColor.labelColor.withAlphaComponent(0.08).setFill()
         NSBezierPath(roundedRect: track, xRadius: 4.5, yRadius: 4.5).fill()
         if let remaining = displayedPercent, remaining > 0 {
@@ -223,7 +251,19 @@ final class QuotaMenuView: NSView {
             let time = date.formatted(.dateTime.hour().minute().locale(L10n.locale))
             return L10n.text("%@ 초기화", "\(day) \(time)")
         } ?? window?.resetDescription.map { L10n.text("초기화: %@", $0) } ?? L10n.text("한도 정보 대기 중")
-        text(reset, x: 24, y: y + 57, size: 10, color: .secondaryLabelColor, width: 252, height: 18)
+        let countdown = Self.resetCountdown(timestamp: window?.resetsAt)
+        let countdownWidth = countdown.map {
+            ceil(($0 as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 9)]).width)
+        } ?? 0
+        let footerWidth = Self.panelWidth - 48
+        let reservedWidth = countdown == nil ? 0 : min(countdownWidth, footerWidth / 2) + 8
+        text(reset, x: 24, y: y + 57, size: 10, color: .secondaryLabelColor,
+             width: footerWidth - reservedWidth, height: 18, lineBreak: .byTruncatingTail)
+        if let countdown {
+            text(countdown, x: 24 + footerWidth - reservedWidth + 8, y: y + 57, size: 9,
+                 color: .tertiaryLabelColor, width: reservedWidth - 8, height: 18, align: .right,
+                 lineBreak: .byTruncatingTail)
+        }
     }
 
     private func text(_ value: String, x: CGFloat, y: CGFloat, size: CGFloat,

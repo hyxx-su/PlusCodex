@@ -13,6 +13,15 @@ struct ActivityChecks {
             awaitingSnapshot: true, recoveryDue: false))
         precondition(ThreadRecoveryPolicy.shouldRefreshReadState(runtime: nil, unread: nil,
             awaitingSnapshot: true, recoveryDue: true))
+        precondition(ThreadRecoveryPolicy.shouldRefreshReadState(runtime: nil, unread: nil,
+            awaitingSnapshot: false, recoveryDue: true),
+            "A lost first snapshot must retry even when no activity row has ever been created")
+        precondition(!ThreadRecoveryPolicy.shouldRefreshReadState(runtime: nil, unread: nil,
+            awaitingSnapshot: false, recoveryDue: false),
+            "Missing initial metadata must not cause a request on every five-second poll")
+        precondition(ThreadRecoveryPolicy.shouldRefreshReadState(runtime: "active", unread: false,
+            awaitingSnapshot: true, recoveryDue: true),
+            "Reconnecting running tasks must remain eligible for recovery")
         let id = "01a0aa9a-48f3-7971-bbf0-1af8c1985b3c"
         var activity = ThreadActivity(id: id, title: "작업", runtime: "active", unread: false, updatedAt: 0)
         precondition(activity.isVisible && activity.isRunning)
@@ -158,8 +167,34 @@ struct ActivityChecks {
         precondition(populated.frame.height == 0 && scroll.documentView!.subviews.isEmpty)
         populated.update(activities: [activity], preserveHeight: true)
         precondition(scroll.documentView!.subviews.count == 1 && populated.frame.height == 42)
+        let overflowActivities = (0..<8).map { index in
+            ThreadActivity(id: UUID().uuidString, title: "작업 \(index)", runtime: "active",
+                           unread: false, updatedAt: Double(index))
+        }
+        populated.update(activities: overflowActivities)
+        precondition(!scroll.hasVerticalScroller && !scroll.hasHorizontalScroller,
+                     "Overflow must not reveal an indicator over the notification controls")
+        let lastRow = scroll.documentView!.subviews.compactMap { $0 as? ThreadActivityButton }
+            .max { $0.frame.maxY < $1.frame.maxY }!
+        precondition(!scroll.documentVisibleRect.intersects(lastRow.frame))
+        scroll.documentView!.scroll(lastRow.frame.origin)
+        precondition(scroll.documentVisibleRect.contains(lastRow.frame),
+                     "Hiding the indicator must not prevent reaching the last task")
+        populated.update(activities: overflowActivities, preserveHeight: true)
+        precondition(scroll.documentVisibleRect.contains(lastRow.frame) && !scroll.hasVerticalScroller,
+                     "Live refresh must preserve the scrolled position without restoring the indicator")
+        populated.update(activities: [activity], preserveHeight: true)
+        precondition(scroll.contentView.bounds.origin == .zero,
+                     "Shrinking the list must restore a valid scroll position")
         let row = ThreadActivityButton(activity: activity,
             frame: NSRect(x: 0, y: 0, width: 276, height: 34))
+        row.layout()
+        precondition(row.testHookShimmerIconBounds == ThreadActivityButton.navigationIconPath.boundingBoxOfPath,
+                     "The white sweep must follow the exact navigation icon outline")
+        let bell = row.subviews.compactMap { $0 as? NSButton }.first!
+        precondition(row.testHookShimmerIconBounds.minX > 0 && row.testHookShimmerIconBounds.maxX < 36)
+        precondition(row.testHookShimmerFrame.maxX < bell.frame.minX,
+                     "The notification button must stay outside the shimmer region")
         row.testHookSetHovered(true)
         row.refreshHover()
         precondition(!row.testHookHovered, "Menu highlight changes must clear stale hover")

@@ -93,6 +93,24 @@ struct RateLimitResetCredit: Decodable {
 struct CodexAccount: Decodable {
     let email: String?
     let planType: String?
+
+    /// Official desktop plan names use prolite/pro/promax for the three Pro tiers.
+    /// Preserve raw plan metadata for quota logic and other providers.
+    var codexPlanDisplayName: String {
+        guard let plan = planType?.trimmingCharacters(in: .whitespacesAndNewlines), !plan.isEmpty else {
+            return "—"
+        }
+        switch plan.lowercased().replacingOccurrences(of: "-", with: "_") {
+        case "prolite", "pro_lite", "pro_5x", "pro100", "pro_100", "pro 100":
+            return "Pro 100"
+        case "pro", "pro_20x", "pro200", "pro_200", "pro 200":
+            return "Pro 200"
+        case "promax", "pro_max", "pro500", "pro_500", "pro 500":
+            return "Pro 500"
+        default:
+            return plan.capitalized
+        }
+    }
 }
 
 private struct AccountResponse: Decodable {

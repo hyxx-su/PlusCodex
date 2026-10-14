@@ -13,6 +13,8 @@ import AppKit
         let menu = delegate.testHookMenu!
         let panel = delegate.testHookDashboardView as! QuotaMenuView
         let list = menu.items.compactMap { $0.view as? ThreadActivityView }.first!
+        precondition(panel.frame.width == 280 && list.frame.width == panel.frame.width,
+                     "Usage and task panels must share the compact menu width")
         let actionRows = menu.items.filter { $0.action != nil }
         precondition(actionRows.map(\.title) == ["설정", "PlusCodex 종료"] && menu.items.count == 5,
                      "Only Settings and Quit must remain after removing Discord: \(actionRows.map(\.title))")
@@ -66,6 +68,8 @@ import AppKit
                      "A new task must expand the existing menu content")
         let scroll = list.subviews.first as! NSScrollView
         let row = scroll.documentView!.subviews.first!
+        precondition(row.frame.width == 256 && scroll.frame.maxX <= list.bounds.width,
+                     "Task rows must stay inside the narrowed menu")
         task.runtime = "idle"
         task.unread = true
         delegate.testHookSetActivities([task])

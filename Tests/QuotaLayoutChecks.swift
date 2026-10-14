@@ -9,6 +9,7 @@ import AppKit
             let account = CodexAccount(email: "test@example.com", planType: plan)
             let quota = Quota(primary: nil, secondary: weekly)
             let view = QuotaMenuView(quota: quota, account: account, updatedAt: nil, failure: nil)
+            precondition(view.bounds.width == 280, "The compact menu must retain its width across quota changes")
             precondition(view.bounds.height == 150)
             precondition(quota.windows.map(\.label) == ["주간"])
             precondition(!(view.accessibilityLabel() ?? "").contains("5시간"))
@@ -20,6 +21,7 @@ import AppKit
                          "Keep only a small trailing inset before the activity section")
             view.update(quota: Quota(primary: nil, secondary: nil), account: account, updatedAt: nil, failure: nil)
             precondition(view.bounds.height == 124)
+            precondition(view.bounds.width == QuotaMenuView.panelWidth)
         }
         precondition(QuotaWindow(usedPercent: 1, windowDurationMins: 15, resetsAt: nil).label == "15분")
         let monthly = QuotaWindow(usedPercent: 40, windowDurationMins: 43200, resetsAt: 12345)
@@ -33,6 +35,23 @@ import AppKit
         precondition(monthly.resetsAt == 12345 && monthly.remaining == 60)
         let cached = Quota(primary: short, secondary: weekly)
         let now = Date()
+        let base = Date(timeIntervalSince1970: 1000)
+        precondition(QuotaMenuView.resetCountdown(timestamp: nil, now: base) == nil)
+        for timestamp in [Double.nan, Double.infinity, 999, 1000, Double.greatestFiniteMagnitude] {
+            precondition(QuotaMenuView.resetCountdown(timestamp: timestamp, now: base) == nil)
+        }
+        precondition(QuotaMenuView.resetCountdown(timestamp: 1001, now: base, language: .korean) == "1분 남음")
+        precondition(QuotaMenuView.resetCountdown(timestamp: 1061, now: base, language: .korean) == "2분 남음")
+        precondition(QuotaMenuView.resetCountdown(timestamp: 5500, now: base, language: .korean) == "1시간 15분 남음")
+        precondition(QuotaMenuView.resetCountdown(timestamp: 5500, now: base, language: .english) == "1h 15m left")
+        for language in AppLanguage.allCases {
+            let weeklyCountdown = QuotaMenuView.resetCountdown(timestamp: 1000 + 7 * 86400,
+                now: base, language: language)!
+            precondition((weeklyCountdown as NSString).size(withAttributes: [
+                .font: NSFont.systemFont(ofSize: 9)
+            ]).width <= (QuotaMenuView.panelWidth - 48) / 2,
+                         "The weekly countdown must fit beside the reset timestamp")
+        }
         precondition(QuotaMenuView.canShowPreviousUsage(cached, updatedAt: now.addingTimeInterval(-9 * 60), now: now))
         precondition(!QuotaMenuView.canShowPreviousUsage(cached, updatedAt: now.addingTimeInterval(-11 * 60), now: now))
         precondition(!QuotaMenuView.canShowPreviousUsage(cached, updatedAt: now.addingTimeInterval(60), now: now))
@@ -48,10 +67,19 @@ import AppKit
         precondition(!claude.showsFailureScreen && claude.bounds.height == 242,
                      "Recent Claude usage is retained during a transient lookup failure")
         let statusFrame = QuotaMenuView.cardStatusTextFrame
-        precondition(statusFrame.minX > 144 && statusFrame.maxX == 223 && statusFrame.maxX < 228,
-                     "Status labels must stay between the title and percentage without moving their right edge")
+        precondition(statusFrame.minX > 124 && statusFrame.maxX == 203 && statusFrame.maxX < 208,
+                     "Compact status labels must stay between the title and percentage")
         precondition(statusFrame.maxY < 38, "Status labels must not overlap the progress bar")
         let statusFont = NSFont.systemFont(ofSize: 10)
+        for plan in ["prolite", "pro", "promax"] {
+            let name = CodexAccount(email: nil, planType: plan).codexPlanDisplayName
+            precondition((name as NSString).size(withAttributes: [.font: statusFont]).width
+                <= QuotaMenuView.panelWidth - 132, "All numbered Pro tiers must fit the plan label")
+        }
+        let percentSize = ("100%" as NSString).size(withAttributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 15, weight: .medium)
+        ])
+        precondition(percentSize.width <= 48, "100% must fit without clipping in the compact card")
         for language in AppLanguage.allCases {
             for key in ["남음", "사용됨", "이전 조회"] {
                 let label = L10n.translation(key, language: language) as NSString
@@ -61,7 +89,12 @@ import AppKit
             }
         }
         if CommandLine.arguments.contains("--render-card-localizations") {
-            try renderCardLocalizations(quota: cached)
+            let countdownQuota = Quota(
+                primary: QuotaWindow(usedPercent: 40, windowDurationMins: 300,
+                    resetsAt: Date().addingTimeInterval(4500).timeIntervalSince1970),
+                secondary: QuotaWindow(usedPercent: 30, windowDurationMins: 10080,
+                    resetsAt: Date().addingTimeInterval(6 * 86400 + 19200).timeIntervalSince1970))
+            try renderCardLocalizations(quota: countdownQuota)
         }
         print("PASS: missing windows, real limits on all plans, dynamic height, single-line localized status")
     }

@@ -3,6 +3,19 @@ import Foundation
 @main
 struct QuotaTests {
     static func main() throws {
+        let planLabels: [(String?, String)] = [
+            ("prolite", "Pro 100"), ("pro", "Pro 200"), ("promax", "Pro 500"),
+            ("pro_5x", "Pro 100"), ("pro_20x", "Pro 200"),
+            ("pro_100", "Pro 100"), ("pro-200", "Pro 200"), ("Pro 500", "Pro 500"),
+            (" PROLITE ", "Pro 100"), ("ProMax", "Pro 500"),
+            ("plus", "Plus"), ("free", "Free"), (nil, "—"), ("  ", "—"),
+            ("pro_50x", "Pro_50X"), ("custom", "Custom")
+        ]
+        for (raw, expected) in planLabels {
+            let account = CodexAccount(email: nil, planType: raw)
+            assert(account.codexPlanDisplayName == expected)
+            assert(account.planType == raw, "Display names must not mutate raw quota plan metadata")
+        }
         func decode(_ json: String) throws -> QuotaResponse {
             try JSONDecoder().decode(QuotaResponse.self, from: Data(json.utf8))
         }

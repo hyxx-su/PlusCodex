@@ -14,7 +14,9 @@ enum ThreadRecordScope {
 enum ThreadRecoveryPolicy {
     static func shouldRefreshReadState(runtime: String?, unread: Bool?, awaitingSnapshot: Bool,
                                        recoveryDue: Bool) -> Bool {
-        if awaitingSnapshot { return recoveryDue }
+        // A subscribed thread may never have received its first snapshot. Treat
+        // missing runtime metadata as recoverable, not as an idle/read thread.
+        if awaitingSnapshot || runtime == nil { return recoveryDue }
         return runtime == "idle" && unread == true
     }
 
@@ -748,6 +750,7 @@ final class ThreadActivityMonitor {
         // Refresh outstanding completed rows from the owner's authoritative snapshot.
         // Keep the previous state until it arrives; absence is not completion evidence.
         let now = Date()
+        awaitingSnapshots.formIntersection(candidates)
         snapshotRequests = snapshotRequests.filter { candidates.contains($0.key) }
         let recoveryDue = now.timeIntervalSince(lastReadRefresh) >= 30
         // Completed unread rows use the existing five-second refresh. Unknown
@@ -761,6 +764,9 @@ final class ThreadActivityMonitor {
         }
         if recoveryDue { lastReadRefresh = now }
         for id in candidates.subtracting(followed) {
+            // Register the wait before subscribing so a lost initial response
+            // remains eligible for bounded retry on the next recovery cycle.
+            awaitingSnapshots.insert(id)
             try follow(id, enabled: true)
             snapshotRequests[id] = now
         }

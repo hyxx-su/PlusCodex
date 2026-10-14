@@ -1,4 +1,5 @@
 import Foundation
+import UserNotifications
 
 @main struct ThreadNotificationChecks {
     static func main() throws {
@@ -95,6 +96,71 @@ import Foundation
         var completed = raw
         completed["completed"] = true
         precondition(ThreadActivityMonitor.pendingRequests(in: [completed]).isEmpty)
+        checkReadCleanup()
         print("PASS: inherited task defaults, explicit ON/OFF persistence, new-turn isolation, legacy mutes, retry scopes, missing-turn guards")
+    }
+
+    private static func checkReadCleanup() {
+        let now = Date(timeIntervalSince1970: 1000)
+        let thread = UUID().uuidString
+        let turn = "read-turn"
+        var readTask = ThreadActivity(id: thread, title: "읽은 작업", runtime: "idle",
+            latestTurn: ThreadTurnState(key: turn, value: ["turnId": turn, "status": "completed"]),
+            unread: false, updatedAt: 999)
+        let scope = ThreadNotificationPreferences.scope(for: readTask)!
+        typealias Entry = ThreadNotificationReadCleanup.Entry
+        let entries = [
+            Entry(identifier: "completion", userInfo: ["threadID": thread, "notificationScope": scope], deliveredAt: now),
+            Entry(identifier: "failure", userInfo: ["threadID": thread, "notificationScope": scope], deliveredAt: now),
+            Entry(identifier: "attention", userInfo: ["threadID": thread, "notificationScope": scope], deliveredAt: now),
+            Entry(identifier: "other", userInfo: ["threadID": "other", "notificationScope": scope], deliveredAt: now),
+            Entry(identifier: "next-turn", userInfo: ["threadID": thread, "notificationScope": thread + ":next"], deliveredAt: now),
+            Entry(identifier: "late", userInfo: ["threadID": thread, "notificationScope": scope], deliveredAt: now.addingTimeInterval(1)),
+            Entry(identifier: "legacy", userInfo: ["threadID": thread], deliveredAt: now),
+            Entry(identifier: "quota", userInfo: [:], deliveredAt: now)
+        ]
+        var queries = 0
+        var fetched: (([Entry]) -> Void)?
+        var removed: [String] = []
+        let cleanup = ThreadNotificationReadCleanup(now: { now }, fetch: {
+            queries += 1
+            fetched = $0
+        }, remove: { removed += $0 })
+        func drain() {
+            let deadline = Date().addingTimeInterval(0.05)
+            while Date() < deadline { _ = RunLoop.main.run(mode: .default, before: deadline) }
+        }
+        func request(_ scope: String) -> UNNotificationRequest {
+            let content = UNMutableNotificationContent()
+            content.userInfo = ["threadID": thread, "notificationScope": scope]
+            return UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        }
+        readTask.stateConfirmed = false
+        cleanup.read(readTask)
+        drain()
+        precondition(queries == 0 && !cleanup.wasRead(request(scope)), "Unconfirmed states must not clear alerts")
+        readTask.stateConfirmed = true
+        cleanup.read(readTask)
+        cleanup.read(readTask)
+        drain()
+        precondition(queries == 1, "Repeated read events must share one OS query")
+        precondition(cleanup.wasRead(request(scope)) && !cleanup.wasRead(request(thread + ":next")),
+                     "Late submission and retry suppression must not leak into the next turn")
+        fetched!(entries)
+        drain()
+        precondition(Set(removed) == ["completion", "failure", "attention", "legacy"],
+                     "Only the read task's existing alerts may be deleted")
+        precondition(!ThreadNotificationReadCleanup.matches(entries[0], threadID: thread, scope: nil, readAt: now),
+                     "A missing turn ID must not clear scoped alerts speculatively")
+        var running = readTask
+        running.runtime = "active"
+        running.latestTurn = ThreadTurnState(key: "running", value: ["turnId": "running", "status": "inProgress"])
+        cleanup.read(running)
+        precondition(!cleanup.wasRead(request(ThreadNotificationPreferences.scope(for: running)!)),
+                     "Reading a running task must not silence its eventual completion")
+        drain()
+        fetched!([])
+        drain()
+        print("PASS: task-read alert cleanup, batched queries, delayed delivery guards and new-turn isolation")
     }
 }

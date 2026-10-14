@@ -4,9 +4,27 @@
     "publishedAt": "2026-10-03T17:26:33Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.1.9",
     "version": "v1.1.9",
+    "highlights": {
+      "ko": [
+        "작업 상태 표시 및 승인·완료 알림 중복 개선",
+        "메뉴바 클릭 안정화 및 우클릭 종료 메뉴 추가",
+        "설정에 버전별 패치노트 페이지 추가",
+        "설정 하단에 디스코드 커뮤니티 버튼 배치",
+        "설정 창 열기·닫기에 따른 앱 표시 정책 조정",
+        "영어 사용량 줄바꿈 수정 및 불필요한 툴팁 제거"
+      ],
+      "en": [
+        "Task status and overlapping approval/completion alert fixes",
+        "Stable menu-bar clicks and a right-click quit option",
+        "Versioned patch notes in Settings",
+        "Discord Community button in the settings footer",
+        "App visibility adjustments when settings open or close",
+        "English quota label wrapping fixes and tooltip cleanup"
+      ]
+    },
     "summary": {
-      "ko": "작업 상태와 알림을 바로잡고 메뉴바·설정 화면 및 패치노트를 개선했습니다.",
-      "en": "Improved task and alert state, menu-bar behavior, settings, and patch notes."
+      "ko": "• 작업 상태·알림 표시 개선\n• 메뉴바·설정·패치노트 개선",
+      "en": "• Task status and alert fixes\n• Menu, settings and patch notes"
     }
   },
   {
@@ -14,9 +32,25 @@
     "publishedAt": "2026-10-01T09:11:41Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.1.8",
     "version": "v1.1.8",
+    "highlights": {
+      "ko": [
+        "재로그인 없이 최신 Plus·Pro 플랜 정보 반영",
+        "Pro의 잘못된 5시간 카드·초기화 알림 제거",
+        "실제 제공되는 한도 주기 표시",
+        "Plus 복귀 시 이전 초기화 시각 정리",
+        "사용량 카드 변경에 따른 메뉴 높이·애니메이션 개선"
+      ],
+      "en": [
+        "Latest Plus / Pro plan reflected without signing in again",
+        "Removal of incorrect five-hour cards and reminders on Pro",
+        "Actual quota periods shown",
+        "Stale reset times cleared when returning to Plus",
+        "Menu height and animation fixes for quota card changes"
+      ]
+    },
     "summary": {
-      "ko": "Plus→Pro 플랜 변경을 반영하고 5시간 한도 표시·알림을 정리했습니다.",
-      "en": "Detect Plus-to-Pro changes and adjust five-hour quota cards and reset reminders."
+      "ko": "• Plus ↔ Pro 플랜 전환 반영\n• 사용량 카드·초기화 알림 개선",
+      "en": "• Plus / Pro plan transition fixes\n• Quota cards and reset reminders"
     }
   },
   {
@@ -24,9 +58,25 @@
     "publishedAt": "2026-10-01T02:56:17Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.1.7",
     "version": "v1.1.7",
+    "highlights": {
+      "ko": [
+        "초기화권 만료 전날 오전 9시 알림 추가",
+        "계정·초기화권 상태 변경 시 예약 정리",
+        "새 작업의 알림 기본값 및 개별 선택 개선",
+        "선택형 알림 자동 정리 추가 — 기본값 꺼짐",
+        "만료된 알림음 예약 정보 정리"
+      ],
+      "en": [
+        "Reset-credit expiry reminders at 9 AM the day before expiry",
+        "Reservation cleanup for account and credit changes",
+        "Per-task alert defaults and overrides",
+        "Optional notification auto-clear, off by default",
+        "Cleanup of expired sound reservation metadata"
+      ]
+    },
     "summary": {
-      "ko": "초기화권 만료 알림과 알림 자동 정리를 추가하고 작업별 알림을 개선했습니다.",
-      "en": "Added expiry reminders and auto-clear notifications; refined per-task notification settings."
+      "ko": "• 초기화권 만료·작업 알림 개선\n• 알림 자동 정리 추가",
+      "en": "• Expiry and per-task alert updates\n• Optional notification auto-clear"
     }
   },
   {
@@ -34,9 +84,25 @@
     "publishedAt": "2026-09-30T02:20:49Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.1.6",
     "version": "v1.1.6",
+    "highlights": {
+      "ko": [
+        "작업 메타데이터 중심 해석으로 메모리 부담 완화",
+        "중복 상태 복구 요청 통합",
+        "계정별 깨우기 예약·실행 결과 분리",
+        "사용량 0%의 연속 정상 조회에 따른 초기 깨우기 판단 추가",
+        "오래된 음원 변환 생략 및 반복 처리 감소"
+      ],
+      "en": [
+        "Lower memory use through task-metadata decoding",
+        "Coalesced duplicate recovery requests",
+        "Account-specific wake schedules and results",
+        "Initial wake checks after consecutive zero-usage reads",
+        "Superseded sound conversions skipped and repeated work reduced"
+      ]
+    },
     "summary": {
-      "ko": "작업 상태 처리의 메모리 부담을 줄이고 계정별 깨우기 기록을 분리했습니다.",
-      "en": "Reduced task-monitoring memory use and separated wake history by account."
+      "ko": "• 작업 상태 처리 메모리 개선\n• 계정별 깨우기 기록 분리",
+      "en": "• Lower task-monitoring memory use\n• Account-specific wake history"
     }
   },
   {
@@ -44,9 +110,25 @@
     "publishedAt": "2026-09-29T12:54:35Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.1.5",
     "version": "v1.1.5",
+    "highlights": {
+      "ko": [
+        "초기화 이후 두 정상 조회를 통한 깨우기 판단",
+        "이미 시작된 주기의 불필요한 깨우기 생략",
+        "저장된 채팅 거절 시 새 채팅 대체 — 기존 채팅 유지",
+        "불명확한 전송 결과의 즉시 재전송 방지",
+        "오래된 조회 제외 및 실패·재시도 안내 추가"
+      ],
+      "en": [
+        "Wake decisions based on two valid post-reset reads",
+        "Unnecessary wake skipped for active cycles",
+        "Replacement chat on explicit rejection; existing chat retained",
+        "No immediate resend after ambiguous submission results",
+        "Stale reads excluded and failure/retry guidance added"
+      ]
+    },
     "summary": {
-      "ko": "사용량 조회 기반의 깨우기 판단과 저장된 채팅 재사용을 보완했습니다.",
-      "en": "Refined usage-based wake decisions and saved-chat reuse."
+      "ko": "• 사용량 기반 깨우기 판단 보완\n• 저장된 채팅 재사용 개선",
+      "en": "• Usage-based wake decision fixes\n• Saved-chat reuse improvements"
     }
   },
   {
@@ -54,9 +136,27 @@
     "publishedAt": "2026-09-29T07:09:31Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.1.4",
     "version": "v1.1.4",
+    "highlights": {
+      "ko": [
+        "작업 완료 확인 후 깨우기 성공 기록",
+        "초기화 시각 변경에 따른 예약 지연 방지",
+        "재실행·장시간 중단 후 깨우기 일정 복구",
+        "기존 작업 행 재사용으로 깜빡임 감소",
+        "읽은 완료 항목 제거 시 메뉴 높이 조정",
+        "현재 작업에만 적용되는 개별 알림 설정"
+      ],
+      "en": [
+        "Wake success recorded after task completion",
+        "Protection against schedule delays from reset estimates",
+        "Wake schedule recovery after relaunch or downtime",
+        "Reduced flicker through task-row reuse",
+        "Menu height updated when read tasks disappear",
+        "Notification overrides scoped to the current task"
+      ]
+    },
     "summary": {
-      "ko": "깨우기 완료 확인·예약 복구를 개선하고 작업 목록 깜빡임을 줄였습니다.",
-      "en": "Improved wake completion checks and schedule recovery; reduced task-list flicker."
+      "ko": "• 깨우기 완료·예약 복구 개선\n• 작업 목록 깜빡임 감소",
+      "en": "• Wake completion and recovery fixes\n• Reduced task-list flicker"
     }
   },
   {
@@ -64,9 +164,27 @@
     "publishedAt": "2026-09-29T03:36:46Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.1.3",
     "version": "v1.1.3",
+    "highlights": {
+      "ko": [
+        "계정별 사용량·완료·읽음 기록 분리",
+        "연결 끊김·응답 지연 후 작업 상태 복구",
+        "초기화 알림 중복 예약 방지",
+        "저장된 깨우기 채팅 재사용 및 일정 복구",
+        "Claude·Grok의 이전 계정 조회 결과 제외",
+        "백그라운드 음원 변환 및 마지막 설정 우선 반영"
+      ],
+      "en": [
+        "Account-specific usage, completion and read records",
+        "Task recovery after disconnects or delayed responses",
+        "Duplicate reset reminder prevention",
+        "Saved wake chat reuse and schedule recovery",
+        "Stale account results discarded for Claude and Grok",
+        "Background sound conversion with latest-setting precedence"
+      ]
+    },
     "summary": {
-      "ko": "계정별 사용량·알림 기록을 분리하고 작업 상태 복구와 알림음을 개선했습니다.",
-      "en": "Separated account records and improved task-state recovery and sound handling."
+      "ko": "• 계정별 사용량·알림 기록 분리\n• 작업 복구·알림음 처리 개선",
+      "en": "• Account-specific usage and alerts\n• Task recovery and sound fixes"
     }
   },
   {
@@ -74,9 +192,27 @@
     "publishedAt": "2026-09-28T14:42:08Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.1.2",
     "version": "v1.1.2",
+    "highlights": {
+      "ko": [
+        "초기화·깨우기 일정 안정화 및 재실행 상태 복구",
+        "주기별 깨우기 중복 전송 방지",
+        "열린 메뉴의 사용량·작업 상태 실시간 갱신",
+        "작업별 완료·실패·승인 알림 설정 추가",
+        "일시적 조회 실패 시 최근 사용량 유지",
+        "큰 작업 상태 처리 및 연결 재설정 후 구독 복구"
+      ],
+      "en": [
+        "Stable reset/wake scheduling and relaunch recovery",
+        "Duplicate wake messages prevented per cycle",
+        "Live usage and task updates in open menus",
+        "Per-task completion, failure and approval alert controls",
+        "Recent usage retained on temporary read failures",
+        "Large task-state handling and subscription recovery"
+      ]
+    },
     "summary": {
-      "ko": "초기화·깨우기 일정을 안정화하고 실시간 작업 목록과 개별 알림을 개선했습니다.",
-      "en": "Stabilized reset scheduling and refined live task lists and per-task notifications."
+      "ko": "• 초기화·깨우기 일정 안정화\n• 실시간 작업 목록·알림 개선",
+      "en": "• Stable reset and wake scheduling\n• Live task list and alert updates"
     }
   },
   {
@@ -84,9 +220,27 @@
     "publishedAt": "2026-09-26T19:43:49Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.1.1",
     "version": "v1.1.1",
+    "highlights": {
+      "ko": [
+        "읽기 전 완료 작업의 목록 유지",
+        "읽음 이벤트·스냅샷·패치 동기화 개선",
+        "동일 채팅의 새 작업·결과 재표시",
+        "진행 상태를 놓친 작업의 완료·실패 감지 보완",
+        "큰 내부 상태 메시지 이후 수신 유지",
+        "메뉴 진입 시 업데이트 확인 상태 즉시 표시"
+      ],
+      "en": [
+        "Unread completed tasks kept in the menu",
+        "Read events, snapshots and patches synchronized",
+        "New tasks and results restored for the same chat",
+        "Completion/failure detection for missed running states",
+        "Reception preserved after oversized state messages",
+        "Immediate update-check feedback when opening the menu"
+      ]
+    },
     "summary": {
-      "ko": "완료 작업의 읽음 처리를 개선하고 새 작업이 목록에 다시 표시되도록 했습니다.",
-      "en": "Improved completion/read tracking and reappearance of new tasks in the menu."
+      "ko": "• 완료 작업의 읽음 처리 개선\n• 새 작업 목록 재표시 보완",
+      "en": "• Completion and read-state fixes\n• New tasks restored to the menu"
     }
   },
   {
@@ -94,9 +248,27 @@
     "publishedAt": "2026-09-26T15:05:13Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.1.0",
     "version": "v1.1.0",
+    "highlights": {
+      "ko": [
+        "현재·이전 Codex 앱 및 별도 CLI 경로 지원",
+        "Claude·Grok 사용량 확인 후 메뉴바 표시",
+        "미설치·미지원 서비스의 표시 스위치 정리",
+        "로그인 계정 변경 시 사용량 재조회",
+        "메뉴 갱신 중 닫힘·호버 잔상 수정",
+        "알림음 설정 및 안내 개선"
+      ],
+      "en": [
+        "Current/legacy Codex app paths and standalone CLI support",
+        "Claude / Grok menu visibility after usage verification",
+        "Visibility controls for missing or unsupported services",
+        "Fresh usage reads after account changes",
+        "Menu dismissal and lingering-hover fixes",
+        "Sound settings and guidance improvements"
+      ]
+    },
     "summary": {
-      "ko": "Codex 연결 경로를 수정하고 Claude·Grok 조회와 알림음 설정을 개선했습니다.",
-      "en": "Fixed Codex connection paths and refined provider usage reads and sound settings."
+      "ko": "• Codex 연결 경로 수정\n• Claude·Grok 조회·설정 개선",
+      "en": "• Codex connection path fixes\n• Claude / Grok usage and settings"
     }
   },
   {
@@ -104,9 +276,25 @@
     "publishedAt": "2026-09-24T16:45:46Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.0.9",
     "version": "v1.0.9",
+    "highlights": {
+      "ko": [
+        "Codex 자동 깨우기 추가 — 기본값 꺼짐",
+        "깨우기 모델·메시지 설정 및 채팅 재사용",
+        "초기화 변경·재실행·잠자기 복귀 시 예약 확인",
+        "업데이트 알림에서 앱 설치 창으로 이동",
+        "알림 설정의 클릭되지 않는 컨트롤 수정"
+      ],
+      "en": [
+        "Automatic Codex wake, off by default",
+        "Wake model/message settings and chat reuse",
+        "Schedule checks after reset changes, relaunch and sleep",
+        "Update alerts linked to the app installer",
+        "Unresponsive notification controls fixed"
+      ]
+    },
     "summary": {
-      "ko": "Codex 자동 깨우기를 추가하고 업데이트 알림에서 설치 창으로 연결합니다.",
-      "en": "Added automatic Codex wake messages and linked update notifications to the installer."
+      "ko": "• Codex 자동 깨우기 추가\n• 업데이트 알림·설정 클릭 개선",
+      "en": "• Automatic Codex wake added\n• Update alerts and settings fixes"
     }
   },
   {
@@ -114,9 +302,25 @@
     "publishedAt": "2026-09-23T14:36:52Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.0.8",
     "version": "v1.0.8",
+    "highlights": {
+      "ko": [
+        "MP3·M4A·WAV 등 사용자 지정 알림음 지원",
+        "음량·최대 10초 재생 시간 설정 및 알림 테스트",
+        "답변·MCP·연결 앱 승인·실패 알림 추가",
+        "알림 설정 스크롤·간격·선택 메뉴 정리",
+        "새 설치에서 Claude·Grok 기본 표시 꺼짐"
+      ],
+      "en": [
+        "Custom notification sounds including MP3, M4A and WAV",
+        "Volume, playback up to ten seconds and alert tests",
+        "Answer, MCP, connected-app approval and failure alerts",
+        "Notification scrolling, spacing and picker cleanup",
+        "Claude / Grok visibility off by default on new installs"
+      ]
+    },
     "summary": {
-      "ko": "사용자 지정 알림음과 음량·재생 시간 설정, 요청·실패 알림을 추가했습니다.",
-      "en": "Added custom sounds, volume and duration controls, plus request and failure alerts."
+      "ko": "• 알림음·음량·재생 시간 설정\n• 요청·실패 알림 추가",
+      "en": "• Custom sound and playback controls\n• Request and failure alerts added"
     }
   },
   {
@@ -124,9 +328,27 @@
     "publishedAt": "2026-09-19T21:35:45Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.0.7",
     "version": "v1.0.7",
+    "highlights": {
+      "ko": [
+        "설정 섹션·간격 및 언어 선택 개선",
+        "검색 결과에서 해당 항목으로 이동",
+        "남은 양·사용한 양 표시 선택 추가",
+        "완료·부족·초기화·업데이트·승인 알림 개별 설정",
+        "Codex 승인 요청 감지·중복 알림 개선",
+        "작업 알림에서 해당 Codex 작업으로 이동"
+      ],
+      "en": [
+        "Consistent settings sections, spacing and language picker",
+        "Navigation from search results to settings items",
+        "Remaining / used quota display options",
+        "Individual completion, quota, reset, update and approval alerts",
+        "Codex approval detection and duplicate alert fixes",
+        "Task alerts linked to the relevant Codex task"
+      ]
+    },
     "summary": {
-      "ko": "설정 검색·화면을 정리하고 사용량 표시 방식과 개별 알림 설정을 추가했습니다.",
-      "en": "Refined settings and search; added usage display modes and individual alert controls."
+      "ko": "• 설정 검색·화면 구성 개선\n• 사용량 표시·개별 알림 설정",
+      "en": "• Settings layout and search updates\n• Usage display and alert controls"
     }
   },
   {
@@ -134,9 +356,25 @@
     "publishedAt": "2026-09-18T15:51:55Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.0.6",
     "version": "v1.0.6",
+    "highlights": {
+      "ko": [
+        "앱 언어 한국어·영어 선택 추가",
+        "메뉴·설정·알림·앱 오류 안내 번역",
+        "업데이트 창에 앱 언어 적용",
+        "영문 README 및 언어별 링크 제공",
+        "채팅 제목·서버 응답 등 외부 원문 유지"
+      ],
+      "en": [
+        "Korean / English app language selection",
+        "Localized menus, settings, alerts and app errors",
+        "App language applied to update dialogs",
+        "English README and language links",
+        "External chat titles and server text kept unchanged"
+      ]
+    },
     "summary": {
-      "ko": "한국어·영어 선택을 추가하고 메뉴·설정·업데이트 화면을 번역했습니다.",
-      "en": "Added Korean/English selection and localized menus, settings and update dialogs."
+      "ko": "• 한국어·영어 선택 추가\n• 메뉴·설정·안내 번역",
+      "en": "• Korean / English selection added\n• Menus, settings and guidance"
     }
   },
   {
@@ -144,9 +382,27 @@
     "publishedAt": "2026-09-18T15:19:37Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.0.5",
     "version": "v1.0.5",
+    "highlights": {
+      "ko": [
+        "시스템 테마에 맞춘 서비스 메뉴 표시",
+        "설정 창 크기·토글·간격·여백 정리",
+        "메뉴의 설정 문구 간소화",
+        "새 버전 설치·건너뛰기·나중에 선택 안내",
+        "실행·메뉴 진입 시 업데이트 확인 유지",
+        "테마 변경 시 로딩 로고 색상 반영"
+      ],
+      "en": [
+        "Provider menus matched to the system appearance",
+        "Compact settings with aligned controls and spacing",
+        "Simplified Settings menu label",
+        "Install, skip and defer options for new versions",
+        "Update checks retained at launch and menu opening",
+        "Loading-logo colors refreshed on appearance changes"
+      ]
+    },
     "summary": {
-      "ko": "라이트·다크 표시를 수정하고 설정과 업데이트 설치 안내를 개선했습니다.",
-      "en": "Fixed light/dark appearance and improved compact settings and update prompts."
+      "ko": "• 라이트·다크 표시 수정\n• 설정·업데이트 안내 개선",
+      "en": "• Light / dark appearance fixes\n• Settings and update guidance"
     }
   },
   {
@@ -154,9 +410,27 @@
     "publishedAt": "2026-09-18T06:03:16Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.0.4",
     "version": "v1.0.4",
+    "highlights": {
+      "ko": [
+        "macOS 스타일 설정 섹션·토글 추가",
+        "Codex·Claude·Grok별 메뉴바 사용량 표시",
+        "Claude CLI 대체 조회 및 인증 재조회 지원",
+        "백그라운드 키체인 승인창 억제",
+        "서비스별 우클릭 끄기 메뉴 제공",
+        "첫 사용량 조회·업데이트·오프라인 상태 표시"
+      ],
+      "en": [
+        "Native macOS settings sections and toggles",
+        "Separate Codex, Claude and Grok usage menu bars",
+        "Claude CLI fallback reads and authentication refresh",
+        "Suppressed background Keychain prompts",
+        "Per-provider right-click disable controls",
+        "Initial usage loading, update and offline feedback"
+      ]
+    },
     "summary": {
-      "ko": "서비스별 메뉴바와 토글 설정을 추가하고 자동 실행·알림 권한을 지원합니다.",
-      "en": "Added provider menu bars and settings toggles, launch-at-login and alert permissions."
+      "ko": "• 서비스별 메뉴바·토글 추가\n• 자동 실행·알림 권한 지원",
+      "en": "• Provider menu bars and toggles\n• Launch-at-login and permissions"
     }
   },
   {
@@ -164,9 +438,25 @@
     "publishedAt": "2026-09-17T15:27:36Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.0.3",
     "version": "v1.0.3",
+    "highlights": {
+      "ko": [
+        "실행·메뉴 진입 시 자동 업데이트 확인",
+        "새 버전 알림 및 같은 빌드의 중복 알림 방지",
+        "업데이트·오프라인 화면의 메뉴 높이 유지",
+        "오프라인 시 빗금 아이콘·연결 없음 안내",
+        "연결 복구 후 사용량·업데이트 재조회"
+      ],
+      "en": [
+        "Automatic update checks at launch and menu opening",
+        "New-version alerts without duplicate build alerts",
+        "Stable menu height during update/offline states",
+        "Hatched offline icon and connection guidance",
+        "Usage and update refresh after reconnection"
+      ]
+    },
     "summary": {
-      "ko": "업데이트 알림과 오프라인 안내를 추가하고 자동 조회를 유지했습니다.",
-      "en": "Added update alerts and offline indicators while preserving automatic checks."
+      "ko": "• 업데이트·오프라인 안내 추가\n• 자동 조회·연결 복구 유지",
+      "en": "• Update and offline feedback\n• Automatic checks and recovery"
     }
   },
   {
@@ -174,9 +464,25 @@
     "publishedAt": "2026-09-17T11:53:49Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.0.2",
     "version": "v1.0.2",
+    "highlights": {
+      "ko": [
+        "앱 이름 PlusCodex로 통일",
+        "Free·Pro 한도 제목 및 기간 표기 정리",
+        "720시간을 1개월로 표시",
+        "서버 사용량·초기화 시각 유지",
+        "메뉴 진입 업데이트 확인 및 중복 요청 방지"
+      ],
+      "en": [
+        "App name aligned to PlusCodex",
+        "Free / Pro quota titles and period labels aligned",
+        "720-hour periods shown as one month",
+        "Server usage values and reset times preserved",
+        "Menu-open update checks with duplicate-request guards"
+      ]
+    },
     "summary": {
-      "ko": "한도 주기 표기를 통일하고 메뉴를 열 때 업데이트를 확인하도록 했습니다.",
-      "en": "Aligned quota-period labels and added update checks when opening the menu."
+      "ko": "• 사용량 한도 주기 표기 통일\n• 메뉴 진입 시 업데이트 확인",
+      "en": "• Consistent quota-period labels\n• Update checks on menu opening"
     }
   },
   {
@@ -184,9 +490,25 @@
     "publishedAt": "2026-09-17T11:44:11Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.0.1",
     "version": "v1.0.1",
+    "highlights": {
+      "ko": [
+        "초기화·조회 실패·10% 경계 중복 알림 개선",
+        "기존 알림 기록 유지 및 재알림 조건 보완",
+        "사용량 부족 문구를 10% 남음으로 변경",
+        "실제 계정 응답의 한도만 표시",
+        "배너 및 Codex Plus 소개 갱신"
+      ],
+      "en": [
+        "Duplicate alert fixes for resets, read failures and 10% thresholds",
+        "Existing alert records retained with refined re-alert rules",
+        "Low-quota wording changed to 10% remaining",
+        "Only quotas returned for the account displayed",
+        "Updated banner and Codex Plus introduction"
+      ]
+    },
     "summary": {
-      "ko": "중복 알림을 줄이고 실제 계정에서 제공되는 사용 한도만 표시합니다.",
-      "en": "Reduced duplicate alerts and displayed only quotas actually provided by the account."
+      "ko": "• 중복 알림 감소\n• 계정에서 제공되는 한도만 표시",
+      "en": "• Reduced duplicate notifications\n• Only available account quotas"
     }
   },
   {
@@ -194,9 +516,25 @@
     "publishedAt": "2026-09-17T10:56:01Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.0.0",
     "version": "v1.0.0",
+    "highlights": {
+      "ko": [
+        "Codex 사용량·초기화 시간 메뉴바 표시",
+        "진행 중·미확인 완료 작업 목록 및 Codex 이동",
+        "작업 완료·초기화·잔여량 부족 알림",
+        "서명 검증 기반 자동 다운로드·설치",
+        "로딩 화면에 업데이트 확인 안내 추가"
+      ],
+      "en": [
+        "Codex quota and reset times in the menu bar",
+        "Running/unread completed tasks with Codex navigation",
+        "Completion, reset and low-quota alerts",
+        "Automatic downloads and installation with signature checks",
+        "Update-check guidance in the loading screen"
+      ]
+    },
     "summary": {
-      "ko": "메뉴바 사용량·작업 목록·알림과 서명 검증을 포함한 자동 업데이트를 제공합니다.",
-      "en": "Introduced menu-bar usage, task lists, alerts and signature-verified automatic updates."
+      "ko": "• 메뉴바 사용량·작업·알림 제공\n• 서명 검증 자동 업데이트",
+      "en": "• Menu-bar usage, tasks and alerts\n• Signature-verified auto-updates"
     }
   }
 ]

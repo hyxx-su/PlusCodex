@@ -50,14 +50,15 @@ private final class ThreadNotificationButton: NSButton {
     }
 }
 
-/// A transparent overlay lets one synchronized sweep cross both the title and bell glyph.
+/// A transparent overlay sweeps the navigation icon and title, not the bell control.
 private final class ThreadShimmerOverlay: NSView {
     override var isFlipped: Bool { true }
 
     let gradient = CAGradientLayer()
     private let maskLayer = CALayer()
     private let textMask = CATextLayer()
-    private let bellMask = CALayer()
+    private let navigationMask = CAShapeLayer()
+    var iconBounds: CGRect { navigationMask.path?.boundingBoxOfPath ?? .zero }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -68,7 +69,11 @@ private final class ThreadShimmerOverlay: NSView {
         gradient.endPoint = CGPoint(x: 1, y: 0.5)
         gradient.mask = maskLayer
         maskLayer.addSublayer(textMask)
-        maskLayer.addSublayer(bellMask)
+        navigationMask.fillColor = NSColor.clear.cgColor
+        navigationMask.strokeColor = NSColor.white.cgColor
+        navigationMask.lineWidth = 1.1
+        navigationMask.lineJoin = .round
+        maskLayer.addSublayer(navigationMask)
         layer?.addSublayer(gradient)
     }
 
@@ -76,7 +81,7 @@ private final class ThreadShimmerOverlay: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    func configure(title: String, titleFrame: NSRect, symbol: NSImage?, symbolFrame: NSRect, scale: CGFloat) {
+    func configure(title: String, titleFrame: NSRect, navigationPath: CGPath, scale: CGFloat) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         gradient.frame = bounds
@@ -88,15 +93,9 @@ private final class ThreadShimmerOverlay: NSView {
         ])
         textMask.truncationMode = .end
         textMask.alignmentMode = .left
-        bellMask.contentsScale = scale
-        bellMask.contentsGravity = .resizeAspect
-        if let symbol {
-            var proposedRect = CGRect(origin: .zero, size: symbol.size)
-            bellMask.contents = symbol.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil)
-        } else {
-            bellMask.contents = nil
-        }
-        bellMask.frame = symbolFrame
+        navigationMask.contentsScale = scale
+        navigationMask.frame = bounds
+        navigationMask.path = navigationPath
         CATransaction.commit()
     }
 }
@@ -225,23 +224,31 @@ final class ThreadActivityButton: NSButton {
     override func layout() {
         super.layout()
         notificationButton.frame = NSRect(x: bounds.width - 30, y: 6, width: 22, height: 22)
-        shimmerOverlay.frame = bounds
+        shimmerOverlay.frame = NSRect(x: 0, y: 0, width: max(0, bounds.width - 36), height: bounds.height)
         let titleFrame = NSRect(x: 36, y: 10, width: max(0, bounds.width - 78), height: 18)
-        let symbolSize = notificationButton.image?.size ?? NSSize(width: 11, height: 11)
-        let symbolFrame = NSRect(
-            x: notificationButton.frame.midX - symbolSize.width / 2,
-            y: notificationButton.frame.midY - symbolSize.height / 2,
-            width: symbolSize.width,
-            height: symbolSize.height)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         shimmerOverlay.configure(
             title: activity.title,
             titleFrame: titleFrame,
-            symbol: notificationButton.image,
-            symbolFrame: symbolFrame,
+            navigationPath: Self.navigationIconPath,
             scale: window?.backingScaleFactor ?? 2)
         CATransaction.commit()
+    }
+
+    static var navigationIconPath: CGPath {
+        let arrow = CGMutablePath()
+        arrow.move(to: CGPoint(x: 9.4, y: 10.5))
+        arrow.addLine(to: CGPoint(x: 18.3, y: 13.7))
+        arrow.addCurve(to: CGPoint(x: 18.4, y: 15), control1: CGPoint(x: 19.2, y: 14), control2: CGPoint(x: 19.2, y: 14.6))
+        arrow.addLine(to: CGPoint(x: 14.8, y: 16.7))
+        arrow.addLine(to: CGPoint(x: 13.1, y: 20.3))
+        arrow.addCurve(to: CGPoint(x: 11.8, y: 20.2), control1: CGPoint(x: 12.7, y: 21.1), control2: CGPoint(x: 12.1, y: 21.1))
+        arrow.addLine(to: CGPoint(x: 8.6, y: 11.3))
+        arrow.addCurve(to: CGPoint(x: 9.4, y: 10.5), control1: CGPoint(x: 8.3, y: 10.5), control2: CGPoint(x: 8.6, y: 10.2))
+        arrow.closeSubpath()
+        var offset = CGAffineTransform(translationX: 6, y: 2)
+        return arrow.copy(using: &offset)!
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -250,24 +257,15 @@ final class ThreadActivityButton: NSButton {
             NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 10, yRadius: 10).fill()
         }
         let color: NSColor = activity.isRunning ? .secondaryLabelColor : .labelColor
-        color.setStroke()
-        // Rounded outline arrow matching the supplied navigation icon.
-        let arrow = NSBezierPath()
-        arrow.move(to: NSPoint(x: 9.4, y: 10.5))
-        arrow.line(to: NSPoint(x: 18.3, y: 13.7))
-        arrow.curve(to: NSPoint(x: 18.4, y: 15), controlPoint1: NSPoint(x: 19.2, y: 14), controlPoint2: NSPoint(x: 19.2, y: 14.6))
-        arrow.line(to: NSPoint(x: 14.8, y: 16.7))
-        arrow.line(to: NSPoint(x: 13.1, y: 20.3))
-        arrow.curve(to: NSPoint(x: 11.8, y: 20.2), controlPoint1: NSPoint(x: 12.7, y: 21.1), controlPoint2: NSPoint(x: 12.1, y: 21.1))
-        arrow.line(to: NSPoint(x: 8.6, y: 11.3))
-        arrow.curve(to: NSPoint(x: 9.4, y: 10.5), controlPoint1: NSPoint(x: 8.3, y: 10.5), controlPoint2: NSPoint(x: 8.6, y: 10.2))
-        arrow.close()
-        var inset = AffineTransform()
-        inset.translate(x: 6, y: 2)
-        arrow.transform(using: inset)
-        arrow.lineWidth = 1.1
-        arrow.lineJoinStyle = .round
-        arrow.stroke()
+        if let context = NSGraphicsContext.current?.cgContext {
+            context.saveGState()
+            context.setStrokeColor(color.cgColor)
+            context.setLineWidth(1.1)
+            context.setLineJoin(.round)
+            context.addPath(Self.navigationIconPath)
+            context.strokePath()
+            context.restoreGState()
+        }
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
         (activity.title as NSString).draw(in: NSRect(x: 36, y: 10, width: max(0, bounds.width - 78), height: 18), withAttributes: [
@@ -293,6 +291,8 @@ final class ThreadActivityButton: NSButton {
     }
 
     var testHookHovered: Bool { isHovered }
+    var testHookShimmerIconBounds: CGRect { shimmerOverlay.iconBounds }
+    var testHookShimmerFrame: NSRect { shimmerOverlay.frame }
     func testHookSetHovered(_ value: Bool) { isHovered = value }
 }
 
@@ -306,9 +306,10 @@ final class ThreadActivityView: NSView {
 
     init(activities: [ThreadActivity], onOpened: @escaping (ThreadActivity) -> Void = { _ in }) {
         self.onOpened = onOpened
-        super.init(frame: NSRect(x: 0, y: 0, width: 300, height: 0))
+        super.init(frame: NSRect(x: 0, y: 0, width: QuotaMenuView.panelWidth, height: 0))
         scroll.drawsBackground = false
-        scroll.scrollerStyle = .overlay
+        // Keep wheel and trackpad scrolling without an indicator covering row controls.
+        scroll.hasVerticalScroller = false
         scroll.documentView = document
         addSubview(scroll)
         connectionLabel.font = .systemFont(ofSize: 11)
@@ -367,7 +368,7 @@ final class ThreadActivityView: NSView {
         }
         var viewSizeChanged = false
         let rowsHeight: CGFloat = activities.isEmpty ? 0 : 8 + CGFloat(min(activities.count, 5)) * 34
-        let targetSize = NSSize(width: 300, height: rowsHeight + statusHeight)
+        let targetSize = NSSize(width: QuotaMenuView.panelWidth, height: rowsHeight + statusHeight)
         let shouldShrinkWhileTracking = preserveHeight && targetSize.height < frame.height
         if activities.isEmpty || !preserveHeight || bounds.height == 0 || statusChanged || shouldShrinkWhileTracking {
             if frame.size != targetSize {
@@ -375,20 +376,18 @@ final class ThreadActivityView: NSView {
                 viewSizeChanged = true
             }
         }
-        let connectionFrame = NSRect(x: 12, y: 3, width: 276, height: 18)
+        let contentWidth = QuotaMenuView.panelWidth - 24
+        let connectionFrame = NSRect(x: 12, y: 3, width: contentWidth, height: 18)
         if connectionLabel.frame != connectionFrame { connectionLabel.frame = connectionFrame }
-        let scrollFrame = NSRect(x: 12, y: 4 + statusHeight, width: 276,
+        let scrollFrame = NSRect(x: 12, y: 4 + statusHeight, width: contentWidth,
                                  height: max(0, bounds.height - 8 - statusHeight))
         let scrollFrameChanged = scroll.frame != scrollFrame
         if scrollFrameChanged { scroll.frame = scrollFrame }
-        let documentSize = NSSize(width: 276, height: max(scroll.bounds.height, CGFloat(orderedIDs.count) * 34))
+        let documentSize = NSSize(width: contentWidth, height: max(scroll.bounds.height, CGFloat(orderedIDs.count) * 34))
         let documentSizeChanged = document.frame.size != documentSize
         if documentSizeChanged { document.setFrameSize(documentSize) }
-        let needsScroller = CGFloat(orderedIDs.count) * 34 > scroll.bounds.height
-        let scrollerChanged = scroll.hasVerticalScroller != needsScroller
-        if scrollerChanged { scroll.hasVerticalScroller = needsScroller }
         for (index, id) in orderedIDs.enumerated() {
-            let targetFrame = NSRect(x: 0, y: CGFloat(index) * 34, width: 276, height: 34)
+            let targetFrame = NSRect(x: 0, y: CGFloat(index) * 34, width: contentWidth, height: 34)
             if let button = buttons[id], button.frame != targetFrame { button.frame = targetFrame }
         }
         let currentOrigin = scroll.contentView.bounds.origin
@@ -396,7 +395,7 @@ final class ThreadActivityView: NSView {
             max(0, document.bounds.height - scroll.contentView.bounds.height)))
         let scrollPositionChanged = currentOrigin != targetOrigin
         if scrollPositionChanged { scroll.contentView.scroll(to: targetOrigin) }
-        if scrollFrameChanged || documentSizeChanged || scrollerChanged || scrollPositionChanged {
+        if scrollFrameChanged || documentSizeChanged || scrollPositionChanged {
             scroll.reflectScrolledClipView(scroll.contentView)
         }
         if statusChanged || statusTextChanged || orderChanged || viewSizeChanged { needsDisplay = true }

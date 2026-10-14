@@ -104,6 +104,8 @@
 "1개월" = "Monthly";
 "%d시간" = "%d hours";
 "%d분" = "%d minutes";
+"%d시간 %d분 남음" = "%dh %dm left";
+"%d분 남음" = "%dm left";
 "%@ 주간" = "%@ weekly";
 "네트워크 연결 없음" = "No network connection";
 "사용량 조회 실패" = "Could not check usage";

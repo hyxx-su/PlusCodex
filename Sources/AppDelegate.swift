@@ -158,6 +158,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         activityMonitor?.onRead = { [weak self] activity in
             guard let self else { return }
             self.readReceipts.acknowledgeExternally(activity)
+            self.notifications.threadRead(activity)
             self.updateActivityView()
         }
         activityMonitor?.onFailure = { [weak self] activity in self?.notifications.failed(activity) }
@@ -554,6 +555,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             activityItem?.view = ThreadActivityView(activities: visible) { [weak self] opened in
                 guard let self else { return }
                 self.readReceipts.acknowledge(opened)
+                self.notifications.threadRead(opened)
                 self.updateActivityView()
             }
             (activityItem?.view as? ThreadActivityView)?.update(activities: visible, connected: activityConnected,

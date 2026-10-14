@@ -16,6 +16,7 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
     private let center = UNUserNotificationCenter.current()
     private let notificationSettings: NotificationSettings
     private lazy var autoCleanup = NotificationAutoCleanup(settings: notificationSettings)
+    private let readCleanup = ThreadNotificationReadCleanup()
     private let threadPreferences: ThreadNotificationPreferences
     private let resetCreditExpiry: ResetCreditExpiryNotifications
     private var lastResetSnapshot: (quota: Quota, account: CodexAccount?)?
@@ -122,6 +123,10 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
         // Retries must check the original task, even after this chat starts a new turn.
         if let scope = ThreadNotificationPreferences.scope(for: activity) { info["notificationScope"] = scope }
         return info
+    }
+
+    func threadRead(_ activity: ThreadActivity) {
+        readCleanup.read(activity)
     }
 
     func isThreadNotificationEnabled(_ kind: NotificationKind, scope: String?) -> Bool {
@@ -400,22 +405,33 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
     }
 
     private func submit(_ request: UNNotificationRequest, attempt: Int = 0) {
+        guard !readCleanup.wasRead(request) else { return }
         NotificationDelivery.shared.add(request, duration: notificationSettings.notificationPlaybackDuration) { [weak self] error in
-            guard let error else { return }
-            NSLog("PlusCodex notification failed: %@", error.localizedDescription)
-            guard attempt < 2 else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + Double((attempt + 1) * 5)) { [weak self] in
+            DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                let kind: NotificationKind = request.identifier.hasPrefix("completion-") ? .completion
-                    : request.identifier.hasPrefix("failure-") ? .failure
-                    : NotificationKind(rawValue: request.content.userInfo["notificationKind"] as? String ?? "") ?? .approval
-                guard self.isThreadNotificationEnabled(kind,
-                    scope: request.content.userInfo["notificationScope"] as? String) else { return }
-                if request.identifier.hasPrefix("attention-") {
-                    guard let id = request.content.userInfo["threadID"] as? String,
-                          self.isAttentionRequestCurrent?(id, request.content.userInfo["requestIdentity"] as? String) == true else { return }
+                // An OS submission can finish after the task has already been read.
+                if self.readCleanup.wasRead(request) {
+                    self.center.removeDeliveredNotifications(withIdentifiers: [request.identifier])
+                    self.center.removePendingNotificationRequests(withIdentifiers: [request.identifier])
+                    NotificationDelivery.shared.cancel(request.identifier)
+                    return
                 }
-                self.submit(request, attempt: attempt + 1)
+                guard let error else { return }
+                NSLog("PlusCodex notification failed: %@", error.localizedDescription)
+                guard attempt < 2 else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + Double((attempt + 1) * 5)) { [weak self] in
+                    guard let self else { return }
+                    let kind: NotificationKind = request.identifier.hasPrefix("completion-") ? .completion
+                        : request.identifier.hasPrefix("failure-") ? .failure
+                        : NotificationKind(rawValue: request.content.userInfo["notificationKind"] as? String ?? "") ?? .approval
+                    guard self.isThreadNotificationEnabled(kind,
+                        scope: request.content.userInfo["notificationScope"] as? String) else { return }
+                    if request.identifier.hasPrefix("attention-") {
+                        guard let id = request.content.userInfo["threadID"] as? String,
+                              self.isAttentionRequestCurrent?(id, request.content.userInfo["requestIdentity"] as? String) == true else { return }
+                    }
+                    self.submit(request, attempt: attempt + 1)
+                }
             }
         }
     }
@@ -424,7 +440,10 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         // Show banners even when PlusCodex itself is frontmost; Codex being
         // frontmost never suppresses a notification from this app either.
-        completionHandler(Self.foregroundPresentationOptions)
+        DispatchQueue.main.async { [weak self] in
+            completionHandler(self?.readCleanup.wasRead(notification.request) == true
+                ? [] : Self.foregroundPresentationOptions)
+        }
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
