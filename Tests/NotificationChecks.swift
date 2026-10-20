@@ -212,9 +212,15 @@ import UserNotifications
             precondition(!notifications.isThreadNotificationEnabled(kind, scope: scope),
                          "Explicit task OFF must suppress both first delivery and retry")
         }
-        precondition(notifications.isThreadNotificationEnabled(.completion, scope: nil),
-                     "Missing scopes use the global default without inventing an override")
-        print("PASS: completion, failure, interruption, foreground banners, task overrides, kind gates and retry scopes")
+        for provider in AIProvider.allCases {
+            let iconURL = NotificationIconProvider.iconURL(for: provider)
+            precondition(iconURL != nil, "Official colorful notification icon must exist for \(provider)")
+            let testContent = UNMutableNotificationContent()
+            NotificationIconProvider.apply(to: testContent, provider: provider)
+            precondition(!testContent.attachments.isEmpty, "Notification attachment must be configured for \(provider)")
+        }
+
+        print("PASS: completion, failure, interruption, foreground banners, task overrides, kind gates, retry scopes, and provider icons")
     }
 
     private static func checkPendingInputCompletion() {

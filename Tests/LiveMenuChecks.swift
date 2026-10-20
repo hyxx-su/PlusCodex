@@ -184,6 +184,30 @@ import AppKit
         taskView.update(activities: [explicitOn, nextTurn], preserveHeight: true)
         precondition(inheritedBell.state == .off && inheritedRow.superview === taskScroll.documentView,
                      "A new turn must inherit OFF while retaining the same menu row")
-        print("PASS: open-menu identity, live quota, task status, animation, task defaults and manual bell overrides")
+        let running = ThreadActivity(id: UUID().uuidString, title: "진행", runtime: "active", unread: false, updatedAt: 1)
+        var unconfirmed = running
+        unconfirmed.stateConfirmed = false
+        let finished = ThreadActivity(id: UUID().uuidString, title: "완료", runtime: "idle", unread: true, updatedAt: 1)
+        func spins(_ rows: [ThreadActivity], connected: Bool = true, wake: String? = nil,
+                   unavailable: Bool = false, reduceMotion: Bool = false) -> Bool {
+            AppDelegate.shouldSpinStatusIcon(activities: rows, connected: connected, wakeThreadID: wake,
+                                             unavailable: unavailable, reduceMotion: reduceMotion)
+        }
+        precondition(spins([finished, running]), "An in-progress task must spin the menu bar icon")
+        precondition(!spins([finished]) && !spins([]), "Only in-progress tasks spin the icon")
+        precondition(!spins([unconfirmed]) && !spins([running], connected: false),
+                     "Unconfirmed or disconnected task state must not spin the icon")
+        precondition(!spins([running], wake: running.id), "Automatic wake runs must not spin the icon")
+        precondition(!spins([running], unavailable: true) && !spins([running], reduceMotion: true),
+                     "Offline icons and Reduce Motion must keep the icon still")
+        let still = CodexStatusIcon.image(size: 18, offline: false)
+        precondition(CodexStatusIcon.spinningImage(size: 18, frame: 0) === still
+            && CodexStatusIcon.spinningImage(size: 18, frame: CodexStatusIcon.spinFrameCount) === still,
+                     "A full turn must return to the regular icon")
+        let rotated = CodexStatusIcon.spinningImage(size: 18, frame: 6)
+        precondition(rotated != nil && rotated !== still && rotated?.isTemplate == true
+            && rotated?.size == NSSize(width: 18, height: 18),
+                     "Rotated frames must keep the template menu bar icon size")
+        print("PASS: open-menu identity, live quota, task status, animation, task defaults and manual bell overrides, status icon spinner")
     }
 }

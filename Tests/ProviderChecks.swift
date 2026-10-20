@@ -11,6 +11,16 @@ import AppKit
             print("Grok availability: \(GrokAvailability.current())")
             return
         }
+        if CommandLine.arguments.contains("--gemini-availability-probe") {
+            print("Gemini availability: \(GeminiAvailability.current())")
+            if let snapshot = try? ExternalUsageClient.fetch(.gemini) {
+                print("Gemini account: \(snapshot.account?.email ?? "nil") (\(snapshot.account?.planType ?? "nil"))")
+                for window in snapshot.quota.windows {
+                    print("Gemini window: \(window.label) remaining=\(window.remaining)%")
+                }
+            }
+            return
+        }
         precondition(ClaudeAvailability.classify(desktopInstalled: false, cliInstalled: false,
                                                  subscriptionType: "free") == .notInstalled)
         precondition(ClaudeAvailability.classify(desktopInstalled: true, cliInstalled: false,
@@ -198,6 +208,72 @@ import AppKit
         throttledController.synchronize()
         precondition(throttledFetches == 1, "Retry-After must not be bypassed by toggling")
         validationSettings.setEnabled(false, for: .grok)
+
+        validationSettings.setEnabled(true, for: .gemini)
+        var geminiFetches = 0
+        let toggleController = ProviderStatusController(provider: .gemini, settings: validationSettings,
+            geminiAvailability: { .readyToCheck }, fetchUsage: { _ in
+                geminiFetches += 1
+                return QuotaSnapshot(quota: weekly, account: CodexAccount(email: "user@example.com", planType: "Pro"))
+            })
+        toggleController.synchronize()
+        waitFor { geminiFetches == 1 }
+        validationSettings.setEnabled(false, for: .gemini)
+        toggleController.synchronize()
+        validationSettings.setEnabled(true, for: .gemini)
+        toggleController.synchronize()
+        waitFor { geminiFetches == 2 }
+        precondition(toggleController.testHookActivityItem.isHidden,
+                     "Gemini menu must hide the activity item when there are no active or unread tasks")
+        let parsedTrajectories = ExternalUsageClient.parseAntigravityTrajectories([
+            "trajectorySummaries": [
+                "a2ae409d-dd14-4a11-a5bf-b4679c2cbe54": [
+                    "summary": "Gemini task in progress",
+                    "status": "CASCADE_RUN_STATUS_RUNNING",
+                    "notFullyIdle": true,
+                    "lastModifiedTime": "2026-10-19T01:20:00Z",
+                    "lastUserInputTime": "2026-10-19T01:19:00Z",
+                    "lastUserInputStepIndex": 12,
+                    "trajectoryType": "CORTEX_TRAJECTORY_TYPE_CASCADE",
+                    "annotations": [
+                        "title": "진행 중인 Gemini 작업",
+                        "lastUserViewTime": "2026-10-19T01:19:30Z",
+                        "archived": false
+                    ],
+                    "trajectoryMetadata": [
+                        "parentConversationId": "",
+                        "isBattleModeFork": false
+                    ]
+                ],
+                "b2ae409d-dd14-4a11-a5bf-b4679c2cbe54": [
+                    "summary": "Subagent task",
+                    "status": "CASCADE_RUN_STATUS_RUNNING",
+                    "notFullyIdle": true,
+                    "lastModifiedTime": "2026-10-19T01:20:00Z",
+                    "trajectoryMetadata": [
+                        "parentConversationId": "a2ae409d-dd14-4a11-a5bf-b4679c2cbe54"
+                    ]
+                ]
+            ]
+        ])
+        precondition(parsedTrajectories.activities.count == 1,
+                     "Subagent trajectories must be excluded from the top-level Gemini task list")
+        let geminiTask = parsedTrajectories.activities[0]
+        precondition(geminiTask.provider == .gemini)
+        precondition(geminiTask.isRunning)
+        precondition(geminiTask.title == "진행 중인 Gemini 작업")
+        precondition(geminiTask.url?.absoluteString == "antigravity://conversations/a2ae409d-dd14-4a11-a5bf-b4679c2cbe54")
+        precondition(AppDelegate.shouldSpinStatusIcon(
+            activities: [geminiTask], connected: true, wakeThreadID: nil, unavailable: false, reduceMotion: false))
+        toggleController.testHookSetActivities([geminiTask], connected: true)
+        precondition(!toggleController.testHookActivityItem.isHidden
+            && toggleController.testHookActivityItem.view is ThreadActivityView,
+            "Active Gemini task must be shown in the Gemini menu")
+        toggleController.testHookSetActivities([], connected: true)
+        precondition(toggleController.testHookActivityItem.isHidden,
+                     "Clearing Gemini tasks must hide the activity item again")
+        validationSettings.setEnabled(false, for: .gemini)
+        toggleController.synchronize()
         precondition(ExternalUsageClient.parseGrok(["used": ["val": 1], "monthlyLimit": ["val": 0]]) == nil)
         precondition(ExternalUsageClient.parseGrok(["used": ["val": 1e300], "monthlyLimit": ["val": 1e-300]])?.primary?.remaining == 0)
         precondition(ExternalUsageClient.grokSession(["https://unknown.example": ["key": "test"]]) == nil)
@@ -205,6 +281,7 @@ import AppKit
         precondition(ExternalUsageClient.grokSession(["https://auth.x.ai": ["key": "test", "expires_at": 9_000_000_000]]) != nil)
         for provider in AIProvider.allCases {
             precondition(CodexStatusIcon.image(size: 18, offline: false, provider: provider) != nil)
+            precondition(CodexStatusIcon.spinningImage(size: 18, frame: 3, provider: provider) != nil)
         }
         precondition(CodexStatusIcon.plusCodexImage(size: 18)?.isTemplate == true)
         precondition(CodexStatusIcon.plusCodexImage(size: 18)?.size == NSSize(width: 18, height: 18))
@@ -222,10 +299,59 @@ import AppKit
         }
         let checks = descendants(window.window!.contentView!).compactMap { $0 as? NSSwitch }
             .filter { AIProvider(rawValue: $0.identifier?.rawValue ?? "") != nil }
-        precondition(checks.count == 3)
+        precondition(checks.count == 4)
         precondition(checks.first { $0.identifier?.rawValue == "codex" }?.state == .on)
         precondition(checks.first { $0.identifier?.rawValue == "claude" }?.state == .off)
         precondition(checks.first { $0.identifier?.rawValue == "grok" }?.state == .off)
+        precondition(checks.first { $0.identifier?.rawValue == "gemini" }?.state == .off)
+
+        precondition(GeminiAvailability.classify(installed: false, authenticated: true) == .notInstalled)
+        precondition(GeminiAvailability.classify(installed: true, authenticated: false) == .notAuthenticated)
+        precondition(GeminiAvailability.classify(installed: true, authenticated: true) == .readyToCheck)
+        precondition(GeminiAvailability.State.notInstalled.actionURL?.absoluteString == "https://antigravity.google")
+        precondition(GeminiAvailability.State.notAuthenticated.guidance == "로그인 필요")
+
+        let antigravitySummary = ExternalUsageClient.parseAntigravitySummary([
+            "response": [
+                "groups": [
+                    [
+                        "displayName": "Gemini Models",
+                        "buckets": [
+                            ["bucketId": "gemini-weekly", "window": "weekly", "remainingFraction": 0.8, "resetTime": "2026-10-25T18:28:50Z"],
+                            ["bucketId": "gemini-5h", "window": "5h", "remainingFraction": 0.9, "resetTime": "2026-10-18T23:28:50Z"]
+                        ]
+                    ],
+                    [
+                        "displayName": "Gemini 4 Argon",
+                        "buckets": [
+                            ["bucketId": "gemini-argon-wtu-weekly", "window": "weekly", "remainingFraction": 0.75, "resetTime": "2026-10-25T16:56:50Z"]
+                        ]
+                    ]
+                ]
+            ]
+        ], userStatus: [
+            "userStatus": [
+                "email": "user@example.com",
+                "planStatus": ["planInfo": ["planName": "Pro"]]
+            ]
+        ])!
+        precondition(antigravitySummary.account?.email == "user@example.com")
+        precondition(antigravitySummary.account?.planType == "Pro")
+        precondition(antigravitySummary.quota.primary?.label == "5시간" && antigravitySummary.quota.primary?.remaining == 90)
+        precondition(antigravitySummary.quota.secondary?.label == "주간" && antigravitySummary.quota.secondary?.remaining == 80)
+        precondition(antigravitySummary.quota.additional?.first?.label == "Argon 주간" && antigravitySummary.quota.additional?.first?.remaining == 75)
+
+        let geminiCLISnapshot = ExternalUsageClient.parseGeminiCLIQuota([
+            "buckets": [
+                ["modelId": "gemini-2.5-pro", "remainingFraction": 0.65, "resetTime": "2026-10-19T18:00:00Z"],
+                ["modelId": "gemini-2.5-flash", "remainingFraction": 0.92, "resetTime": "2026-10-19T18:00:00Z"],
+                ["modelId": "gemini-2.5-flash-lite", "remainingFraction": 1.0, "resetTime": "2026-10-19T18:00:00Z"]
+            ]
+        ], account: CodexAccount(email: "cli@example.com", planType: "Paid"))!
+        precondition(geminiCLISnapshot.account?.email == "cli@example.com")
+        precondition(geminiCLISnapshot.quota.primary?.label == "Pro" && geminiCLISnapshot.quota.primary?.remaining == 65)
+        precondition(geminiCLISnapshot.quota.secondary?.label == "Flash" && geminiCLISnapshot.quota.secondary?.remaining == 92)
+        precondition(geminiCLISnapshot.quota.additional?.first?.label == "Flash Lite" && geminiCLISnapshot.quota.additional?.first?.remaining == 100)
 
         let gatingSuite = "PlusCodex.ClaudeAvailabilityChecks.\(UUID().uuidString)"
         let gatingDefaults = UserDefaults(suiteName: gatingSuite)!
@@ -275,7 +401,8 @@ import AppKit
         var openedGrokURLs: [URL] = []
         let grokWindow = AISettingsWindow(settings: gatingSettings,
             claudeAvailability: { .availableOrUnknown },
-            grokAvailability: { grokAvailability }, openGrokURL: { openedGrokURLs.append($0) })
+            grokAvailability: { grokAvailability }, openGrokURL: { openedGrokURLs.append($0) },
+            geminiAvailability: { .readyToCheck })
         let grokToggle = descendants(grokWindow.window!.contentView!).compactMap { $0 as? NSSwitch }
             .first { $0.identifier?.rawValue == "grok" }!
         grokToggle.performClick(nil)

@@ -49,7 +49,7 @@ enum CodexStatusIcon {
             return true
         }
         image.isTemplate = true
-        rendered.countLimit = 64
+        rendered.countLimit = 128
         rendered.setObject(image, forKey: cacheKey)
         return image
     }
@@ -81,7 +81,35 @@ enum CodexStatusIcon {
             return true
         }
         image.isTemplate = !offline
-        rendered.countLimit = 64
+        rendered.countLimit = 128
+        rendered.setObject(image, forKey: cacheKey)
+        return image
+    }
+
+    /// Frames per full turn of the in-progress menu bar spinner.
+    static let spinFrameCount = 24
+
+    /// The normal template icon rotated clockwise by `frame / spinFrameCount` of a turn.
+    static func spinningImage(size: CGFloat, frame: Int, provider: AIProvider = .codex) -> NSImage? {
+        let frame = ((frame % spinFrameCount) + spinFrameCount) % spinFrameCount
+        if frame == 0 { return image(size: size, offline: false, provider: provider) }
+        let cacheKey = key("\(provider.resource):\(size):spin\(frame)")
+        if let image = rendered.object(forKey: cacheKey) { return image }
+        guard let source = source(provider.resource) else { return nil }
+        let degrees = CGFloat(frame) / CGFloat(spinFrameCount) * 360
+        let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            let transform = NSAffineTransform()
+            transform.translateX(by: size / 2, yBy: size / 2)
+            transform.rotate(byDegrees: -degrees)
+            transform.translateX(by: -size / 2, yBy: -size / 2)
+            transform.concat()
+            source.draw(in: rect)
+            NSColor.labelColor.setFill()
+            rect.fill(using: .sourceIn)
+            return true
+        }
+        image.isTemplate = true
+        rendered.countLimit = 128
         rendered.setObject(image, forKey: cacheKey)
         return image
     }

@@ -26,11 +26,19 @@ import ServiceManagement
         let window = AISettingsWindow(settings: settings, wakeSettings: wakeSettings, login: login,
                                       claudeAvailability: { .availableOrUnknown },
                                       grokAvailability: { .readyToCheck },
+                                      geminiAvailability: { .readyToCheck },
                                       openDiscordURL: { openedDiscordURL = $0 })
         func descendants(_ view: NSView) -> [NSView] {
             view.subviews + view.subviews.flatMap(descendants)
         }
+        func hasOnlyRequestedTooltips(_ views: [NSView]) -> Bool {
+            views.allSatisfy {
+                $0.toolTip == nil || $0.identifier?.rawValue.hasPrefix("menuBarFormat-help-") == true
+            }
+        }
         let root = window.window!.contentView!
+        precondition(window.window is SettingsTextEditingWindow,
+                     "The actual settings window must route field-editor shortcuts without an Edit menu")
         let discord = descendants(root).compactMap { $0 as? NSButton }
             .first { $0.identifier?.rawValue == "settings-discord" }!
         precondition(discord.title == "디스코드 커뮤니티" && discord.accessibilityLabel() == "디스코드 커뮤니티")
@@ -47,11 +55,11 @@ import ServiceManagement
         discord.performClick(nil)
         precondition(openedDiscordURL?.absoluteString == "https://discord.gg/jR87pagNRG")
         try verifyDiscordLocalization(in: window, button: discord, settings: settings)
-        precondition(descendants(root).allSatisfy { $0.toolTip == nil },
-                     "Settings controls and footer links must not show hover tooltips")
+        precondition(hasOnlyRequestedTooltips(descendants(root)),
+                     "Only the explicitly requested provider help buttons may show hover tooltips")
         wakeSettings.lastFailure = "Wake failure detail"
         window.synchronize()
-        precondition(descendants(root).allSatisfy { $0.toolTip == nil },
+        precondition(hasOnlyRequestedTooltips(descendants(root)),
                      "A failed wake must not restore its old tooltip")
         let wakeDescription = descendants(root).compactMap { $0 as? NSTextField }
             .first { $0.accessibilityHelp() == "Wake failure detail" }!
@@ -61,7 +69,7 @@ import ServiceManagement
                      "Recovery must restore accessible guidance without a hover tooltip")
         let toggles = descendants(window.window!.contentView!).compactMap { $0 as? NSSwitch }
         let providerToggles = toggles.filter { AIProvider(rawValue: $0.identifier?.rawValue ?? "") != nil }
-        precondition(providerToggles.count == 3)
+        precondition(providerToggles.count == 4)
         let notificationToggles = toggles.filter {
             guard let raw = $0.identifier?.rawValue, raw.hasPrefix("notification-") else { return false }
             return NotificationKind(rawValue: String(raw.dropFirst("notification-".count))) != nil
@@ -82,7 +90,8 @@ import ServiceManagement
         let expirySettings = NotificationSettings(defaults: defaults)
         let expiryWindow = AISettingsWindow(settings: settings, notificationSettings: expirySettings, login: login,
                                             claudeAvailability: { .availableOrUnknown },
-                                            grokAvailability: { .readyToCheck })
+                                            grokAvailability: { .readyToCheck },
+                                            geminiAvailability: { .readyToCheck })
         let expiryToggle = descendants(expiryWindow.window!.contentView!).compactMap { $0 as? NSSwitch }
             .first { $0.identifier?.rawValue == "notification-resetCreditExpiry" }!
         precondition(expiryToggle.state == .on && expiryToggle.accessibilityLabel() == "초기화권 만료")
@@ -103,7 +112,7 @@ import ServiceManagement
         cleanupToggle.state = .off
         _ = cleanupToggle.sendAction(cleanupToggle.action, to: cleanupToggle.target)
         precondition(!expirySettings.autoCleanupEnabled && expirySettings.autoCleanupStartedAt == nil)
-        precondition(descendants(expiryWindow.window!.contentView!).allSatisfy { $0.toolTip == nil },
+        precondition(hasOnlyRequestedTooltips(descendants(expiryWindow.window!.contentView!)),
                      "Toggling notification settings must not reintroduce hover tooltips")
         precondition(L10n.translation("알림 자동 정리", language: .english) == "Auto-clear notifications")
         if CommandLine.arguments.contains("--render-auto-cleanup") {
@@ -128,6 +137,7 @@ import ServiceManagement
         precondition(providerToggles.first { $0.identifier?.rawValue == "codex" }?.state == .on)
         precondition(providerToggles.first { $0.identifier?.rawValue == "claude" }?.state == .off)
         precondition(providerToggles.first { $0.identifier?.rawValue == "grok" }?.state == .off)
+        precondition(providerToggles.first { $0.identifier?.rawValue == "gemini" }?.state == .off)
         precondition(toggles.first { $0.identifier?.rawValue == "launchAtLogin" }?.state == .off)
         precondition(window.window!.title == "설정")
         precondition(window.window!.contentView!.frame.size == NSSize(width: 680, height: 600))
@@ -139,7 +149,9 @@ import ServiceManagement
             notificationNavigation.performClick(nil)
             root.layoutSubtreeIfNeeded()
             let scroll = descendants(root).compactMap { $0 as? NSScrollView }
-                .first { ($0.documentView?.frame.height ?? 0) > $0.frame.height }!
+                .first { scroll in descendants(scroll).contains {
+                    $0.identifier?.rawValue == "notification-permission"
+                } }!
             let controls = descendants(scroll.documentView!).filter { view in
                 guard !view.isHidden else { return false }
                 return ["notification-permission", "notification-autoCleanup", "notification-completion"].contains(view.identifier?.rawValue ?? "")
@@ -176,9 +188,10 @@ import ServiceManagement
         let expandedWindow = AISettingsWindow(settings: settings,
                                               notificationSettings: customSoundSettings, login: login,
                                               claudeAvailability: { .availableOrUnknown },
-                                              grokAvailability: { .readyToCheck })
+                                              grokAvailability: { .readyToCheck },
+                                              geminiAvailability: { .readyToCheck })
         verifyNotificationControls(in: expandedWindow, expectedCount: 7)
-        precondition(descendants(expandedWindow.window!.contentView!).allSatisfy { $0.toolTip == nil })
+        precondition(hasOnlyRequestedTooltips(descendants(expandedWindow.window!.contentView!)))
         let volumeSlider = descendants(expandedWindow.window!.contentView!).compactMap { $0 as? NSSlider }
             .first { $0.accessibilityLabel() == "음량" }!
         precondition(volumeSlider.minValue == 0 && volumeSlider.maxValue == 200)
@@ -191,7 +204,7 @@ import ServiceManagement
         claude.state = .off
         _ = claude.sendAction(claude.action, to: claude.target)
         precondition(!settings.enabled(.claude))
-        for provider in [AIProvider.claude, .grok] {
+        for provider in [AIProvider.claude, .grok, .gemini] {
             settings.setEnabled(false, for: provider)
             let controller = ProviderStatusController(provider: provider, settings: settings)
             let settingsRow = controller.testHookMenu.items.first { $0.title == "설정" }
@@ -214,8 +227,23 @@ import ServiceManagement
                 let view = controller.testHookMenu.items[0].view!
                 precondition(view.subviews.contains { $0 is QuotaLoadingView } == (offline || checking))
             }
+            controller.presentation(offline: false, checking: true)
+            controller.menuWillOpen(controller.testHookMenu)
+            precondition((controller.testHookMenu.items[0].view as? QuotaMenuView)?.checkingForUpdates == true)
+            controller.presentation(offline: false, checking: false)
+            let activeDashboard = controller.testHookMenu.items[0].view as? QuotaMenuView
+            precondition(activeDashboard?.checkingForUpdates == false,
+                         "An open provider menu must leave the update-checking overlay as soon as checking finishes")
+            let updatedQuota = Quota(primary: QuotaWindow(usedPercent: 20, windowDurationMins: 300, resetsAt: nil), secondary: nil)
+            controller.testHookPresentation(quota: updatedQuota, fetching: false, checking: false, offline: false)
+            let task = ThreadActivity(id: "gemini-task", title: "Test Gemini Task", runtime: "active",
+                                      unread: false, updatedAt: 100, stateConfirmed: true, provider: .gemini)
+            controller.testHookSetActivities([task], connected: true)
+            precondition(!controller.testHookActivityItem.isHidden, "Activity item must be visible when tasks exist")
+            precondition(controller.testHookMenu.items.filter { !$0.isHidden }.count == 5)
+            controller.menuDidClose(controller.testHookMenu)
         }
-        print("PASS: login, native switches, notification hit targets, Discord footer, Claude/Grok loading and stable overlays")
+        print("PASS: login, native switches, notification hit targets, Discord footer, Claude/Grok loading, stable overlays and task row")
     }
 
     private static func verifyDiscordLocalization(in controller: AISettingsWindow, button: NSButton,
@@ -223,10 +251,11 @@ import ServiceManagement
         let defaults = UserDefaults.standard
         let arguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
         let appearance = NSApp.appearance
-        let providers = [AIProvider.claude, .grok].map {
+        let providers = [AIProvider.claude, .grok, .gemini].map {
             ProviderStatusController(provider: $0, settings: settings,
                                      claudeAvailability: { .availableOrUnknown },
-                                     grokAvailability: { .readyToCheck })
+                                     grokAvailability: { .readyToCheck },
+                                     geminiAvailability: { .readyToCheck })
         }
         defer {
             defaults.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)

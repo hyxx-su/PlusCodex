@@ -22,6 +22,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var activities: [ThreadActivity] = []
     private var activityConnected = false
     private var activityCompatibilityIssue = false
+    private var spinTimer: Timer?
+    private var spinFrame = 0
+    private var iconUnavailable = false
     private var activityItem: NSMenuItem?
     private var dashboardItem: NSMenuItem?
     private var quitItem: NSMenuItem?
@@ -37,6 +40,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     private let notificationSettings = NotificationSettings()
     private lazy var notifications = AppNotifications(settings: notificationSettings)
+    private lazy var permissionOnboarding = PermissionOnboarding(
+        notificationsNeeded: { [weak self] in
+            self?.notificationSettings.anyEnabled == true || ThreadNotificationPreferences().hasEnabledOverrides
+        },
+        geminiEnabled: { [weak self] in self?.providerSettings.enabled(.gemini) == true })
     private let updater = AppUpdater()
     private var checkingForUpdates = false
     private var menuTracking = false
@@ -86,16 +94,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSApp.terminate(nil)
             return
         }
-        extraProviders = [AIProvider.claude, .grok].map { provider in
+        extraProviders = [AIProvider.claude, .grok, .gemini].map { provider in
             let controller = ProviderStatusController(provider: provider, settings: providerSettings)
+            controller.onOpen = { [weak self] in self?.prepareMenuOpenUpdateCheck() }
             controller.onSettings = { [weak self] in self?.openSettings() }
             controller.onState = { [weak self] in self?.settingsWindow.update(provider, status: $0) }
+            controller.onQuota = { [weak self] in self?.settingsWindow.updateMenuBarQuota(provider, quota: $0) }
             controller.onVisibilityChange = { [weak self] in
                 DispatchQueue.main.async { self?.updateFallbackItem() }
             }
+            controller.onCompletion = { [weak self] activity in self?.notifications.completed(activity) }
+            controller.onFailure = { [weak self] activity in self?.notifications.failed(activity) }
+            controller.onAttention = { [weak self] event in self?.notifications.attentionNeeded(event) }
+            controller.onRead = { [weak self] activity in self?.notifications.threadRead(activity) }
+            controller.startActivityMonitoring()
             return controller
         }
-        providerSettings.onChange = { [weak self] in self?.synchronizeProviders() }
+        providerSettings.onChange = { [weak self] in
+            self?.synchronizeProviders()
+            self?.permissionOnboarding.checkIfNeeded()
+        }
         synchronizeProviders()
         render()
         networkMonitor.pathUpdateHandler = { [weak self] path in
@@ -135,7 +153,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.builtItems?.menu.cancelTracking()
             self?.extraProviders.forEach { $0.dismissMenu() }
         }
-        notifications.start()
+        // Explain each permission first; only the guide's explicit action requests consent.
+        notifications.start(requestAuthorization: false)
         do { try LoginLaunchController().applyInitialDefault() }
         catch { NSLog("PlusCodex login item: %@", error.localizedDescription) }
         updater.start()
@@ -174,13 +193,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.updateActivityView()
         }
         notifications.isAttentionRequestCurrent = { [weak self] id, identity in
-            guard let self, self.activityConnected,
-                  let activity = self.activities.first(where: { $0.id == id }), activity.stateConfirmed else { return false }
-            if let identity { return activity.pendingRequests.contains { $0.identity == identity } }
-            return activity.isWaitingForApproval
+            guard let self else { return false }
+            if self.activityConnected,
+               let activity = self.activities.first(where: { $0.id == id }),
+               activity.stateConfirmed {
+                if let identity { return activity.pendingRequests.contains { $0.identity == identity } }
+                return activity.isWaitingForApproval
+            }
+            return self.extraProviders.contains { $0.isAttentionRequestCurrent(id: id, identity: identity) }
         }
         activityMonitor?.start()
         timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
+            self?.render()
             self?.checkCodexLoginChange()
             self?.requestRefresh(retryWhenBusy: false)
             self?.extraProviders.forEach { $0.synchronize() }
@@ -191,14 +215,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                                          name: NSWorkspace.didWakeNotification, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(codexApplicationActivated(_:)),
                                                          name: NSWorkspace.didActivateApplicationNotification, object: nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.permissionOnboarding.checkIfNeeded()
+        }
     }
 
     @objc private func codexApplicationActivated(_ notification: Notification) {
         guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-              app.bundleIdentifier == "com.openai.codex" else { return }
-        // The auth file may be written just after Codex regains focus from a browser sign-in.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-            self?.checkCodexLoginChange()
+              let bundleID = app.bundleIdentifier else { return }
+        if bundleID == "com.openai.codex" {
+            // The auth file may be written just after Codex regains focus from a browser sign-in.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                self?.checkCodexLoginChange()
+            }
+        } else if ["com.anthropic.claudefordesktop", "com.google.antigravity"].contains(bundleID) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                self?.extraProviders.forEach { $0.synchronize() }
+            }
         }
     }
 
@@ -220,6 +253,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func wokeFromSleep() {
         refresh()
+        extraProviders.forEach { $0.synchronize() }
         wakeScheduler.tick(quota: quota, offline: offline)
     }
 
@@ -320,27 +354,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func render(allowingTrackedUpdateTransition: Bool = false) {
+        settingsWindow.updateMenuBarQuota(.codex, quota: quota?.effectiveQuota(account: account))
         statusWindow.update(quota: quota, fetching: fetching, failure: failure)
-        let primary = quota?.primary ?? quota?.secondary
         let showingPreviousUsage = failure != nil
             && QuotaMenuView.canShowPreviousUsage(quota, updatedAt: updatedAt)
         let failureScreen = failure != nil && !showingPreviousUsage
         let unavailable = offline || codexExecutableMissing || failureScreen
-        let percent = unavailable ? ""
-            : primary.map { "\($0.displayPercent(showRemaining: providerSettings.showRemaining(.codex)))%" } ?? (quota == nil ? "…" : "—")
+        let percent = unavailable ? "" : MenuBarFormat.render(providerSettings.menuBarFormat(.codex),
+            quota: quota?.effectiveQuota(account: account), showRemaining: providerSettings.showRemaining(.codex))
         if let button = item?.button {
-            button.image = CodexStatusIcon.image(size: 18, offline: unavailable)
-            button.imagePosition = unavailable ? .imageOnly : .imageLeading
-            button.attributedTitle = NSAttributedString(string: unavailable ? "" : " " + percent, attributes: [
+            iconUnavailable = unavailable
+            updateStatusSpinner()
+            button.image = codexStatusImage()
+            button.imagePosition = unavailable || percent.isEmpty ? .imageOnly : .imageLeading
+            button.attributedTitle = NSAttributedString(string: unavailable || percent.isEmpty ? "" : " " + percent, attributes: [
                 .font: NSFont.monospacedDigitSystemFont(ofSize: unavailable ? 9 : 11, weight: .medium),
                 .foregroundColor: unavailable ? NSColor.systemGray : NSColor.labelColor
             ])
             let unavailableTitle = L10n.text(offline ? "네트워크 연결 없음"
                 : codexExecutableMissing ? "Codex를 찾을 수 없음" : "사용량 조회 실패")
-            let usageAccessibility = L10n.text("Codex 남은 사용량 ") + percent
+            let usageAccessibility = "Codex " + percent
             button.setAccessibilityLabel(unavailable ? unavailableTitle
                 : showingPreviousUsage ? L10n.text("이전 조회") + " · " + usageAccessibility : usageAccessibility)
-            let usageTitle = L10n.text("Codex · %@ 잔여 %@", primary?.displayLabel(planType: account?.planType, isPrimary: quota?.primary != nil) ?? L10n.text("사용 한도"), percent)
+            let usageTitle = "Codex · " + percent
             button.setAccessibilityHelp(unavailable ? unavailableTitle
                 : showingPreviousUsage ? L10n.text("이전 조회") + " · " + usageTitle : usageTitle)
         }
@@ -433,12 +469,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
                 item?.autosaveName = "CodexQuota"
                 item?.button?.configureMenuTracking(target: self, action: #selector(statusClicked))
+                settingsWindow.update(.codex, status: account?.email ?? L10n.text("사용량 확인 중"))
                 refresh()
             }
             render()
         } else {
             notifications.invalidateResetCreditExpiry()
             if let item {
+                StatusMenuPresentation.unregister(item)
                 NSStatusBar.system.removeStatusItem(item)
                 self.item = nil
                 settingsWindow.update(.codex, status: L10n.text("메뉴바에서 꺼짐"))
@@ -447,6 +485,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         extraProviders.forEach { $0.synchronize() }
         settingsWindow.synchronize()
         updateFallbackItem()
+        updateStatusSpinner()
     }
 
     static func needsFallbackStatusItem(codexVisible: Bool, providerVisibility: [Bool]) -> Bool {
@@ -470,20 +509,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let title = L10n.text("PlusCodex 설정")
             fallbackItem?.button?.setAccessibilityLabel(title)
         } else if let fallbackItem {
+            StatusMenuPresentation.unregister(fallbackItem)
             NSStatusBar.system.removeStatusItem(fallbackItem)
             self.fallbackItem = nil
         }
     }
 
+    private func prepareMenuOpenUpdateCheck() {
+        if !offline { updater.checkOnMenuOpen() }
+        let checking = updater.isChecking
+        checkingForUpdates = checking
+        extraProviders.forEach { $0.presentation(offline: offline, checking: checking) }
+        render()
+    }
+
     @objc private func statusClicked() {
         guard let button = item?.button else { return }
-        if NSApp.currentEvent?.type == .rightMouseDown {
+        if StatusMenuPresentation.isRightClick {
             contextMenu().popUpFollowingSystemAppearance(from: button)
         } else {
             // Prepare the existing full-size checking screen before AppKit starts menu tracking.
-            if !offline { updater.checkOnMenuOpen() }
-            checkingForUpdates = updater.isChecking
-            render()
+            prepareMenuOpenUpdateCheck()
             builtItems?.menu.popUpFollowingSystemAppearance(from: button)
         }
     }
@@ -518,6 +564,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Notification clicks also reopen the app. Settings must only open from the menu,
         // otherwise they steal focus before the notification delegate opens the Codex thread.
         refresh()
+        extraProviders.forEach { $0.synchronize() }
         return false
     }
 
@@ -543,6 +590,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func testHookSetUpdatedAt(_ value: Date?) { updatedAt = value }
 
     private func updateActivityView() {
+        updateStatusSpinner()
         if stateScreenHeight != nil {
             if !menuTracking, activityItem?.isHidden == false { activityItem?.isHidden = true }
             return
@@ -565,6 +613,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let alpha: CGFloat = activityConnected ? 1 : 0.55
         if rowView?.alphaValue != alpha { rowView?.alphaValue = alpha }
         if !menuTracking, activityItem?.isHidden == true { activityItem?.isHidden = false }
+    }
+
+    /// A confirmed in-progress user task spins the Codex menu bar icon.
+    /// Automatic wake runs are maintenance work and never spin it.
+    static func shouldSpinStatusIcon(activities: [ThreadActivity], connected: Bool,
+                                     wakeThreadID: String?, unavailable: Bool, reduceMotion: Bool) -> Bool {
+        guard connected, !unavailable, !reduceMotion else { return false }
+        return activities.contains { $0.stateConfirmed && $0.isRunning && $0.id != wakeThreadID }
+    }
+
+    private var statusIconSpinning: Bool {
+        Self.shouldSpinStatusIcon(activities: activities, connected: activityConnected,
+                                  wakeThreadID: wakeSettings.threadID, unavailable: iconUnavailable,
+                                  reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+    }
+
+    private func codexStatusImage() -> NSImage? {
+        spinTimer != nil && !iconUnavailable
+            ? CodexStatusIcon.spinningImage(size: 18, frame: spinFrame)
+            : CodexStatusIcon.image(size: 18, offline: iconUnavailable)
+    }
+
+    private func updateStatusSpinner() {
+        let spinning = item != nil && statusIconSpinning
+        if spinning, spinTimer == nil {
+            let timer = Timer(timeInterval: 1.0 / 16, repeats: true) { [weak self] _ in
+                guard let self else { return }
+                self.spinFrame = (self.spinFrame + 1) % CodexStatusIcon.spinFrameCount
+                self.item?.button?.image = self.codexStatusImage()
+            }
+            spinTimer = timer
+            RunLoop.main.add(timer, forMode: .common)
+            RunLoop.main.add(timer, forMode: .eventTracking)
+        } else if !spinning, let timer = spinTimer {
+            timer.invalidate()
+            spinTimer = nil
+            spinFrame = 0
+            item?.button?.image = codexStatusImage()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) { networkMonitor.cancel() }

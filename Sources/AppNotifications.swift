@@ -80,6 +80,7 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
                 self.saveAlertState()
                 for alert in alerts {
                     let content = UNMutableNotificationContent()
+                    NotificationIconProvider.apply(to: content, provider: .codex)
                     content.title = alert.level == 2 ? L10n.text("Codex %@ 사용량 소진", alert.label) : L10n.text("Codex %@ 10% 남았습니다.", alert.label)
                     content.body = alert.level == 2
                         ? L10n.text("남은 사용량이 0%입니다. 초기화 시간을 확인하세요.")
@@ -105,14 +106,15 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
-    func start() {
+    func start(requestAuthorization: Bool = true) {
         center.delegate = self
         autoCleanup.synchronize()
         resetCreditExpiry.start()
         // A disabled reset must not leave an old OS request active when the
         // first usage fetch is offline or fails after relaunch.
         if !notificationSettings.isEnabled(.reset) { cancelPendingResetsIfDisabled() }
-        guard notificationSettings.anyEnabled || threadPreferences.hasEnabledOverrides else { return }
+        guard requestAuthorization,
+              notificationSettings.anyEnabled || threadPreferences.hasEnabledOverrides else { return }
         center.requestAuthorization(options: [.alert, .sound]) { _, error in
             if let error { NSLog("PlusCodex notification authorization: %@", error.localizedDescription) }
         }
@@ -120,6 +122,7 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
 
     private func threadUserInfo(_ activity: ThreadActivity) -> [String: Any] {
         var info: [String: Any] = ["threadID": activity.id]
+        if let urlString = activity.url?.absoluteString { info["threadURL"] = urlString }
         // Retries must check the original task, even after this chat starts a new turn.
         if let scope = ThreadNotificationPreferences.scope(for: activity) { info["notificationScope"] = scope }
         return info
@@ -140,7 +143,8 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
         guard activity.id != CodexWakeSettings().threadID else { return }
         guard isThreadNotificationEnabled(.completion, scope: ThreadNotificationPreferences.scope(for: activity)) else { return }
         let content = UNMutableNotificationContent()
-        content.title = L10n.text("Codex 작업 완료")
+        NotificationIconProvider.apply(to: content, provider: activity.provider)
+        content.title = L10n.text(activity.provider == .gemini ? "Gemini 작업 완료" : "Codex 작업 완료")
         content.body = activity.title
         content.sound = notificationSettings.sound
         content.userInfo = threadUserInfo(activity)
@@ -151,8 +155,10 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
     func failed(_ activity: ThreadActivity) {
         guard isThreadNotificationEnabled(.failure, scope: ThreadNotificationPreferences.scope(for: activity)) else { return }
         let content = UNMutableNotificationContent()
-        content.title = L10n.text("Codex 작업 실패")
-        let title = activity.title.isEmpty ? L10n.text("Codex 채팅") : activity.title
+        NotificationIconProvider.apply(to: content, provider: activity.provider)
+        content.title = L10n.text(activity.provider == .gemini ? "Gemini 작업 실패" : "Codex 작업 실패")
+        let fallbackChat = L10n.text(activity.provider == .gemini ? "Gemini 채팅" : "Codex 채팅")
+        let title = activity.title.isEmpty ? fallbackChat : activity.title
         content.body = L10n.text("%@ 작업을 완료하지 못했습니다. 작업 내용을 확인하세요.", title)
         content.sound = notificationSettings.sound
         content.userInfo = threadUserInfo(activity)
@@ -161,33 +167,36 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func attentionNeeded(_ event: ThreadAttentionEvent) {
+        let isGemini = event.activity.provider == .gemini
         let kind: NotificationKind
         let titleKey: String
         let bodyKey: String
         switch event.kind {
         case .approval:
             kind = .approval
-            titleKey = "Codex 승인 필요"
+            titleKey = isGemini ? "Gemini 승인 필요" : "Codex 승인 필요"
             bodyKey = "%@ 작업에서 승인이 필요합니다."
         case .answer:
             kind = .answer
-            titleKey = "Codex 답변 필요"
+            titleKey = isGemini ? "Gemini 답변 필요" : "Codex 답변 필요"
             bodyKey = "%@ 작업에서 답변을 기다리고 있습니다."
         case .mcp:
             kind = .mcp
-            titleKey = "Codex MCP 확인 필요"
+            titleKey = isGemini ? "Gemini MCP 확인 필요" : "Codex MCP 확인 필요"
             bodyKey = "%@ 작업에서 MCP 서버의 입력 또는 확인이 필요합니다."
         case .appApproval:
             kind = .appApproval
-            titleKey = "Codex 앱 승인 필요"
+            titleKey = isGemini ? "Gemini 앱 승인 필요" : "Codex 앱 승인 필요"
             bodyKey = "%@ 작업에서 연결된 앱의 작업 실행 승인이 필요합니다."
         }
         guard isThreadNotificationEnabled(kind, scope: ThreadNotificationPreferences.scope(for: event.activity)) else { return }
         let activity = event.activity
         let content = UNMutableNotificationContent()
+        NotificationIconProvider.apply(to: content, provider: activity.provider)
         content.title = L10n.text(titleKey)
+        let fallbackChat = L10n.text(isGemini ? "Gemini 채팅" : "Codex 채팅")
         content.body = activity.title.isEmpty
-            ? L10n.text(bodyKey, L10n.text("Codex 채팅"))
+            ? L10n.text(bodyKey, fallbackChat)
             : L10n.text(bodyKey, activity.title)
         content.sound = notificationSettings.sound
         content.userInfo = threadUserInfo(activity)
@@ -343,6 +352,7 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
                         continue
                     }
                     let content = UNMutableNotificationContent()
+                    NotificationIconProvider.apply(to: content, provider: .codex)
                     content.title = L10n.text("Codex %@ 초기화 시간", target.label)
                     content.body = L10n.text("사용량 초기화 예정 시간이 되었습니다. PlusCodex에서 남은 사용량을 확인하세요.")
                     content.sound = self.notificationSettings.sound
@@ -452,10 +462,14 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
            response.notification.request.content.userInfo["updateAvailable"] as? Bool == true {
             DispatchQueue.main.async { [weak self] in self?.onUpdateNotificationOpened?() }
         }
-        if response.actionIdentifier == UNNotificationDefaultActionIdentifier,
-           let id = response.notification.request.content.userInfo["threadID"] as? String,
-           UUID(uuidString: id) != nil, let url = URL(string: "codex://threads/\(id)") {
-            DispatchQueue.main.async { NSWorkspace.shared.open(url) }
+        if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+            let userInfo = response.notification.request.content.userInfo
+            if let urlString = userInfo["threadURL"] as? String, let url = URL(string: urlString) {
+                DispatchQueue.main.async { NSWorkspace.shared.open(url) }
+            } else if let id = userInfo["threadID"] as? String,
+                      UUID(uuidString: id) != nil, let url = URL(string: "codex://threads/\(id)") {
+                DispatchQueue.main.async { NSWorkspace.shared.open(url) }
+            }
         }
         completionHandler()
     }

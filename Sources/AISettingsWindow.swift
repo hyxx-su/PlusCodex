@@ -296,6 +296,8 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
     private let openClaudeURL: (URL) -> Void
     private let grokAvailability: () -> GrokAvailability.State
     private let openGrokURL: (URL) -> Void
+    private let geminiAvailability: () -> GeminiAvailability.State
+    private let openGeminiURL: (URL) -> Void
     private let openDiscordURL: (URL) -> Void
     private let notificationSettings: NotificationSettings
     private let wakeSettings: CodexWakeSettings
@@ -388,6 +390,8 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
                                         titleKey: String, isParent: Bool)] = []
     private var toggles: [AIProvider: NSSwitch] = [:]
     private var statuses: [AIProvider: NSTextField] = [:]
+    private var menuBarFormatView: MenuBarFormatSettingsView?
+    private weak var aiScrollView: NSScrollView?
     private var lastClaudeAvailability: ClaudeAvailability.State?
     private let loginToggle = NSSwitch()
     private let usageDisplayToggle = NSSwitch()
@@ -403,18 +407,22 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
          openClaudeURL: @escaping (URL) -> Void = { _ = NSWorkspace.shared.open($0) },
          grokAvailability: @escaping () -> GrokAvailability.State = { GrokAvailability.current() },
          openGrokURL: @escaping (URL) -> Void = { _ = NSWorkspace.shared.open($0) },
+         geminiAvailability: @escaping () -> GeminiAvailability.State = { GeminiAvailability.current() },
+         openGeminiURL: @escaping (URL) -> Void = { _ = NSWorkspace.shared.open($0) },
          openDiscordURL: @escaping (URL) -> Void = { _ = NSWorkspace.shared.open($0) }) {
         self.settings = settings
         self.claudeAvailability = claudeAvailability
         self.openClaudeURL = openClaudeURL
         self.grokAvailability = grokAvailability
         self.openGrokURL = openGrokURL
+        self.geminiAvailability = geminiAvailability
+        self.openGeminiURL = openGeminiURL
         self.openDiscordURL = openDiscordURL
         self.notificationSettings = notificationSettings
         self.wakeSettings = wakeSettings
         self.login = login
         self.language = language
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 600),
+        let window = SettingsTextEditingWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 600),
                               styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
         window.title = L10n.text("설정")
@@ -607,7 +615,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
                 "언어", "로그인 시 PlusCodex 자동 실행", "Codex 깨우기", "자동으로 깨우기", "깨우기 모델", "깨우기 메시지"
             ]),
             (1, "AI 표시", "sparkles", [
-                "AI 서비스", "사용량 표시", "사용한 양으로 표시하기"
+                "AI 서비스", "사용량 표시", "사용한 양으로 표시하기", "메뉴바 표시 형식"
             ]),
             (2, "알림", "bell", [
                 "알림 설정", "알림 소리", "재생 시간", "음량", "알림 테스트", "테스트 알림을 발송합니다.", "알림 자동 정리", "알림 항목", "작업 알림", "사용량 부족",
@@ -841,8 +849,9 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
 
         let usageCardHeight: CGFloat = 78
         // Leave a clear 24pt break between the provider and usage sections.
-        label("사용량 표시", in: ai, x: 13, y: 57, width: 437, size: 14, bold: true)
-        let usageCardTop: CGFloat = 49
+        let usageHeaderY = providerCard.frame.minY - 48
+        label("사용량 표시", in: ai, x: 13, y: usageHeaderY, width: 437, size: 14, bold: true)
+        let usageCardTop = providerCard.frame.minY - 56
         let usageCard = NSView(frame: NSRect(x: 13,
                                              y: usageCardTop - usageCardHeight,
                                              width: 437,
@@ -1080,6 +1089,34 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
                 for view in page.subviews { view.frame.origin.y += verticalOffset }
             }
         }
+        // Reuse the notification page's fixed top origin; existing cards keep their exact top spacing.
+        let aiPage = pages[1]
+        let formatTop = aiPage.bounds.height - usageCard.frame.minY + 24
+        let formatView = MenuBarFormatSettingsView(frame: NSRect(x: 13, y: formatTop, width: 437,
+            height: MenuBarFormatSettingsView.preferredHeight), settings: settings)
+        let aiDocument = NotificationDocumentView(frame: NSRect(x: 0, y: 0, width: aiPage.bounds.width,
+            height: formatTop + MenuBarFormatSettingsView.preferredHeight + 24))
+        for view in aiPage.subviews {
+            let frame = view.frame
+            view.removeFromSuperview()
+            view.frame.origin.y = aiPage.bounds.height - frame.maxY
+            aiDocument.addSubview(view)
+        }
+        aiDocument.addSubview(formatView)
+        menuBarFormatView = formatView
+        let aiScroll = NSScrollView(frame: aiPage.bounds)
+        aiScroll.drawsBackground = false
+        aiScroll.hasHorizontalScroller = false
+        aiScroll.hasVerticalScroller = true
+        aiScroll.autohidesScrollers = true
+        aiScroll.scrollerStyle = .overlay
+        aiScroll.verticalScrollElasticity = .none
+        aiScroll.contentView = NotificationClipView()
+        aiScroll.documentView = aiDocument
+        aiPage.addSubview(aiScroll)
+        aiScrollView = aiScroll
+        formatView.onHeightChanged = { [weak self] in self?.updateMenuBarFormatLayout() }
+        updateMenuBarFormatLayout()
         let patchNotes = PatchNotesView(frame: pages[3].bounds)
         pages[3].addSubview(patchNotes)
         patchNotesView = patchNotes
@@ -1182,6 +1219,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         closeButton?.setAccessibilityLabel(L10n.text("닫기"))
         configureDiscordButton()
         patchNotesView?.reloadLocalization()
+        menuBarFormatView?.reloadLocalization()
         releaseButton?.setAccessibilityLabel(L10n.text("릴리즈 보기"))
         makerButton?.setAccessibilityLabel(L10n.text("내 GitHub 계정"))
         navigationSearchField?.placeholderString = L10n.text("설정 검색")
@@ -1234,6 +1272,10 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         if index == 2 && !wasVisible {
             scrollNotificationsToTop()
         }
+        if index == 1 && !wasVisible, let scroll = aiScrollView {
+            scroll.contentView.scroll(to: .zero)
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
     }
     private func scrollNotificationsToTop() {
         guard let scroll = notificationScrollView else { return }
@@ -1250,6 +1292,9 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
     @objc private func selectNavigationSearchResult(_ sender: NSButton) {
         showPage(sender.tag)
         guard let row = navigationSearchRows.first(where: { $0.button === sender }) else { return }
+        if row.titleKey == "메뉴바 표시 형식", let view = menuBarFormatView {
+            view.scrollToVisible(view.bounds)
+        }
         if row.titleKey == "언어" { window?.makeFirstResponder(languagePicker) }
         if row.titleKey == "깨우기 모델" { window?.makeFirstResponder(wakeModelPicker) }
         if row.titleKey == "깨우기 메시지" { window?.makeFirstResponder(wakeMessageField) }
@@ -1392,9 +1437,11 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         for provider in AIProvider.allCases {
             let claudeState = provider == .claude ? claudeAvailability() : .availableOrUnknown
             let grokState = provider == .grok ? grokAvailability() : .readyToCheck
+            let geminiState = provider == .gemini ? geminiAvailability() : .readyToCheck
             let enabled = settings.enabled(provider)
                 && claudeState == .availableOrUnknown
                 && grokState == .readyToCheck
+                && geminiState == .readyToCheck
                 && (provider != .grok || settings.grokUsageVerified)
             toggles[provider]?.state = enabled ? .on : .off
             statuses[provider]?.alphaValue = enabled ? 1 : 0.5
@@ -1408,9 +1455,16 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
                 statuses[provider]?.stringValue = L10n.text(guidance)
             } else if provider == .grok && settings.enabled(provider) && !settings.grokUsageVerified {
                 statuses[provider]?.stringValue = L10n.text("사용량 확인 중")
+            } else if provider == .gemini, let guidance = geminiState.guidance {
+                statuses[provider]?.stringValue = L10n.text(guidance)
+            } else if provider == .gemini && !enabled {
+                statuses[provider]?.stringValue = L10n.text("메뉴바에서 꺼짐")
             }
             if provider == .claude { lastClaudeAvailability = claudeState }
         }
+        menuBarFormatView?.synchronize(enabledProviders: Set(AIProvider.allCases.filter {
+            toggles[$0]?.state == .on
+        }))
         loginToggle.state = login.requested ? .on : .off
         for kind in NotificationKind.allCases {
             notificationToggles[kind]?.state = notificationSettings.isEnabled(kind) ? .on : .off
@@ -1438,8 +1492,20 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         case .codex: guidance = nil
         case .claude: guidance = claudeAvailability().guidance
         case .grok: guidance = grokAvailability().guidance
+        case .gemini: guidance = geminiAvailability().guidance
         }
         statuses[provider]?.stringValue = guidance.map { L10n.text($0) } ?? status
+    }
+    func updateMenuBarQuota(_ provider: AIProvider, quota: Quota?) {
+        menuBarFormatView?.updateQuota(quota, provider: provider)
+    }
+    private func updateMenuBarFormatLayout() {
+        guard let view = menuBarFormatView, let scroll = aiScrollView, let document = scroll.documentView else { return }
+        document.setFrameSize(NSSize(width: document.frame.width,
+            height: max(scroll.bounds.height, view.frame.maxY + 24)))
+        // Shrinking the list must not leave the viewport scrolled into an empty tail.
+        scroll.contentView.scroll(to: scroll.contentView.bounds.origin)
+        scroll.reflectScrolledClipView(scroll.contentView)
     }
     private func configureWakeModelPicker() {
         wakeModelPicker.displayTitle = "\(wakeSettings.displayName) · Light"
@@ -2234,6 +2300,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
                     return
                 }
                 let content = UNMutableNotificationContent()
+                NotificationIconProvider.apply(to: content, provider: .codex)
                 content.title = L10n.text("알림 테스트")
                 content.body = L10n.text("테스트 알림입니다.")
                 content.sound = self.notificationSettings.sound
@@ -2361,6 +2428,14 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
             settings.setEnabled(false, for: provider)
             synchronize()
             openGrokURL(destination)
+            return
+        }
+        if provider == .gemini && sender.state == .on,
+           let destination = geminiAvailability().actionURL {
+            sender.state = .off
+            settings.setEnabled(false, for: provider)
+            synchronize()
+            openGeminiURL(destination)
             return
         }
         settings.setEnabled(sender.state == .on, for: provider); synchronize()

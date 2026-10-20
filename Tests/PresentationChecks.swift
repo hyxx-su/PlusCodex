@@ -83,12 +83,20 @@ private final class StatusMenuActionTarget: NSObject {
 
     private static func assertStatusMenuInput() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        defer { NSStatusBar.system.removeStatusItem(item) }
+        let secondItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        defer {
+            StatusMenuPresentation.unregister(item)
+            StatusMenuPresentation.unregister(secondItem)
+            NSStatusBar.system.removeStatusItem(item)
+            NSStatusBar.system.removeStatusItem(secondItem)
+        }
         let button = item.button!
+        let secondButton = secondItem.button!
         let target = StatusMenuActionTarget()
         let action = #selector(StatusMenuActionTarget.activate(_:))
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         button.configureMenuTracking(target: target, action: action)
+        secondButton.configureMenuTracking(target: target, action: action)
 
         let expected: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown]
         let configured = UInt(button.sendAction(on: expected))
@@ -102,6 +110,21 @@ private final class StatusMenuActionTarget: NSObject {
         button.configureMenuTracking(target: target, action: action)
         button.performClick(nil)
         precondition(target.activations == 2, "Reconfiguration must not duplicate the target action")
+
+        if let secondWindow = secondButton.window {
+            let secondCenter = secondWindow.convertToScreen(secondButton.convert(secondButton.bounds, to: nil))
+            let hitPoint = NSPoint(x: secondCenter.midX, y: secondCenter.midY)
+            precondition(StatusMenuPresentation.targetStatusButton(at: hitPoint, excluding: secondButton) != secondButton,
+                         "Clicking the same status button must close the menu rather than reopening it")
+            precondition(StatusMenuPresentation.targetStatusButton(at: hitPoint, excluding: button) === secondButton,
+                         "Clicking another status button while a menu is open must target that button")
+            StatusMenuPresentation.scheduleActivation(secondButton, rightClick: false)
+            _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.05))
+            precondition(target.activations == 3 && target.lastSender === secondButton)
+            StatusMenuPresentation.unregister(secondItem)
+            precondition(StatusMenuPresentation.targetStatusButton(at: hitPoint, excluding: button) == nil,
+                         "Unregistered status items must not be targeted")
+        }
         print("PASS: status menus subscribe only to left/right mouse-down; programmatic activation dispatches once")
     }
 
