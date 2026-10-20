@@ -7,8 +7,46 @@ enum CLIInstallation {
         if provider == .codex {
             return codexExecutable(appBundles: codexAppBundles(home: home), directories: directories)
         }
+        if provider == .gemini {
+            return findExecutable(name: "gemini", directories: directories)
+                ?? antigravityExecutable(home: home, directories: directories)
+        }
         let name = provider == .claude ? "claude" : provider.rawValue
         return findExecutable(name: name, directories: directories)
+    }
+
+    static func antigravityExecutable(home: URL = FileManager.default.homeDirectoryForCurrentUser,
+                                      environment: [String: String] = ProcessInfo.processInfo.environment) -> String? {
+        antigravityExecutable(home: home, directories: searchDirectories(home: home, environment: environment))
+    }
+
+    static func antigravityExecutable(home: URL, directories: [String]) -> String? {
+        for bundle in antigravityAppBundles(home: home) {
+            for relativePath in [
+                "Contents/Resources/app/bin/agy",
+                "Contents/MacOS/Electron"
+            ] {
+                let candidate = bundle.appendingPathComponent(relativePath).path
+                if isExecutable(candidate) { return candidate }
+            }
+        }
+        let agyHomeBin = home.appendingPathComponent(".antigravity/antigravity/bin/agy").path
+        if isExecutable(agyHomeBin) { return agyHomeBin }
+        return findExecutable(name: "agy", directories: directories)
+    }
+
+    static func antigravityAppBundles(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> [URL] {
+        var bundles: [URL] = []
+        for id in ["com.google.antigravity", "dev.antigravity.app"] {
+            if let registered = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
+                bundles.append(registered)
+            }
+        }
+        for directory in [URL(fileURLWithPath: "/Applications"), home.appendingPathComponent("Applications")] {
+            bundles.append(directory.appendingPathComponent("Antigravity.app"))
+        }
+        var seen = Set<String>()
+        return bundles.filter { seen.insert($0.standardizedFileURL.path).inserted }
     }
 
     /// The desktop app's internal CLI location has changed across releases.
@@ -43,7 +81,8 @@ enum CLIInstallation {
 
     private static func searchDirectories(home: URL, environment: [String: String]) -> [String] {
         var directories = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
-        directories += [home.appendingPathComponent(".local/bin").path,
+        directories += [home.appendingPathComponent(".antigravity/antigravity/bin").path,
+                        home.appendingPathComponent(".local/bin").path,
                         home.appendingPathComponent(".npm-global/bin").path,
                         home.appendingPathComponent(".bun/bin").path,
                         home.appendingPathComponent(".volta/bin").path,

@@ -1,12 +1,22 @@
 import Foundation
 
 enum AIProvider: String, CaseIterable {
-    case codex, claude, grok
+    case codex, claude, grok, gemini
     var name: String {
-        switch self { case .codex: return "Codex"; case .claude: return "Claude"; case .grok: return "Grok" }
+        switch self {
+        case .codex: return "Codex"
+        case .claude: return "Claude"
+        case .grok: return "Grok"
+        case .gemini: return "Gemini"
+        }
     }
     var resource: String {
-        switch self { case .codex: return "Codex"; case .claude: return "Claude"; case .grok: return "Grok" }
+        switch self {
+        case .codex: return "Codex"
+        case .claude: return "Claude"
+        case .grok: return "Grok"
+        case .gemini: return "Gemini"
+        }
     }
 }
 
@@ -19,6 +29,19 @@ final class ProviderSettings {
     func generation(_ provider: AIProvider) -> Int { generations[provider, default: 0] }
     var onChange: (() -> Void)?
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+    func menuBarFormat(_ provider: AIProvider) -> String {
+        guard let value = defaults.string(forKey: "provider.\(provider.rawValue).menuBarFormat"),
+              MenuBarFormat.isValid(value) else { return MenuBarFormat.defaultFormat }
+        return value
+    }
+    @discardableResult
+    func setMenuBarFormat(_ value: String, for provider: AIProvider) -> Bool {
+        guard MenuBarFormat.isValid(value) else { return false }
+        guard menuBarFormat(provider) != value else { return true }
+        defaults.set(value, forKey: "provider.\(provider.rawValue).menuBarFormat")
+        onChange?()
+        return true
+    }
     var claudeShowRemaining: Bool {
         showRemaining(.claude)
     }

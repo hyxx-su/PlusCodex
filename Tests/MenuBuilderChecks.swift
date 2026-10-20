@@ -21,7 +21,7 @@ struct MenuBuilderChecks {
         assertVisible(intro, duringIntro: false)
         assertContextMenus()
         print("PASS: intro menu shows only the logo panel; dashboard restores all rows")
-        print("PASS: Codex/Claude/Grok context menus expose separate hide/quit actions in Korean and English")
+        print("PASS: Codex/Claude/Grok/Gemini context menus expose only separate hide/quit actions in Korean and English")
     }
 
     static func assertContextMenus() {
@@ -35,7 +35,7 @@ struct MenuBuilderChecks {
         }
         let settings = ProviderSettings(defaults: providerDefaults)
         let delegate = AppDelegate()
-        let providers = [AIProvider.claude, .grok].map {
+        let providers = [AIProvider.claude, .grok, .gemini].map {
             ProviderStatusController(provider: $0, settings: settings,
                                      claudeAvailability: { .availableOrUnknown },
                                      grokAvailability: { .readyToCheck })

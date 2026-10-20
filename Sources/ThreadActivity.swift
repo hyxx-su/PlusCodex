@@ -43,6 +43,13 @@ struct ThreadTurnState: Equatable {
     var status: String
     let startedAtMs: Double
 
+    init(key: String, id: String, status: String, startedAtMs: Double = 0) {
+        self.key = key
+        self.id = id
+        self.status = status
+        self.startedAtMs = startedAtMs
+    }
+
     init?(key: String, value: Any) {
         guard let value = value as? [String: Any],
               let id = value["turnId"] as? String,
@@ -64,6 +71,7 @@ struct ThreadActivity: Equatable {
     var unread: Bool
     var updatedAt: Double
     var stateConfirmed = true
+    var provider: AIProvider = .codex
     var statusLabel: String {
         !stateConfirmed ? L10n.text("작업 상태 확인 불가")
             : isRunning ? L10n.text("작업 중") : L10n.text("완료 · 미확인")
@@ -94,7 +102,12 @@ struct ThreadActivity: Equatable {
     var isVisible: Bool { isRunning || (runtime == "idle" && unread) }
     var url: URL? {
         guard UUID(uuidString: id) != nil else { return nil }
-        return URL(string: "codex://threads/\(id)")
+        switch provider {
+        case .gemini:
+            return URL(string: "antigravity://conversations/\(id)")
+        case .codex, .claude, .grok:
+            return URL(string: "codex://threads/\(id)")
+        }
     }
 }
 

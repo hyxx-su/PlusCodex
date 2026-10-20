@@ -4,6 +4,7 @@ import ServiceManagement
 @main struct SettingsChecks {
     static func main() throws {
         _ = NSApplication.shared
+        verifyGeminiPermissionActivation()
         let suite = "PlusCodex.settings.tests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -26,11 +27,19 @@ import ServiceManagement
         let window = AISettingsWindow(settings: settings, wakeSettings: wakeSettings, login: login,
                                       claudeAvailability: { .availableOrUnknown },
                                       grokAvailability: { .readyToCheck },
+                                      geminiAvailability: { .readyToCheck },
                                       openDiscordURL: { openedDiscordURL = $0 })
         func descendants(_ view: NSView) -> [NSView] {
             view.subviews + view.subviews.flatMap(descendants)
         }
+        func hasOnlyRequestedTooltips(_ views: [NSView]) -> Bool {
+            views.allSatisfy {
+                $0.toolTip == nil || $0.identifier?.rawValue.hasPrefix("menuBarFormat-help-") == true
+            }
+        }
         let root = window.window!.contentView!
+        precondition(window.window is SettingsTextEditingWindow,
+                     "The actual settings window must route field-editor shortcuts without an Edit menu")
         let discord = descendants(root).compactMap { $0 as? NSButton }
             .first { $0.identifier?.rawValue == "settings-discord" }!
         precondition(discord.title == "디스코드 커뮤니티" && discord.accessibilityLabel() == "디스코드 커뮤니티")
@@ -47,11 +56,11 @@ import ServiceManagement
         discord.performClick(nil)
         precondition(openedDiscordURL?.absoluteString == "https://discord.gg/jR87pagNRG")
         try verifyDiscordLocalization(in: window, button: discord, settings: settings)
-        precondition(descendants(root).allSatisfy { $0.toolTip == nil },
-                     "Settings controls and footer links must not show hover tooltips")
+        precondition(hasOnlyRequestedTooltips(descendants(root)),
+                     "Only the explicitly requested provider help buttons may show hover tooltips")
         wakeSettings.lastFailure = "Wake failure detail"
         window.synchronize()
-        precondition(descendants(root).allSatisfy { $0.toolTip == nil },
+        precondition(hasOnlyRequestedTooltips(descendants(root)),
                      "A failed wake must not restore its old tooltip")
         let wakeDescription = descendants(root).compactMap { $0 as? NSTextField }
             .first { $0.accessibilityHelp() == "Wake failure detail" }!
@@ -61,7 +70,7 @@ import ServiceManagement
                      "Recovery must restore accessible guidance without a hover tooltip")
         let toggles = descendants(window.window!.contentView!).compactMap { $0 as? NSSwitch }
         let providerToggles = toggles.filter { AIProvider(rawValue: $0.identifier?.rawValue ?? "") != nil }
-        precondition(providerToggles.count == 3)
+        precondition(providerToggles.count == 4)
         let notificationToggles = toggles.filter {
             guard let raw = $0.identifier?.rawValue, raw.hasPrefix("notification-") else { return false }
             return NotificationKind(rawValue: String(raw.dropFirst("notification-".count))) != nil
@@ -82,7 +91,8 @@ import ServiceManagement
         let expirySettings = NotificationSettings(defaults: defaults)
         let expiryWindow = AISettingsWindow(settings: settings, notificationSettings: expirySettings, login: login,
                                             claudeAvailability: { .availableOrUnknown },
-                                            grokAvailability: { .readyToCheck })
+                                            grokAvailability: { .readyToCheck },
+                                            geminiAvailability: { .readyToCheck })
         let expiryToggle = descendants(expiryWindow.window!.contentView!).compactMap { $0 as? NSSwitch }
             .first { $0.identifier?.rawValue == "notification-resetCreditExpiry" }!
         precondition(expiryToggle.state == .on && expiryToggle.accessibilityLabel() == "초기화권 만료")
@@ -103,7 +113,7 @@ import ServiceManagement
         cleanupToggle.state = .off
         _ = cleanupToggle.sendAction(cleanupToggle.action, to: cleanupToggle.target)
         precondition(!expirySettings.autoCleanupEnabled && expirySettings.autoCleanupStartedAt == nil)
-        precondition(descendants(expiryWindow.window!.contentView!).allSatisfy { $0.toolTip == nil },
+        precondition(hasOnlyRequestedTooltips(descendants(expiryWindow.window!.contentView!)),
                      "Toggling notification settings must not reintroduce hover tooltips")
         precondition(L10n.translation("알림 자동 정리", language: .english) == "Auto-clear notifications")
         if CommandLine.arguments.contains("--render-auto-cleanup") {
@@ -128,6 +138,7 @@ import ServiceManagement
         precondition(providerToggles.first { $0.identifier?.rawValue == "codex" }?.state == .on)
         precondition(providerToggles.first { $0.identifier?.rawValue == "claude" }?.state == .off)
         precondition(providerToggles.first { $0.identifier?.rawValue == "grok" }?.state == .off)
+        precondition(providerToggles.first { $0.identifier?.rawValue == "gemini" }?.state == .off)
         precondition(toggles.first { $0.identifier?.rawValue == "launchAtLogin" }?.state == .off)
         precondition(window.window!.title == "설정")
         precondition(window.window!.contentView!.frame.size == NSSize(width: 680, height: 600))
@@ -139,7 +150,9 @@ import ServiceManagement
             notificationNavigation.performClick(nil)
             root.layoutSubtreeIfNeeded()
             let scroll = descendants(root).compactMap { $0 as? NSScrollView }
-                .first { ($0.documentView?.frame.height ?? 0) > $0.frame.height }!
+                .first { scroll in descendants(scroll).contains {
+                    $0.identifier?.rawValue == "notification-permission"
+                } }!
             let controls = descendants(scroll.documentView!).filter { view in
                 guard !view.isHidden else { return false }
                 return ["notification-permission", "notification-autoCleanup", "notification-completion"].contains(view.identifier?.rawValue ?? "")
@@ -176,9 +189,10 @@ import ServiceManagement
         let expandedWindow = AISettingsWindow(settings: settings,
                                               notificationSettings: customSoundSettings, login: login,
                                               claudeAvailability: { .availableOrUnknown },
-                                              grokAvailability: { .readyToCheck })
+                                              grokAvailability: { .readyToCheck },
+                                              geminiAvailability: { .readyToCheck })
         verifyNotificationControls(in: expandedWindow, expectedCount: 7)
-        precondition(descendants(expandedWindow.window!.contentView!).allSatisfy { $0.toolTip == nil })
+        precondition(hasOnlyRequestedTooltips(descendants(expandedWindow.window!.contentView!)))
         let volumeSlider = descendants(expandedWindow.window!.contentView!).compactMap { $0 as? NSSlider }
             .first { $0.accessibilityLabel() == "음량" }!
         precondition(volumeSlider.minValue == 0 && volumeSlider.maxValue == 200)
@@ -191,7 +205,7 @@ import ServiceManagement
         claude.state = .off
         _ = claude.sendAction(claude.action, to: claude.target)
         precondition(!settings.enabled(.claude))
-        for provider in [AIProvider.claude, .grok] {
+        for provider in [AIProvider.claude, .grok, .gemini] {
             settings.setEnabled(false, for: provider)
             let controller = ProviderStatusController(provider: provider, settings: settings)
             let settingsRow = controller.testHookMenu.items.first { $0.title == "설정" }
@@ -214,8 +228,138 @@ import ServiceManagement
                 let view = controller.testHookMenu.items[0].view!
                 precondition(view.subviews.contains { $0 is QuotaLoadingView } == (offline || checking))
             }
+            controller.presentation(offline: false, checking: true)
+            controller.menuWillOpen(controller.testHookMenu)
+            precondition((controller.testHookMenu.items[0].view as? QuotaMenuView)?.checkingForUpdates == true)
+            controller.presentation(offline: false, checking: false)
+            let activeDashboard = controller.testHookMenu.items[0].view as? QuotaMenuView
+            precondition(activeDashboard?.checkingForUpdates == false,
+                         "An open provider menu must leave the update-checking overlay as soon as checking finishes")
+            let updatedQuota = Quota(primary: QuotaWindow(usedPercent: 20, windowDurationMins: 300, resetsAt: nil), secondary: nil)
+            controller.testHookPresentation(quota: updatedQuota, fetching: false, checking: false, offline: false)
+            let task = ThreadActivity(id: "gemini-task", title: "Test Gemini Task", runtime: "active",
+                                      unread: false, updatedAt: 100, stateConfirmed: true, provider: .gemini)
+            controller.testHookSetActivities([task], connected: true)
+            precondition(!controller.testHookActivityItem.isHidden, "Activity item must be visible when tasks exist")
+            precondition(controller.testHookMenu.items.filter { !$0.isHidden }.count == 5)
+            controller.menuDidClose(controller.testHookMenu)
         }
-        print("PASS: login, native switches, notification hit targets, Discord footer, Claude/Grok loading and stable overlays")
+        print("PASS: login, native switches, notification hit targets, Discord footer, Claude/Grok loading, stable overlays and task row")
+    }
+
+    private static func verifyGeminiPermissionActivation() {
+        let suite = "PlusCodex.GeminiPermission.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = ProviderSettings(defaults: defaults)
+        var granted = false
+        var availability = GeminiAvailability.State.readyToCheck
+        var opens = 0
+        var canOpen = true
+        let controller = AISettingsWindow(settings: settings,
+            geminiAvailability: { availability }, openGeminiURL: { _ in },
+            geminiAccessibilityGranted: { granted },
+            openGeminiAccessibility: { opens += 1; return canOpen })
+        settings.onChange = { [weak controller] in controller?.synchronize() }
+        precondition(L10n.translation("손쉬운 사용 권한이 필요합니다", language: .english)
+            == "Accessibility permission is required")
+        func descendants(_ view: NSView) -> [NSView] {
+            view.subviews + view.subviews.flatMap(descendants)
+        }
+        let controls = descendants(controller.window!.contentView!)
+        let toggle = controls.compactMap { $0 as? NSSwitch }
+            .first { $0.identifier?.rawValue == "gemini" }!
+        func enable() {
+            toggle.state = .on
+            precondition(toggle.sendAction(toggle.action, to: toggle.target))
+        }
+        func wait(_ seconds: TimeInterval) {
+            let deadline = Date().addingTimeInterval(seconds)
+            while Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        }
+        func warning(_ key: String) -> NSTextField? {
+            controls.compactMap { $0 as? NSTextField }.first { $0.stringValue == L10n.text(key) }
+        }
+
+        enable()
+        precondition(toggle.state == .off && !settings.enabled(.gemini) && opens == 0)
+        let message = warning("손쉬운 사용 권한이 필요합니다")!
+        precondition(message.textColor == .systemRed && message.alphaValue == 1,
+                     "Show the permission requirement in red before requesting native consent")
+        controller.update(.gemini, status: "Background update")
+        precondition(message.stringValue == L10n.text("손쉬운 사용 권한이 필요합니다"),
+                     "Background status must not erase the activation warning")
+        enable()
+        wait(0.85)
+        precondition(opens == 1 && !settings.enabled(.gemini) && toggle.state == .off,
+                     "Repeated clicks must dispatch one consent request and never enable without consent")
+        enable()
+        enable()
+        precondition(opens == 1 && toggle.state == .off,
+                     "A retry still waits for the warning display delay and coalesces rapid clicks")
+        wait(0.85)
+        precondition(opens == 2 && !settings.enabled(.gemini) && toggle.state == .off,
+                     "Clicking again while the red warning remains must dispatch a fresh consent request")
+        granted = true
+        NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: NSApp)
+        precondition(settings.enabled(.gemini) && toggle.state == .on)
+        precondition(message.textColor == .secondaryLabelColor && message.alphaValue == 1)
+        precondition(ProviderSettings(defaults: defaults).enabled(.gemini), "Persist ON only after consent")
+        wait(0.8)
+        precondition(opens == 2, "Granted permission must stop further requests")
+        toggle.state = .off
+        _ = toggle.sendAction(toggle.action, to: toggle.target)
+        enable()
+        precondition(settings.enabled(.gemini) && toggle.state == .on && opens == 2,
+                     "Already-granted permission enables immediately")
+
+        granted = false
+        NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: NSApp)
+        precondition(!settings.enabled(.gemini) && toggle.state == .off,
+                     "Revoked permission must not leave a saved ON value")
+        enable()
+        controller.windowWillClose(Notification(name: NSWindow.willCloseNotification, object: controller.window))
+        granted = true
+        wait(0.85)
+        controller.synchronize()
+        precondition(!settings.enabled(.gemini) && opens == 2,
+                     "Closing settings cancels both delayed redirect and automatic activation")
+
+        granted = false
+        enable()
+        availability = .notAuthenticated
+        granted = true
+        controller.synchronize()
+        precondition(!settings.enabled(.gemini) && toggle.state == .off,
+                     "Permission alone must not bypass a changed login state")
+        availability = .readyToCheck
+        granted = false
+        enable()
+        wait(0.8)
+        granted = true
+        wait(0.65)
+        precondition(settings.enabled(.gemini) && toggle.state == .on && opens == 3,
+                     "Polling completes activation even without an app-activation notification")
+
+        granted = false
+        NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: NSApp)
+        canOpen = false
+        enable()
+        wait(0.85)
+        precondition(!settings.enabled(.gemini) && opens == 4)
+        precondition(warning("손쉬운 사용 설정을 열지 못했습니다. 시스템 설정에서 PlusCodex 권한을 확인해 주세요.")?.textColor == .systemRed)
+        enable()
+        controller.windowWillClose(Notification(name: NSWindow.willCloseNotification, object: controller.window))
+
+        settings.setEnabled(true, for: .gemini)
+        var fetches = 0
+        let status = ProviderStatusController(provider: .gemini, settings: settings,
+            geminiAvailability: { .readyToCheck }, geminiAccessibilityGranted: { false },
+            fetchUsage: { _ in fetches += 1; throw QuotaError.missingExecutable })
+        status.synchronize()
+        precondition(!settings.enabled(.gemini) && !status.testHookHasStatusItem && fetches == 0,
+                     "A saved setting cannot start Gemini without OS permission")
+        print("PASS: Gemini red warning retry, rapid-click coalescing, delayed native consent, consent-only persistence, grant polling and close/login guards")
     }
 
     private static func verifyDiscordLocalization(in controller: AISettingsWindow, button: NSButton,
@@ -223,10 +367,11 @@ import ServiceManagement
         let defaults = UserDefaults.standard
         let arguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
         let appearance = NSApp.appearance
-        let providers = [AIProvider.claude, .grok].map {
+        let providers = [AIProvider.claude, .grok, .gemini].map {
             ProviderStatusController(provider: $0, settings: settings,
                                      claudeAvailability: { .availableOrUnknown },
-                                     grokAvailability: { .readyToCheck })
+                                     grokAvailability: { .readyToCheck },
+                                     geminiAvailability: { .readyToCheck })
         }
         defer {
             defaults.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)

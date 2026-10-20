@@ -268,6 +268,7 @@ final class ResetCreditExpiryNotifications {
                 // Do not submit a catch-up reminder which would arrive after expiry.
                 guard fireAt < target.expiresAt else { continue }
                 let content = UNMutableNotificationContent()
+                NotificationIconProvider.apply(to: content, provider: .codex)
                 content.title = L10n.text("Codex 초기화권 만료 예정")
                 let formatter = DateFormatter()
                 formatter.locale = L10n.locale
