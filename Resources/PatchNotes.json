@@ -1,5 +1,43 @@
 [
   {
+    "version": "v1.2.0",
+    "publishedAt": "2026-10-20T05:40:00Z",
+    "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.2.0",
+    "body": "# PlusCodex v1.2.0\n\n- Gemini 사용량 및 Antigravity 작업 상태 연동\n- Gemini 작업 알림과 현재 채팅 읽음 감지\n- AI별 메뉴바 표시 형식과 초기화 시간 커스텀\n- 토큰 도움말과 빠른 선택, 입력창 편집 단축키 개선\n- 손쉬운 사용 권한 안내와 허용 후 활성화 흐름 개선\n\nPlusCodex v1.0.0~v1.9.9는 베타 버전입니다.",
+    "summary": {
+      "ko": "• Gemini 사용량·작업 알림 연동\n• AI별 메뉴바 표시 커스텀",
+      "en": "• Gemini usage and task alerts\n• Custom menu-bar formats"
+    },
+    "highlights": {
+      "ko": [
+        "Gemini 5시간·주간·Argon 사용량 및 초기화 시간 표시",
+        "Antigravity 작업 상태와 완료·실패·확인 대기 알림 연동",
+        "현재 채팅 읽음 감지와 읽은 작업의 알림 정리",
+        "Gemini 활성화 시 손쉬운 사용 권한 안내 및 허용 후 자동 활성화",
+        "AI별 메뉴바 표시 형식과 실시간 미리보기 추가",
+        "자동 선택·5시간·주간·Argon 및 초기화 시간 토큰 지원",
+        "사용 중인 AI만 표시하고 아이콘·이름·도움말 정렬 개선",
+        "작은 호버 도움말에서 토큰 복사 및 빠른 선택 지원",
+        "입력창 복사·붙여넣기 및 실행 취소·다시 실행 개선",
+        "AI 알림 로고의 흰 배경과 검정 Codex 로고 적용",
+        "PR 빌드·36개 회귀 테스트 및 필수 CI 검사 추가"
+      ],
+      "en": [
+        "Gemini five-hour, weekly and Argon usage with reset times",
+        "Antigravity task status and completion, failure and attention alerts",
+        "Current-chat read detection and read-task notification cleanup",
+        "Accessibility permission guidance and Gemini activation after approval",
+        "Per-AI menu-bar formats with live previews",
+        "Auto, five-hour, weekly, Argon and reset-time tokens",
+        "Enabled providers only, with aligned icons, names and help controls",
+        "Compact hover help with token copying and Quick Select",
+        "Copy, paste, undo and redo improvements in format fields",
+        "White-backed notification logos and a black Codex logo",
+        "PR builds, 36 regression checks and a required CI gate"
+      ]
+    }
+  },
+  {
     "version": "v1.2.0-beta.1",
     "publishedAt": "2026-10-14T12:24:13Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.2.0-beta.1",
