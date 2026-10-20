@@ -119,8 +119,16 @@ private final class StatusMenuActionTarget: NSObject {
             precondition(StatusMenuPresentation.targetStatusButton(at: hitPoint, excluding: button) === secondButton,
                          "Clicking another status button while a menu is open must target that button")
             StatusMenuPresentation.scheduleActivation(secondButton, rightClick: false)
-            _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.05))
-            precondition(target.activations == 3 && target.lastSender === secondButton)
+            // A RunLoop iteration may service another source before the handoff timer.
+            // Wait for completion, including the bounded mouse-release deferral, rather than one iteration.
+            let activationDeadline = Date().addingTimeInterval(2)
+            while target.activations < 3 && Date() < activationDeadline {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            }
+            precondition(target.activations == 3 && target.lastSender === secondButton,
+                         "The asynchronous status-menu handoff must complete once before the deadline")
+            RunLoop.main.run(until: Date().addingTimeInterval(0.25))
+            precondition(target.activations == 3, "The handoff must not dispatch again on a later iteration")
             StatusMenuPresentation.unregister(secondItem)
             precondition(StatusMenuPresentation.targetStatusButton(at: hitPoint, excluding: button) == nil,
                          "Unregistered status items must not be targeted")

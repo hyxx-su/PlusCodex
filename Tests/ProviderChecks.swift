@@ -212,7 +212,7 @@ import AppKit
         validationSettings.setEnabled(true, for: .gemini)
         var geminiFetches = 0
         let toggleController = ProviderStatusController(provider: .gemini, settings: validationSettings,
-            geminiAvailability: { .readyToCheck }, fetchUsage: { _ in
+            geminiAvailability: { .readyToCheck }, geminiAccessibilityGranted: { true }, fetchUsage: { _ in
                 geminiFetches += 1
                 return QuotaSnapshot(quota: weekly, account: CodexAccount(email: "user@example.com", planType: "Pro"))
             })

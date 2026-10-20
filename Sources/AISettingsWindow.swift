@@ -298,6 +298,12 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
     private let openGrokURL: (URL) -> Void
     private let geminiAvailability: () -> GeminiAvailability.State
     private let openGeminiURL: (URL) -> Void
+    private let geminiAccessibilityGranted: () -> Bool
+    private let openGeminiAccessibility: () -> Bool
+    private var pendingGeminiEnablement = false
+    private var geminiPermissionMessage: String?
+    private var geminiPermissionRedirect: Timer?
+    private var geminiPermissionPoll: Timer?
     private let openDiscordURL: (URL) -> Void
     private let notificationSettings: NotificationSettings
     private let wakeSettings: CodexWakeSettings
@@ -409,6 +415,13 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
          openGrokURL: @escaping (URL) -> Void = { _ = NSWorkspace.shared.open($0) },
          geminiAvailability: @escaping () -> GeminiAvailability.State = { GeminiAvailability.current() },
          openGeminiURL: @escaping (URL) -> Void = { _ = NSWorkspace.shared.open($0) },
+         geminiAccessibilityGranted: @escaping () -> Bool = { AntigravityConversationReader.hasPermission },
+         openGeminiAccessibility: @escaping () -> Bool = {
+             AntigravityConversationReader.requestPermission()
+             // macOS owns the warning and its Open System Settings action.
+             // This acknowledges request dispatch, not a permission grant.
+             return true
+         },
          openDiscordURL: @escaping (URL) -> Void = { _ = NSWorkspace.shared.open($0) }) {
         self.settings = settings
         self.claudeAvailability = claudeAvailability
@@ -417,6 +430,8 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         self.openGrokURL = openGrokURL
         self.geminiAvailability = geminiAvailability
         self.openGeminiURL = openGeminiURL
+        self.geminiAccessibilityGranted = geminiAccessibilityGranted
+        self.openGeminiAccessibility = openGeminiAccessibility
         self.openDiscordURL = openDiscordURL
         self.notificationSettings = notificationSettings
         self.wakeSettings = wakeSettings
@@ -438,6 +453,8 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         window.delegate = self
         NotificationCenter.default.addObserver(self, selector: #selector(languageDidChange),
                                                name: .plusCodexLanguageDidChange, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(geminiPermissionChanged),
+                                               name: NSApplication.didBecomeActiveNotification, object: nil)
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 680, height: 600))
         root.wantsLayer = true
         root.setAdaptiveBackgroundColor(NSColor.windowBackgroundColor)
@@ -1189,6 +1206,8 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
     }
     required init?(coder: NSCoder) { nil }
     deinit {
+        geminiPermissionRedirect?.invalidate()
+        geminiPermissionPoll?.invalidate()
         NotificationCenter.default.removeObserver(self)
         if let monitor = searchPopoverEventMonitor {
             NSEvent.removeMonitor(monitor)
@@ -1197,6 +1216,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
     }
 
     func windowWillClose(_ notification: Notification) {
+        cancelGeminiEnablement()
         saveWakeMessage(wakeMessageField)
         closeSearchPopover()
         notificationSoundPopover?.close()
@@ -1414,6 +1434,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
     }
     func windowDidBecomeKey(_ notification: Notification) { synchronize(); refreshNotifications() }
     func synchronize() {
+        completeGeminiEnablementIfPermitted()
         let remainingValues = AIProvider.allCases.map { settings.showRemaining($0) }
         usageDisplayToggle.state = remainingValues.allSatisfy({ !$0 }) ? .on : .off
         languagePicker.displayTitle = language.selected == .korean ? L10n.text("한국어") : "English"
@@ -1442,10 +1463,16 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
                 && claudeState == .availableOrUnknown
                 && grokState == .readyToCheck
                 && geminiState == .readyToCheck
+                && (provider != .gemini || geminiAccessibilityGranted())
                 && (provider != .grok || settings.grokUsageVerified)
             toggles[provider]?.state = enabled ? .on : .off
             statuses[provider]?.alphaValue = enabled ? 1 : 0.5
-            if provider == .claude, let guidance = claudeState.guidance {
+            statuses[provider]?.textColor = .secondaryLabelColor
+            if provider == .gemini, let message = geminiPermissionMessage {
+                statuses[provider]?.stringValue = L10n.text(message)
+                statuses[provider]?.textColor = .systemRed
+                statuses[provider]?.alphaValue = 1
+            } else if provider == .claude, let guidance = claudeState.guidance {
                 statuses[provider]?.stringValue = L10n.text(guidance)
             } else if provider == .claude && !enabled {
                 statuses[provider]?.stringValue = L10n.text("메뉴바에서 꺼짐")
@@ -1487,6 +1514,12 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
                                       height: height)
     }
     func update(_ provider: AIProvider, status: String) {
+        if provider == .gemini, let message = geminiPermissionMessage {
+            statuses[provider]?.stringValue = L10n.text(message)
+            statuses[provider]?.textColor = .systemRed
+            statuses[provider]?.alphaValue = 1
+            return
+        }
         let guidance: String?
         switch provider {
         case .codex: guidance = nil
@@ -1495,6 +1528,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         case .gemini: guidance = geminiAvailability().guidance
         }
         statuses[provider]?.stringValue = guidance.map { L10n.text($0) } ?? status
+        statuses[provider]?.textColor = .secondaryLabelColor
     }
     func updateMenuBarQuota(_ provider: AIProvider, quota: Quota?) {
         menuBarFormatView?.updateQuota(quota, provider: provider)
@@ -2414,6 +2448,7 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
     }
     @objc private func toggled(_ sender: NSSwitch) {
         guard let raw = sender.identifier?.rawValue, let provider = AIProvider(rawValue: raw) else { return }
+        if provider == .gemini && sender.state == .off { cancelGeminiEnablement() }
         if provider == .claude && sender.state == .on,
            let destination = claudeAvailability().actionURL {
             sender.state = .off
@@ -2432,13 +2467,78 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
         }
         if provider == .gemini && sender.state == .on,
            let destination = geminiAvailability().actionURL {
+            cancelGeminiEnablement()
             sender.state = .off
             settings.setEnabled(false, for: provider)
             synchronize()
             openGeminiURL(destination)
             return
         }
+        if provider == .gemini && sender.state == .on && !geminiAccessibilityGranted() {
+            sender.state = .off
+            beginGeminiEnablement()
+            return
+        }
+        if provider == .gemini { cancelGeminiEnablement() }
         settings.setEnabled(sender.state == .on, for: provider); synchronize()
+    }
+
+    private func beginGeminiEnablement() {
+        // Coalesce clicks only until dispatch; waiting for consent must not block a user retry.
+        guard geminiPermissionRedirect == nil else { synchronize(); return }
+        pendingGeminiEnablement = true
+        geminiPermissionMessage = "손쉬운 사용 권한이 필요합니다"
+        settings.setEnabled(false, for: .gemini)
+        synchronize()
+        guard pendingGeminiEnablement else { return }
+        let redirect = Timer(timeInterval: 0.7, repeats: false) { [weak self] _ in
+            guard let self, self.pendingGeminiEnablement else { return }
+            self.geminiPermissionRedirect = nil
+            if self.geminiAccessibilityGranted() {
+                self.synchronize()
+            } else if !self.openGeminiAccessibility() {
+                self.cancelGeminiEnablement()
+                self.geminiPermissionMessage = "손쉬운 사용 설정을 열지 못했습니다. 시스템 설정에서 PlusCodex 권한을 확인해 주세요."
+                self.synchronize()
+            }
+        }
+        geminiPermissionRedirect = redirect
+        RunLoop.main.add(redirect, forMode: .common)
+        if geminiPermissionPoll == nil {
+            let poll = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+                guard let self, self.pendingGeminiEnablement else { return }
+                if self.geminiAccessibilityGranted() { self.synchronize() }
+            }
+            geminiPermissionPoll = poll
+            RunLoop.main.add(poll, forMode: .common)
+        }
+    }
+
+    private func completeGeminiEnablementIfPermitted() {
+        guard pendingGeminiEnablement, geminiAccessibilityGranted() else { return }
+        cancelGeminiEnablement()
+        // Login/install state can change while System Settings is in the foreground.
+        guard geminiAvailability() == .readyToCheck else { return }
+        statuses[.gemini]?.stringValue = L10n.text("연결 확인 중")
+        settings.setEnabled(true, for: .gemini)
+    }
+
+    private func cancelGeminiEnablement() {
+        pendingGeminiEnablement = false
+        geminiPermissionMessage = nil
+        geminiPermissionRedirect?.invalidate()
+        geminiPermissionRedirect = nil
+        geminiPermissionPoll?.invalidate()
+        geminiPermissionPoll = nil
+    }
+
+    @objc private func geminiPermissionChanged() {
+        guard pendingGeminiEnablement || settings.enabled(.gemini) else { return }
+        // Recheck consent on return from System Settings without mutating preferences during window construction.
+        if settings.enabled(.gemini) && !geminiAccessibilityGranted() {
+            settings.setEnabled(false, for: .gemini)
+        }
+        synchronize()
     }
     @objc private func toggleLogin(_ sender: NSSwitch) {
         let enabling = sender.state == .on

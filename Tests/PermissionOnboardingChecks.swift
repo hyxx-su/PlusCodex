@@ -29,7 +29,11 @@ import UserNotifications
                      "An update should explain permissions that are still missing")
         precondition(pending(revision: "1|1.2.1|23", status: .authorized, gemini: true,
                              accessibility: true).isEmpty, "Updates must not ask again for granted permissions")
-        let guide = Guide(defaults: defaults, notificationsNeeded: { true }, geminiEnabled: { true })
+        var accessibilityRequests = 0
+        var settingsOpened: [URL] = []
+        let guide = Guide(defaults: defaults, notificationsNeeded: { true }, geminiEnabled: { true },
+            requestAccessibilityPermission: { accessibilityRequests += 1 },
+            openSystemSettings: { settingsOpened.append($0); return true })
         for permissions: [Guide.Permission] in [[.notifications], [.accessibility], [.notifications, .accessibility]] {
             guide.testHookBuildWindow(permissions)
             let content = guide.window!.contentView!
@@ -41,6 +45,24 @@ import UserNotifications
                 precondition(needed.height <= label.frame.height + 1, "Clipped guide label: \(label.stringValue)")
             }
         }
+        let arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        defer { UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain) }
+        for language in AppLanguage.allCases {
+            var localizedArguments = arguments
+            localizedArguments["appLanguage"] = language.rawValue
+            UserDefaults.standard.setVolatileDomain(localizedArguments, forName: UserDefaults.argumentDomain)
+            guide.testHookBuildWindow([.accessibility])
+            let button = guide.window!.contentView!.subviews.compactMap { $0 as? NSButton }
+                .first { $0.identifier?.rawValue == "permission-guide-accessibility" }!
+            precondition(button.title == L10n.text("손쉬운 사용 권한 요청"))
+            precondition(button.cell!.cellSize.width <= button.frame.width, "Permission request label must fit")
+            let previousRequests = accessibilityRequests
+            // Dispatch the action directly: a live OS grant may disable the button on the test machine.
+            precondition(NSApp.sendAction(button.action!, to: button.target, from: button))
+            precondition(accessibilityRequests == previousRequests + 1 && settingsOpened.isEmpty,
+                         "Request native consent once; never also open System Settings behind its warning")
+        }
+        print("PASS: Accessibility action requests native consent only, no duplicate Settings launch, localized button labels fit")
         print("PASS: first install, update, already-granted permissions, disabled features, skip persistence, later Gemini enablement and guide layout")
     }
 }

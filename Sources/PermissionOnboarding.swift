@@ -11,6 +11,8 @@ final class PermissionOnboarding: NSWindowController {
     private let revision: String
     private let notificationsNeeded: () -> Bool
     private let geminiEnabled: () -> Bool
+    private let requestAccessibilityPermission: () -> Void
+    private let openSystemSettings: (URL) -> Bool
     private var checking = false
     private var shownPermissions: [Permission] = []
     private var statusLabels: [Permission: NSTextField] = [:]
@@ -20,10 +22,14 @@ final class PermissionOnboarding: NSWindowController {
 
     init(defaults: UserDefaults = .standard,
          notificationsNeeded: @escaping () -> Bool,
-         geminiEnabled: @escaping () -> Bool) {
+         geminiEnabled: @escaping () -> Bool,
+         requestAccessibilityPermission: @escaping () -> Void = { AntigravityConversationReader.requestPermission() },
+         openSystemSettings: @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) }) {
         self.defaults = defaults
         self.notificationsNeeded = notificationsNeeded
         self.geminiEnabled = geminiEnabled
+        self.requestAccessibilityPermission = requestAccessibilityPermission
+        self.openSystemSettings = openSystemSettings
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
         revision = "1|\(version)|\(build)"
@@ -114,7 +120,7 @@ final class PermissionOnboarding: NSWindowController {
                 x: 24, y: top - 66, width: 472, height: 40, secondary: true)
             let state = label("", x: 24, y: top - 106, width: 278, height: 34, secondary: true)
             statusLabels[permission] = state
-            let button = NSButton(title: L10n.text(isNotification ? "알림 허용" : "손쉬운 사용 설정 열기"),
+            let button = NSButton(title: L10n.text(isNotification ? "알림 허용" : "손쉬운 사용 권한 요청"),
                                   target: self, action: #selector(configurePermission(_:)))
             button.bezelStyle = .rounded
             button.tag = index
@@ -181,13 +187,13 @@ final class PermissionOnboarding: NSWindowController {
                 openSettings("x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(bundleID)")
             }
         case .accessibility:
-            AntigravityConversationReader.requestPermission()
-            openSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            // Do not open Settings behind the system-owned consent warning.
+            requestAccessibilityPermission()
         }
     }
 
     private func openSettings(_ address: String) {
-        guard let url = URL(string: address), NSWorkspace.shared.open(url) else {
+        guard let url = URL(string: address), openSystemSettings(url) else {
             let alert = NSAlert()
             alert.messageText = L10n.text("시스템 설정에서 PlusCodex 권한을 확인해 주세요.")
             alert.runModal()

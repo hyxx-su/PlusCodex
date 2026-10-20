@@ -7,6 +7,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
     private let claudeAvailability: () -> ClaudeAvailability.State
     private let grokAvailability: () -> GrokAvailability.State
     private let geminiAvailability: () -> GeminiAvailability.State
+    private let geminiAccessibilityGranted: () -> Bool
     private let fetchUsage: (AIProvider) throws -> QuotaSnapshot
     private var item: NSStatusItem?
     private let menu = NSMenu()
@@ -55,6 +56,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
          claudeAvailability: @escaping () -> ClaudeAvailability.State = { ClaudeAvailability.current() },
          grokAvailability: @escaping () -> GrokAvailability.State = { GrokAvailability.current() },
          geminiAvailability: @escaping () -> GeminiAvailability.State = { GeminiAvailability.current() },
+         geminiAccessibilityGranted: @escaping () -> Bool = { AntigravityConversationReader.hasPermission },
          fetchUsage: @escaping (AIProvider) throws -> QuotaSnapshot = ExternalUsageClient.fetch,
          activityDefaults: UserDefaults = .standard) {
         self.provider = provider
@@ -62,6 +64,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
         self.claudeAvailability = claudeAvailability
         self.grokAvailability = grokAvailability
         self.geminiAvailability = geminiAvailability
+        self.geminiAccessibilityGranted = geminiAccessibilityGranted
         self.fetchUsage = fetchUsage
         self.activityDefaults = activityDefaults
         completionTracker = CompletionTracker(defaults: activityDefaults, account: "gemini:local")
@@ -285,7 +288,9 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
             onState?(L10n.text(guidance))
             return
         }
-        if provider == .gemini, let guidance = geminiAvailability().guidance {
+        let geminiGuidance = provider == .gemini ? geminiAvailability().guidance
+            ?? (enabled && !geminiAccessibilityGranted() ? "손쉬운 사용 권한이 필요합니다" : nil) : nil
+        if let guidance = geminiGuidance {
             if enabled { settings.setEnabled(false, for: provider) }
             if let item {
                 StatusMenuPresentation.unregister(item)
@@ -576,28 +581,8 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
         }
     }
     private func contextMenu() -> NSMenu {
-        let result = StatusMenuBuilder.makeContextMenu(disableTitle: L10n.text("%@ 끄기", provider.name), target: self,
+        return StatusMenuBuilder.makeContextMenu(disableTitle: L10n.text("%@ 끄기", provider.name), target: self,
                                            disableAction: #selector(disable), quitAction: #selector(quit))
-        if provider == .gemini {
-            let permission = NSMenuItem(title: L10n.text("채팅 읽음 감지 설정…"),
-                                       action: #selector(configureConversationReading), keyEquivalent: "")
-            permission.target = self
-            result.insertItem(permission, at: 0)
-        }
-        return result
-    }
-    @objc private func configureConversationReading() {
-        let alert = NSAlert()
-        alert.messageText = L10n.text("Antigravity 채팅 읽음 감지")
-        alert.informativeText = L10n.text("손쉬운 사용 권한을 허용하면 현재 보고 있는 Antigravity 채팅 주소만 확인하여 완료 항목과 알림을 정리합니다. 대화 본문은 읽거나 저장하지 않습니다. 권한이 없어도 메뉴 클릭과 기존 읽음 시각으로 정리합니다.")
-        alert.addButton(withTitle: L10n.text("손쉬운 사용 설정 열기"))
-        alert.addButton(withTitle: L10n.text("취소"))
-        NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        AntigravityConversationReader.requestPermission()
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
-        }
     }
     func menuWillOpen(_ menu: NSMenu) {
         menuTracking = true

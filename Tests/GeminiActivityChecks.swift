@@ -135,7 +135,9 @@ import AppKit
         precondition(axReads == 1, "A changed result needs a new observation")
         applyVisible(input: 2020, modified: 2031, time: 44)
         precondition(axReads == 2 && ax.testHookActivityItem.isHidden)
-        precondition(ax.testHookContextMenu.items.first?.title == L10n.text("채팅 읽음 감지 설정…"))
+        precondition(ax.testHookContextMenu.items.filter { !$0.isSeparatorItem }.map(\.title)
+            == [L10n.text("%@ 끄기", "Gemini"), L10n.text("PlusCodex 종료")],
+            "Accessibility setup belongs to Gemini activation, not its context menu")
         print("PASS: foreground URL validation, stale-view cleanup, reading dwell, other-chat isolation, permission fallback, reconnect/sleep guards and new-turn notifications")
         print("PASS: Gemini completion/failure/attention callbacks, same-step new turns, stable task identity, external reads, no duplicate alerts, initial cleanup and explicit unread")
     }

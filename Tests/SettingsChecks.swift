@@ -4,6 +4,7 @@ import ServiceManagement
 @main struct SettingsChecks {
     static func main() throws {
         _ = NSApplication.shared
+        verifyGeminiPermissionActivation()
         let suite = "PlusCodex.settings.tests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -244,6 +245,121 @@ import ServiceManagement
             controller.menuDidClose(controller.testHookMenu)
         }
         print("PASS: login, native switches, notification hit targets, Discord footer, Claude/Grok loading, stable overlays and task row")
+    }
+
+    private static func verifyGeminiPermissionActivation() {
+        let suite = "PlusCodex.GeminiPermission.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = ProviderSettings(defaults: defaults)
+        var granted = false
+        var availability = GeminiAvailability.State.readyToCheck
+        var opens = 0
+        var canOpen = true
+        let controller = AISettingsWindow(settings: settings,
+            geminiAvailability: { availability }, openGeminiURL: { _ in },
+            geminiAccessibilityGranted: { granted },
+            openGeminiAccessibility: { opens += 1; return canOpen })
+        settings.onChange = { [weak controller] in controller?.synchronize() }
+        precondition(L10n.translation("손쉬운 사용 권한이 필요합니다", language: .english)
+            == "Accessibility permission is required")
+        func descendants(_ view: NSView) -> [NSView] {
+            view.subviews + view.subviews.flatMap(descendants)
+        }
+        let controls = descendants(controller.window!.contentView!)
+        let toggle = controls.compactMap { $0 as? NSSwitch }
+            .first { $0.identifier?.rawValue == "gemini" }!
+        func enable() {
+            toggle.state = .on
+            precondition(toggle.sendAction(toggle.action, to: toggle.target))
+        }
+        func wait(_ seconds: TimeInterval) {
+            let deadline = Date().addingTimeInterval(seconds)
+            while Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        }
+        func warning(_ key: String) -> NSTextField? {
+            controls.compactMap { $0 as? NSTextField }.first { $0.stringValue == L10n.text(key) }
+        }
+
+        enable()
+        precondition(toggle.state == .off && !settings.enabled(.gemini) && opens == 0)
+        let message = warning("손쉬운 사용 권한이 필요합니다")!
+        precondition(message.textColor == .systemRed && message.alphaValue == 1,
+                     "Show the permission requirement in red before requesting native consent")
+        controller.update(.gemini, status: "Background update")
+        precondition(message.stringValue == L10n.text("손쉬운 사용 권한이 필요합니다"),
+                     "Background status must not erase the activation warning")
+        enable()
+        wait(0.85)
+        precondition(opens == 1 && !settings.enabled(.gemini) && toggle.state == .off,
+                     "Repeated clicks must dispatch one consent request and never enable without consent")
+        enable()
+        enable()
+        precondition(opens == 1 && toggle.state == .off,
+                     "A retry still waits for the warning display delay and coalesces rapid clicks")
+        wait(0.85)
+        precondition(opens == 2 && !settings.enabled(.gemini) && toggle.state == .off,
+                     "Clicking again while the red warning remains must dispatch a fresh consent request")
+        granted = true
+        NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: NSApp)
+        precondition(settings.enabled(.gemini) && toggle.state == .on)
+        precondition(message.textColor == .secondaryLabelColor && message.alphaValue == 1)
+        precondition(ProviderSettings(defaults: defaults).enabled(.gemini), "Persist ON only after consent")
+        wait(0.8)
+        precondition(opens == 2, "Granted permission must stop further requests")
+        toggle.state = .off
+        _ = toggle.sendAction(toggle.action, to: toggle.target)
+        enable()
+        precondition(settings.enabled(.gemini) && toggle.state == .on && opens == 2,
+                     "Already-granted permission enables immediately")
+
+        granted = false
+        NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: NSApp)
+        precondition(!settings.enabled(.gemini) && toggle.state == .off,
+                     "Revoked permission must not leave a saved ON value")
+        enable()
+        controller.windowWillClose(Notification(name: NSWindow.willCloseNotification, object: controller.window))
+        granted = true
+        wait(0.85)
+        controller.synchronize()
+        precondition(!settings.enabled(.gemini) && opens == 2,
+                     "Closing settings cancels both delayed redirect and automatic activation")
+
+        granted = false
+        enable()
+        availability = .notAuthenticated
+        granted = true
+        controller.synchronize()
+        precondition(!settings.enabled(.gemini) && toggle.state == .off,
+                     "Permission alone must not bypass a changed login state")
+        availability = .readyToCheck
+        granted = false
+        enable()
+        wait(0.8)
+        granted = true
+        wait(0.65)
+        precondition(settings.enabled(.gemini) && toggle.state == .on && opens == 3,
+                     "Polling completes activation even without an app-activation notification")
+
+        granted = false
+        NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: NSApp)
+        canOpen = false
+        enable()
+        wait(0.85)
+        precondition(!settings.enabled(.gemini) && opens == 4)
+        precondition(warning("손쉬운 사용 설정을 열지 못했습니다. 시스템 설정에서 PlusCodex 권한을 확인해 주세요.")?.textColor == .systemRed)
+        enable()
+        controller.windowWillClose(Notification(name: NSWindow.willCloseNotification, object: controller.window))
+
+        settings.setEnabled(true, for: .gemini)
+        var fetches = 0
+        let status = ProviderStatusController(provider: .gemini, settings: settings,
+            geminiAvailability: { .readyToCheck }, geminiAccessibilityGranted: { false },
+            fetchUsage: { _ in fetches += 1; throw QuotaError.missingExecutable })
+        status.synchronize()
+        precondition(!settings.enabled(.gemini) && !status.testHookHasStatusItem && fetches == 0,
+                     "A saved setting cannot start Gemini without OS permission")
+        print("PASS: Gemini red warning retry, rapid-click coalescing, delayed native consent, consent-only persistence, grant polling and close/login guards")
     }
 
     private static func verifyDiscordLocalization(in controller: AISettingsWindow, button: NSButton,
