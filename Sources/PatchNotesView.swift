@@ -18,7 +18,15 @@ struct PatchNote: Decodable {
         guard let url = bundle.url(forResource: "PatchNotes", withExtension: "json"),
               let data = try? Data(contentsOf: url),
               let notes = try? JSONDecoder().decode([PatchNote].self, from: data) else { return [] }
-        return notes.sorted { $0.version.compare($1.version, options: .numeric) == .orderedDescending }
+        // Compare the base first; a release precedes its own beta in descending order.
+        return notes.sorted {
+            let lhs = $0.version.split(separator: "-", maxSplits: 1)
+            let rhs = $1.version.split(separator: "-", maxSplits: 1)
+            let baseOrder = String(lhs[0]).compare(String(rhs[0]), options: .numeric)
+            if baseOrder != .orderedSame { return baseOrder == .orderedDescending }
+            if lhs.count != rhs.count { return lhs.count < rhs.count }
+            return $0.version.compare($1.version, options: .numeric) == .orderedDescending
+        }
     }
 }
 
