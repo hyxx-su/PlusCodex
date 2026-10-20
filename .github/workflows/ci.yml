@@ -1,0 +1,97 @@
+name: PlusCodex CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pluscodex-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: macOS Build
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Validate scripts and resources
+        run: |
+          bash -n build.sh test.sh prepare-sparkle.sh package-dmg.sh package-release.sh
+          plutil -lint Info.plist Resources/ko.lproj/Localizable.strings Resources/en.lproj/Localizable.strings
+          git diff --check
+      - name: Verify test group coverage
+        run: |
+          ruby <<'RUBY'
+          require 'yaml'
+          workflow = YAML.load_file('.github/workflows/ci.yml')
+          expected = File.read('test.sh')[/TEST_NAMES=\(([^)]+)\)/, 1].split
+          groups = workflow.fetch('jobs').fetch('tests').fetch('strategy').fetch('matrix').fetch('include')
+          actual = groups.flat_map { |group| group.fetch('tests').split }
+          abort 'CI test groups must contain every default test exactly once' unless actual.sort == expected.sort && actual.uniq.size == actual.size
+          puts "All #{actual.size} default tests are covered."
+          RUBY
+      - name: Build Apple Silicon app
+        run: bash build.sh
+      - name: Verify app signature
+        run: codesign --verify --deep --strict build/PlusCodex.app
+
+  tests:
+    name: Tests (${{ matrix.group }})
+    runs-on: macos-15
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: core
+            tests: ReliabilityChecks AppearanceSoundChecks CLIInstallationChecks QuotaTests QuotaAlertChecks QuotaLayoutChecks IssueReportChecks IntroChecks BackgroundKeychainChecks
+          - group: notifications
+            tests: NotificationChecks NotificationAutoCleanupChecks ResetCreditExpiryChecks NotificationSoundChecks ThreadNotificationChecks PermissionOnboardingChecks UsageDisplayChecks
+          - group: activity
+            tests: ActivityChecks ActivityIPCChecks LiveMenuChecks GeminiActivityChecks CodexWakeChecks CodexWakeBridgeChecks CodexWakeAccountChecks
+          - group: settings
+            tests: MenuBuilderChecks UpdateLoadingChecks UpdaterChecks ProviderChecks ClaudeFallbackChecks SettingsChecks SettingsTextEditingChecks SettingsDockChecks PresentationChecks MenuBarFormatChecks StatusWindowChecks CompactSettingsChecks PatchNotesChecks
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Run regression tests
+        env:
+          SELECTED_TESTS: ${{ matrix.tests }}
+        run: |
+          read -r -a checks <<< "$SELECTED_TESTS"
+          bash test.sh "${checks[@]}"
+
+  gate:
+    # Keep this name stable: main branch protection requires this exact check.
+    name: CI Gate
+    if: ${{ always() }}
+    needs: [build, tests]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every build and test job to pass
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+          TEST_RESULT: ${{ needs.tests.result }}
+        run: |
+          if [[ "$BUILD_RESULT" != success || "$TEST_RESULT" != success ]]; then
+            echo "CI failed: build=$BUILD_RESULT, tests=$TEST_RESULT" >&2
+            exit 1
+          fi
+          echo "All PlusCodex CI checks passed."
