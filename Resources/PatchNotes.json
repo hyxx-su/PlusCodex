@@ -1,5 +1,37 @@
 [
   {
+    "version": "v1.2.1",
+    "publishedAt": "2026-10-23T00:00:00Z",
+    "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.2.1",
+    "body": "# PlusCodex v1.2.1\n\n- 최신 사용량 응답에서 초기화 주기와 사용량 변화를 확인한 뒤 초기화 알림 발송\n- 오래된 응답·계정 및 플랜 변경·시각 보정으로 인한 잘못된 알림 방지\n- 최신 응답에서 남아 있는 초기화권을 확인한 뒤 만료 알림 발송\n- 사용량 패널 재사용 및 막대 애니메이션의 다시 그리기 범위 축소\n- 변경되지 않은 메뉴바·설정·상태 문구의 반복 갱신 감소\n\n알림 검증에는 앱 실행과 정상적인 사용량 조회가 필요합니다. 상태를 확인할 수 없으면 알림을 생략할 수 있습니다.\n\n## English\n\n- Validate reset cycles and usage changes against fresh usage responses before sending reset alerts\n- Prevent incorrect alerts caused by stale responses, account or plan changes, and corrected deadlines\n- Confirm remaining reset credits in the latest response before sending expiry reminders\n- Reuse usage panels and redraw only the animated progress-bar areas\n- Reduce repeated updates to unchanged menu-bar, settings and status text\n\nAlert validation requires the app to be running and usage reads to succeed. Alerts may be skipped when the current state cannot be confirmed.\n\nPlusCodex v1.0.0~v1.9.9는 베타 버전입니다. / Versions v1.0.0 through v1.9.9 are beta releases.",
+    "summary": {
+      "ko": "• 초기화·만료 알림 정확도 개선\n• 사용량 화면 갱신 비용 감소",
+      "en": "• More accurate reset and expiry alerts\n• Lower usage-screen update overhead"
+    },
+    "highlights": {
+      "ko": [
+        "최신 응답의 초기화 주기·사용량 변화를 확인한 뒤 알림 발송",
+        "오래된 응답·계정 및 플랜 변경·시각 보정에 따른 잘못된 알림 방지",
+        "이전 버전의 검증되지 않은 미래 알림 예약 정리",
+        "최신 응답에서 남아 있는 초기화권을 확인한 뒤 만료 알림 발송",
+        "사용량 패널 재사용으로 반복 생성 감소",
+        "막대 애니메이션의 다시 그리기 범위 축소",
+        "메뉴바·설정·상태 문구의 불필요한 갱신 감소",
+        "앱 실행과 정상 조회가 필요하며 상태를 확인하지 못하면 알림 생략 가능"
+      ],
+      "en": [
+        "Validate reset cycles and usage changes against fresh responses before alerting",
+        "Reject stale responses and account, plan or deadline inconsistencies",
+        "Clear unverified future alerts scheduled by earlier versions",
+        "Confirm remaining reset credits in the latest response before expiry reminders",
+        "Reuse usage panels instead of repeatedly creating them",
+        "Limit animation redraws to progress-bar areas",
+        "Avoid redundant menu-bar, settings and status text updates",
+        "Requires a running app and successful reads; unconfirmed alerts may be skipped"
+      ]
+    }
+  },
+  {
     "version": "v1.2.0",
     "publishedAt": "2026-10-20T05:40:00Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.2.0",

@@ -1,3 +1,56 @@
+# PlusCodex v1.2.1
+
+초기화·만료 알림의 정확도를 높이고 사용량 화면의 반복 갱신 비용을 줄였습니다.
+
+PlusCodex의 **v1.0.0~v1.9.9는 베타 버전**입니다. 이번 버전도 베타이며, 기존 앱의 업데이트 경로를 유지하기 위해 GitHub Latest로 제공합니다.
+
+## 주요 변경사항
+
+### 초기화 및 만료 알림
+
+- 최신 사용량 응답에서 초기화 주기와 사용량 변화를 함께 확인한 뒤 초기화 알림 발송
+- 오래되거나 순서가 뒤바뀐 응답, 계정·플랜 변경 및 초기화 시각 보정으로 인한 잘못된 알림 방지
+- 이전 버전에서 예약한 검증되지 않은 미래 알림 정리
+- 최신 응답에서 남아 있는 초기화권을 확인한 뒤 만료 알림 발송
+- 조회 실패·계정 변경·불완전한 정보에 따른 기존 알림 근거 정리
+
+### 사용량 화면 및 갱신 성능
+
+- 일반 사용량 패널을 재사용해 화면 갱신 시 반복 생성 감소
+- 사용량 막대 애니메이션의 다시 그리기 범위를 줄여 날짜·문자 처리 비용 감소
+- 변경되지 않은 메뉴바 제목·설정 미리보기·상태 문구의 불필요한 갱신 감소
+
+## 설치 및 업데이트
+
+- 기존 앱: 앱의 업데이트 확인 기능 이용
+- 수동 설치: [PlusCodex-1.2.1.dmg](https://github.com/hyxx-su/PlusCodex/releases/download/v1.2.1/PlusCodex-1.2.1.dmg)
+- 지원 환경: Apple Silicon Mac, macOS 14 이상
+- 기존 설정과 저장된 깨우기 채팅 유지
+
+## 알려진 제한 사항
+
+- 초기화·만료 알림의 검증에는 앱 실행과 정상적인 사용량 조회가 필요함
+- 서버의 초기화 반영이 늦거나 현재 상태를 확인할 수 없으면 잘못된 알림을 피하기 위해 알림을 생략할 수 있음
+- 화면 처리 비용 감소를 확인했지만 실제 전체 앱의 백그라운드 CPU 사용량 감소는 확인하지 못함
+- 알림 전달은 macOS 알림 권한·집중 모드·알림 스타일의 영향을 받음
+- 다른 Mac의 실제 설치·업데이트와 서버 응답 지연을 포함한 실사용 동작은 별도 확인 필요
+- 이 배포본은 Apple Development 서명이며 **Developer ID 서명·Apple 공증은 적용되지 않음**
+- Sparkle 업데이트 서명은 업데이트 파일과 피드의 무결성을 검증하며 Apple 공증을 대체하지 않음
+- PlusCodex는 OpenAI 또는 Google의 공식 앱이 아님
+
+## English
+
+- Validate reset cycles and usage changes against fresh usage responses before sending reset alerts.
+- Reject stale or out-of-order responses and account, plan or deadline inconsistencies. Clear unverified future alerts from earlier versions.
+- Confirm remaining reset credits in the latest response before sending expiry reminders.
+- Reuse usage panels, redraw only animated progress-bar areas, and avoid updating unchanged menu-bar, preview and status text.
+- Reset and expiry validation requires the app to be running and usage reads to succeed. Alerts may be skipped when the current state cannot be confirmed.
+- Lower screen-update overhead was measured; lower overall background CPU usage has not been established.
+- Versions v1.0.0 through v1.9.9 are beta releases. This release remains Latest to preserve the existing update path.
+- Apple Silicon and macOS 14 or later. Apple Development signed; no Developer ID signing or Apple notarization.
+
+---
+
 # PlusCodex v1.2.0
 
 Gemini 연동과 AI별 메뉴바 표시 커스텀을 추가했습니다.
