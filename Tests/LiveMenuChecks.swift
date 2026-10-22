@@ -3,6 +3,7 @@ import AppKit
 @main struct LiveMenuChecks {
     static func main() {
         _ = NSApplication.shared
+        checkProviderPanelReuse()
         func quota(_ used: Double) -> Quota {
             Quota(primary: QuotaWindow(usedPercent: used, windowDurationMins: 300, resetsAt: nil), secondary: nil)
         }
@@ -209,5 +210,60 @@ import AppKit
             && rotated?.size == NSSize(width: 18, height: 18),
                      "Rotated frames must keep the template menu bar icon size")
         print("PASS: open-menu identity, live quota, task status, animation, task defaults and manual bell overrides, status icon spinner")
+    }
+}
+
+private func checkProviderPanelReuse() {
+    let suite = "PlusCodex.panel-reuse.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let settings = ProviderSettings(defaults: defaults)
+    let initial = Quota(primary: QuotaWindow(usedPercent: 25, windowDurationMins: 300,
+                                            resetsAt: Date().timeIntervalSince1970 + 3600), secondary: nil)
+    let changed = Quota(primary: QuotaWindow(usedPercent: 50, windowDurationMins: 300, resetsAt: nil),
+                        secondary: QuotaWindow(usedPercent: 20, windowDurationMins: 10080, resetsAt: nil))
+    for provider in [AIProvider.claude, .grok, .gemini] {
+        let controller = ProviderStatusController(provider: provider, settings: settings, activityDefaults: defaults)
+        func render(_ quota: Quota?, loading: Bool = false, checking: Bool = false, offline: Bool = false) {
+            controller.testHookPresentation(quota: quota, fetching: loading, checking: checking, offline: offline)
+        }
+        func panel() -> QuotaMenuView { controller.testHookMenu.items[0].view as! QuotaMenuView }
+        render(initial)
+        let original = panel()
+        let started = ProcessInfo.processInfo.systemUptime
+        var replacements = 0
+        for _ in 0..<500 {
+            let previous = panel()
+            render(initial)
+            if panel() !== previous { replacements += 1 }
+        }
+        print("PERF: \(provider.rawValue) 500 unchanged renders, panel replacements=\(replacements), elapsed=\(ProcessInfo.processInfo.systemUptime - started)s")
+        precondition(replacements == 0, "Unchanged polling must reuse the existing usage panel")
+        render(changed)
+        precondition(panel() === original && original.testHookDisplayedPercents == [50, 80])
+        precondition(original.frame.height > QuotaMenuView.panelHeight(quota: initial, intro: false))
+        render(initial)
+        precondition(panel() === original && original.testHookDisplayedPercents == [75])
+        precondition(original.frame.height == QuotaMenuView.panelHeight(quota: initial, intro: false))
+        settings.setShowRemaining(false, for: provider)
+        render(initial)
+        precondition(panel() !== original && panel().testHookDisplayedPercents == [25])
+        settings.setShowRemaining(true, for: provider)
+        render(initial, offline: true)
+        precondition(panel().offline)
+        render(initial)
+        precondition(!panel().offline && panel().testHookDisplayedPercents == [75])
+        render(initial, checking: true)
+        precondition(panel().checkingForUpdates)
+        render(initial)
+        precondition(!panel().checkingForUpdates)
+        render(nil, loading: true)
+        precondition(panel().intro)
+        render(initial)
+        precondition(!panel().intro)
+        controller.testHookSetFailure("test failure")
+        precondition(panel().showsFailureScreen)
+        controller.testHookSetFailure(nil)
+        precondition(!panel().showsFailureScreen)
     }
 }

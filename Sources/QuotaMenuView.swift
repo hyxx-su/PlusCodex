@@ -119,7 +119,12 @@ final class QuotaMenuView: NSView {
             let t = min(1, (ProcessInfo.processInfo.systemUptime - began) / 0.25)
             let eased = 1 - pow(1 - t, 3)
             self.displayedPercents = zip(start, target).map { $0 + ($1 - $0) * eased }
-            self.needsDisplay = true
+            // Only the fill moves. Keep account text and reset-date formatting
+            // out of the 60 Hz animation path; normal updates still redraw them.
+            for index in target.indices {
+                self.setNeedsDisplay(NSRect(x: 23, y: 62 + CGFloat(index) * 92 + 37,
+                                            width: Self.panelWidth - 46, height: 8))
+            }
             if t >= 1 { timer.invalidate(); self.animationTimer = nil }
         }
         animationTimer = timer
@@ -167,7 +172,7 @@ final class QuotaMenuView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard !intro && !checkingForUpdates && !offline && !missingExecutable && !showsFailureScreen else { return }
-        if let headerIcon {
+        if needsToDraw(NSRect(x: 0, y: 0, width: bounds.width, height: 58)), let headerIcon {
             let tintedIcon = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
                 headerIcon.draw(in: rect)
                 NSColor.labelColor.setFill()
@@ -216,6 +221,7 @@ final class QuotaMenuView: NSView {
 
     private func card(_ window: QuotaWindow?, title: String, y: CGFloat, displayedPercent: Double?) {
         let rect = NSRect(x: 12, y: y, width: Self.panelWidth - 24, height: 84)
+        guard needsToDraw(rect) else { return }
         NSColor.labelColor.withAlphaComponent(0.025).setFill()
         NSBezierPath(roundedRect: rect, xRadius: 14, yRadius: 14).fill()
         NSColor.labelColor.withAlphaComponent(0.07).setStroke()
@@ -245,6 +251,7 @@ final class QuotaMenuView: NSView {
             NSBezierPath(roundedRect: fill, xRadius: 4.5, yRadius: 4.5).fill()
             NSGraphicsContext.restoreGraphicsState()
         }
+        guard needsToDraw(NSRect(x: 24, y: y + 57, width: Self.panelWidth - 48, height: 18)) else { return }
         let reset = window?.resetsAt.map { timestamp -> String in
             let date = Date(timeIntervalSince1970: timestamp)
             let day = Calendar.current.isDateInToday(date) ? L10n.text("오늘") : date.formatted(.dateTime.month().day().locale(L10n.locale))
@@ -270,10 +277,12 @@ final class QuotaMenuView: NSView {
                       weight: NSFont.Weight = .regular, color: NSColor = .labelColor,
                       width: CGFloat = 190, height: CGFloat = 32, align: NSTextAlignment = .left,
                       numeric: Bool = false, lineBreak: NSLineBreakMode = .byWordWrapping) {
+        let rect = NSRect(x: x, y: y, width: width, height: height)
+        guard needsToDraw(rect) else { return }
         let style = NSMutableParagraphStyle()
         style.alignment = align
         style.lineBreakMode = lineBreak
-        (value as NSString).draw(in: NSRect(x: x, y: y, width: width, height: height), withAttributes: [
+        (value as NSString).draw(in: rect, withAttributes: [
             .font: numeric ? NSFont.monospacedDigitSystemFont(ofSize: size, weight: weight)
                 : NSFont.systemFont(ofSize: size, weight: weight),
             .foregroundColor: color, .paragraphStyle: style

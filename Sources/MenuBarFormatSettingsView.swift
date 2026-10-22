@@ -211,7 +211,9 @@ final class MenuBarFormatSettingsView: NSView, NSTextFieldDelegate, NSPopoverDel
     private func updateHelpAndPresets(_ provider: AIProvider, force: Bool = false) {
         let help = MenuBarFormat.helpText(provider: provider, quota: snapshots[provider])
         helpButtons[provider]?.toolTip = nil
-        helpButtons[provider]?.setAccessibilityHelp(help)
+        if let button = helpButtons[provider], button.accessibilityHelp() != help {
+            button.setAccessibilityHelp(help)
+        }
         let formats = MenuBarFormat.presets(quota: snapshots[provider])
         guard force || providerPresets[provider] != formats else { return }
         providerPresets[provider] = formats
@@ -282,15 +284,19 @@ final class MenuBarFormatSettingsView: NSView, NSTextFieldDelegate, NSPopoverDel
     private func refreshPreview(_ provider: AIProvider) {
         guard let field = fields[provider] else { return }
         let valid = MenuBarFormat.isValid(field.stringValue)
-        errors[provider]?.stringValue = valid ? "" : L10n.text("지원 토큰·괄호·80자 제한을 확인하세요. 저장되지 않았습니다.")
-        errors[provider]?.isHidden = valid
-        previews[provider]?.isHidden = !valid
+        let errorText = valid ? "" : L10n.text("지원 토큰·괄호·80자 제한을 확인하세요. 저장되지 않았습니다.")
+        if let error = errors[provider] {
+            if error.stringValue != errorText { error.stringValue = errorText }
+            if error.isHidden != valid { error.isHidden = valid }
+        }
+        if let preview = previews[provider], preview.isHidden == valid { preview.isHidden = !valid }
         let now = Date()
         let text = MenuBarFormat.render(valid ? field.stringValue : settings.menuBarFormat(provider),
             quota: snapshots[provider], showRemaining: settings.showRemaining(provider), now: now)
         let preview = text.isEmpty ? L10n.text("아이콘만 표시") : text
-        previews[provider]?.stringValue = snapshots[provider] == nil && !text.isEmpty
+        let previewText = snapshots[provider] == nil && !text.isEmpty
             ? L10n.text("미리보기: 사용량 조회 후 표시됩니다.") : L10n.text("미리보기: %@", preview)
+        if let label = previews[provider], label.stringValue != previewText { label.stringValue = previewText }
     }
 
     func controlTextDidChange(_ notification: Notification) {

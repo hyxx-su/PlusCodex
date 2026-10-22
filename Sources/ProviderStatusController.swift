@@ -465,8 +465,11 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
         updateStatusSpinner()
         item?.button?.image = providerStatusImage()
         item?.button?.imagePosition = unavailable || percent.isEmpty ? .imageOnly : .imageLeading
-        item?.button?.attributedTitle = NSAttributedString(string: unavailable ? "" : percent, attributes: [
+        let title = NSAttributedString(string: unavailable ? "" : percent, attributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium), .foregroundColor: NSColor.labelColor])
+        if let button = item?.button, !button.attributedTitle.isEqual(to: title) {
+            button.attributedTitle = title
+        }
         let unavailableTitle = L10n.text(offline ? "네트워크 연결 없음" : "사용량 조회 실패")
         let usageAccessibility = provider.name + percent
         item?.button?.setAccessibilityLabel(unavailable ? provider.name + " " + unavailableTitle
@@ -490,11 +493,21 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
             overlayHeight = menu.size.height - (probe.size.height - view.frame.height)
         }
         if !overlay { overlayHeight = nil }
-        dashboard.view = QuotaMenuView(quota: snapshot?.quota, account: snapshot?.account,
-            updatedAt: snapshotAt, failure: failure, intro: fetching && snapshot == nil && !overlay,
-            checkingForUpdates: checking, offline: offline,
-            preservedHeight: overlayHeight, provider: provider, showRemaining: showRemaining)
-        actions.forEach { $0.isHidden = overlay }
+        let intro = fetching && snapshot == nil && !overlay
+        // Reuse ordinary usage panels across polling and menu opens. Rebuild
+        // state screens so their immutable captions and layout stay correct.
+        if !overlay, !intro, let panel = dashboard.view as? QuotaMenuView,
+           !panel.intro, !panel.checkingForUpdates, !panel.offline, !panel.showsFailureScreen,
+           panel.showRemaining == showRemaining {
+            panel.update(quota: snapshot?.quota, account: snapshot?.account,
+                         updatedAt: snapshotAt, failure: failure)
+        } else {
+            dashboard.view = QuotaMenuView(quota: snapshot?.quota, account: snapshot?.account,
+                updatedAt: snapshotAt, failure: failure, intro: intro,
+                checkingForUpdates: checking, offline: offline,
+                preservedHeight: overlayHeight, provider: provider, showRemaining: showRemaining)
+        }
+        actions.filter { $0.isHidden != overlay }.forEach { $0.isHidden = overlay }
         updateActivityView()
     }
 

@@ -148,38 +148,7 @@ import UserNotifications
 
         precondition(AppNotifications.foregroundPresentationOptions.contains(.banner))
         precondition(AppNotifications.foregroundPresentationOptions.contains(.sound))
-        let resetContent = UNMutableNotificationContent()
-        resetContent.userInfo = ["resetAt": 1_800_000_000.0, "resetAccount": "first@example.com",
-                                 "resetLabel": "5시간", "resetSound": "default|5.0|1.0"]
-        let pendingReset = UNNotificationRequest(identifier: AppNotifications.resetIdentifier(
-            name: "primary", timestamp: 1_800_000_000), content: resetContent,
-            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 60, repeats: false))
-        precondition(AppNotifications.resetIdentifier(name: "primary", timestamp: 1_800_000_000)
-            != AppNotifications.resetIdentifier(name: "primary", timestamp: 1_800_018_000),
-            "Different reset cycles must have independent pending IDs")
-        precondition(AppNotifications.isPreviousCycleDue(pendingAt: 1_800_000_000,
-            latestAt: 1_800_018_000, now: 1_800_000_001, windowDuration: 5 * 60 * 60),
-            "A still-pending due notification must survive the next-cycle booking")
-        precondition(!AppNotifications.isPreviousCycleDue(pendingAt: 1_800_000_000,
-            latestAt: 1_800_000_900, now: 1_800_000_001, windowDuration: 5 * 60 * 60),
-            "A corrected deadline must cancel the obsolete request")
-        precondition(AppNotifications.isPreviousCycleDue(pendingAt: 1_800_000_000,
-            latestAt: 1_800_604_800, now: 1_800_000_001, windowDuration: 7 * 24 * 60 * 60),
-            "A weekly reset must preserve the previous due notification")
-        precondition(AppNotifications.isPreviousCycleDue(pendingAt: 1_800_000_000,
-            latestAt: 1_802_419_200, now: 1_800_000_001, windowDuration: 30 * 24 * 60 * 60),
-            "Calendar months shorter than 30 days must still be recognised")
-        precondition(AppNotifications.resetRequestMatches(pendingReset, timestamp: 1_800_000_000,
-            account: "first@example.com", label: "5시간", sound: "default|5.0|1.0"))
-        precondition(!AppNotifications.resetRequestMatches(pendingReset, timestamp: 1_800_000_060,
-            account: "first@example.com", label: "5시간", sound: "default|5.0|1.0"),
-            "A changed reset time must replace the pending notification")
-        precondition(!AppNotifications.resetRequestMatches(pendingReset, timestamp: 1_800_000_000,
-            account: "second@example.com", label: "5시간", sound: "default|5.0|1.0"),
-            "An account switch must replace the pending notification")
-        precondition(!AppNotifications.resetRequestMatches(pendingReset, timestamp: 1_800_000_000,
-            account: "first@example.com", label: "5시간", sound: "custom|5.0|1.0"),
-            "A sound change must update the pending notification")
+        checkValidatedResetNotifications()
 
         for kind in NotificationKind.allCases {
             defaults.set(false, forKey: "notifications.\(kind.rawValue).enabled")
@@ -314,5 +283,256 @@ import UserNotifications
         precondition(recentCompletion.update([row], connected: true, now: start.addingTimeInterval(1)).count == 1,
                      "A recent terminal snapshot must defer, not discard, its completion")
         precondition(recentCompletion.update([row], connected: true, now: start.addingTimeInterval(2)).isEmpty)
+    }
+}
+
+private func checkValidatedResetNotifications() {
+    let deadline = Date().timeIntervalSince1970 + 120
+    let account = CodexAccount(email: "reset-a@example.com", planType: "plus")
+    func quota(_ at: Double, minutes: Int = 300, used: Double? = nil, plan: String? = nil) -> Quota {
+        Quota(primary: QuotaWindow(usedPercent: used ?? (at <= deadline ? 80 : 10),
+                                  windowDurationMins: minutes, resetsAt: at), secondary: nil, planType: plan)
+    }
+    func waitUntil(_ condition: () -> Bool) {
+        let limit = Date().addingTimeInterval(3)
+        while !condition() && Date() < limit {
+            _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.005))
+        }
+        precondition(condition(), "Reset reconciliation timed out")
+    }
+    func isolated(_ test: (ResetNotificationFixture, AppNotifications, NotificationSettings) -> Void) {
+        let suite = "PlusCodex.validated-reset.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = NotificationSettings(defaults: defaults)
+        let fixture = ResetNotificationFixture(now: Date(timeIntervalSince1970: deadline - 60))
+        // Seed the old build's accepted future reservation before loading the ledger.
+        ResetCycleLedger(defaults: defaults).registered(account: account.email!, name: "primary",
+                                                       deadline: deadline, duration: 18000)
+        let legacyContent = UNMutableNotificationContent()
+        legacyContent.userInfo = ["resetAccount": account.email!, "resetAt": deadline]
+        fixture.pending["reset-primary"] = UNNotificationRequest(identifier: "reset-primary", content: legacyContent,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 60, repeats: false))
+        let notifications = AppNotifications(settings: settings,
+            threadPreferences: ThreadNotificationPreferences(defaults: defaults), resetDefaults: defaults,
+            resetClock: { fixture.now },
+            readPendingResets: { $0(Array(fixture.pending.values)) },
+            readResetAuthorization: { completion in
+                fixture.authorizationReads += 1
+                if fixture.holdAuthorization { fixture.authorization = completion }
+                else { completion(fixture.authorized) }
+            },
+            addReset: { fixture.add($0, completion: $1) },
+            removeReset: { ids in ids.forEach { fixture.pending.removeValue(forKey: $0) } })
+        test(fixture, notifications, settings)
+    }
+    func drain(_ notifications: AppNotifications) { waitUntil { !notifications.resetSyncInProgress } }
+
+    precondition(AppNotifications.isPreviousCycleDue(pendingAt: deadline, latestAt: deadline + 18000,
+        now: deadline + 1, windowDuration: 18000))
+    precondition(AppNotifications.isPreviousCycleDue(pendingAt: deadline, latestAt: deadline + 604800,
+        now: deadline + 1, windowDuration: 604800))
+    precondition(AppNotifications.isPreviousCycleDue(pendingAt: deadline, latestAt: deadline + 28 * 86400,
+        now: deadline + 1, windowDuration: 30 * 86400))
+    for (latest, now) in [(deadline, deadline + 1), (deadline + 900, deadline + 1),
+                          (deadline + 18000, deadline - 1), (deadline + 18000, deadline + 301),
+                          (Double.nan, deadline + 1)] {
+        precondition(!AppNotifications.isPreviousCycleDue(pendingAt: deadline, latestAt: latest,
+            now: now, windowDuration: 18000), "Stale or corrected deadlines are not confirmed cycles")
+    }
+
+    isolated { fixture, notifications, _ in
+        let content = UNMutableNotificationContent()
+        for id in ["reset-secondary-obsolete", "completion-unrelated"] {
+            fixture.pending[id] = UNNotificationRequest(identifier: id, content: content,
+                trigger: UNTimeIntervalNotificationTrigger(timeInterval: 60, repeats: false))
+        }
+        notifications.scheduleResets(quota(deadline), account: account)
+        drain(notifications)
+        precondition(fixture.additions == 0 && fixture.pending.count == 1,
+                     "Cancel legacy reset timers, preserve unrelated notifications, never book future resets")
+        precondition(fixture.authorizationReads == 0, "No permission IPC without a due candidate")
+        fixture.now = Date(timeIntervalSince1970: deadline + 1)
+        notifications.scheduleResets(quota(deadline), account: account)
+        drain(notifications)
+        precondition(fixture.additions == 0, "Clock passing a stale server deadline is not a reset")
+        notifications.scheduleResets(quota(deadline + 18000), account: account)
+        drain(notifications)
+        precondition(fixture.additions == 1)
+        let request = fixture.pending.values.first { $0.identifier.hasPrefix("reset-") }!
+        precondition(request.trigger == nil && request.content.userInfo["resetAt"] as? Double == deadline)
+        for _ in 0..<10 { notifications.scheduleResets(quota(deadline + 18000), account: account) }
+        drain(notifications)
+        precondition(fixture.additions == 1, "Repeated polling must not duplicate a confirmed reset")
+        precondition(fixture.authorizationReads == 1, "Consumed reminders do not re-read permission every poll")
+    }
+
+    for used in [80.0, 90, -.infinity, .infinity, .nan, -1, 101] {
+        isolated { fixture, notifications, _ in
+            notifications.scheduleResets(quota(deadline), account: account)
+            drain(notifications)
+            fixture.now = Date(timeIntervalSince1970: deadline + 1)
+            notifications.scheduleResets(quota(deadline + 18000, used: used), account: account)
+            drain(notifications)
+            precondition(fixture.additions == 0, "Dates alone must not confirm unchanged, increased or invalid usage")
+        }
+    }
+
+    isolated { fixture, notifications, _ in
+        notifications.scheduleResets(quota(deadline, used: 0), account: account)
+        drain(notifications)
+        fixture.now = Date(timeIntervalSince1970: deadline + 1)
+        notifications.scheduleResets(quota(deadline + 18000, used: 0), account: account)
+        drain(notifications)
+        precondition(fixture.additions == 1, "An entirely unused window can still roll over")
+    }
+
+    isolated { fixture, notifications, _ in
+        notifications.scheduleResets(quota(deadline), account: account)
+        drain(notifications)
+        fixture.now = Date(timeIntervalSince1970: deadline + 1)
+        notifications.scheduleResets(quota(deadline + 18000, plan: "free"), account: account)
+        drain(notifications)
+        precondition(fixture.additions == 0, "A changed plan is not a natural reset, even if usage falls")
+    }
+
+    isolated { fixture, notifications, _ in
+        notifications.scheduleResets(quota(deadline), account: account)
+        drain(notifications)
+        fixture.now = Date(timeIntervalSince1970: deadline - 10)
+        notifications.scheduleResets(quota(deadline + 900), account: account)
+        drain(notifications)
+        notifications.scheduleResets(quota(deadline), account: account,
+                                     requestStartedAt: Date(timeIntervalSince1970: deadline - 20))
+        drain(notifications)
+        fixture.now = Date(timeIntervalSince1970: deadline + 1)
+        notifications.scheduleResets(quota(deadline + 18000), account: account)
+        drain(notifications)
+        precondition(fixture.additions == 0, "An older response must not undo a newer deadline correction")
+    }
+
+    for offset in [-61.0, 1, .nan] {
+        isolated { fixture, notifications, _ in
+            notifications.scheduleResets(quota(deadline), account: account)
+            drain(notifications)
+            notifications.scheduleResets(quota(deadline + 900), account: account,
+                                         requestStartedAt: fixture.now.addingTimeInterval(offset))
+            drain(notifications)
+            fixture.now = Date(timeIntervalSince1970: deadline + 1)
+            notifications.scheduleResets(quota(deadline + 18000), account: account)
+            drain(notifications)
+            precondition(fixture.additions == 1, "Stale, future or invalid timestamps cannot poison the baseline")
+        }
+    }
+
+    for change in 0..<7 {
+        isolated { fixture, notifications, settings in
+            notifications.scheduleResets(quota(deadline), account: account)
+            drain(notifications)
+            fixture.now = Date(timeIntervalSince1970: deadline + 1)
+            switch change {
+            case 0:
+                notifications.scheduleResets(quota(deadline + 900), account: account)
+            case 1:
+                fixture.now = Date(timeIntervalSince1970: deadline + 301)
+                notifications.scheduleResets(quota(deadline + 18000), account: account)
+            case 2:
+                notifications.scheduleResets(quota(deadline + 18000), account: CodexAccount(email: "other@example.com", planType: "plus"))
+            case 3:
+                notifications.scheduleResets(quota(deadline + 18000, minutes: 10080), account: account)
+            case 4:
+                notifications.invalidateResetAccount()
+                notifications.scheduleResets(quota(deadline + 18000), account: account)
+            case 5:
+                settings.setEnabled(false, for: .reset)
+                notifications.scheduleResets(quota(deadline + 18000), account: account)
+            default:
+                notifications.scheduleResets(quota(deadline + 18000), account: account,
+                                             requestStartedAt: Date(timeIntervalSince1970: deadline - 1))
+            }
+            drain(notifications)
+            precondition(fixture.additions == 0, "No reset reminder for invalid evidence (case \(change))")
+            if change == 6 {
+                notifications.scheduleResets(quota(deadline + 18000), account: account)
+                drain(notifications)
+                precondition(fixture.additions == 1, "The next post-boundary fetch can still confirm the reset")
+            }
+        }
+    }
+
+    isolated { fixture, notifications, _ in
+        notifications.scheduleResets(quota(deadline), account: account)
+        drain(notifications)
+        fixture.now = Date(timeIntervalSince1970: deadline + 1)
+        fixture.failNext = true
+        notifications.scheduleResets(quota(deadline + 18000), account: account)
+        drain(notifications)
+        precondition(fixture.additions == 1 && fixture.pending.isEmpty)
+        notifications.scheduleResets(quota(deadline + 18000), account: account)
+        drain(notifications)
+        precondition(fixture.additions == 2 && fixture.pending.count == 1,
+                     "Failed submissions retry only with another fresh fetch")
+    }
+
+    for change in 0..<4 {
+        isolated { fixture, notifications, settings in
+            notifications.scheduleResets(quota(deadline), account: account)
+            drain(notifications)
+            fixture.now = Date(timeIntervalSince1970: deadline + 1)
+            fixture.holdAuthorization = true
+            notifications.scheduleResets(quota(deadline + 18000), account: account)
+            waitUntil { fixture.authorization != nil }
+            if change == 0 { fixture.now = fixture.now.addingTimeInterval(61) }
+            if change == 1 { notifications.invalidateResetAccount() }
+            if change == 2 { settings.setEnabled(false, for: .reset) }
+            fixture.holdAuthorization = false
+            let completion = fixture.authorization!
+            fixture.authorization = nil
+            completion(change != 3)
+            drain(notifications)
+            precondition(fixture.additions == 0, "Check freshness, account, settings and authorization immediately before send")
+        }
+    }
+
+    isolated { fixture, notifications, _ in
+        notifications.scheduleResets(quota(deadline), account: account)
+        drain(notifications)
+        fixture.now = Date(timeIntervalSince1970: deadline + 1)
+        fixture.holdAdditions = true
+        notifications.scheduleResets(quota(deadline + 18000), account: account)
+        waitUntil { fixture.held != nil }
+        notifications.invalidateResetAccount()
+        let (request, completion) = fixture.held!
+        fixture.pending[request.identifier] = request
+        fixture.held = nil
+        fixture.holdAdditions = false
+        completion(nil)
+        drain(notifications)
+        precondition(fixture.pending.isEmpty, "Account invalidation also removes an in-flight immediate submission")
+    }
+}
+
+private final class ResetNotificationFixture {
+    var now: Date
+    var pending: [String: UNNotificationRequest] = [:]
+    var additions = 0
+    var authorized = true
+    var authorizationReads = 0
+    var failNext = false
+    var holdAuthorization = false
+    var authorization: ((Bool) -> Void)?
+    var holdAdditions = false
+    var held: (UNNotificationRequest, (Error?) -> Void)?
+    init(now: Date) { self.now = now }
+    func add(_ request: UNNotificationRequest, completion: @escaping (Error?) -> Void) {
+        additions += 1
+        if holdAdditions { held = (request, completion) }
+        else if failNext {
+            failNext = false
+            completion(NSError(domain: "reset-fixture", code: 1))
+        } else {
+            pending[request.identifier] = request
+            completion(nil)
+        }
     }
 }

@@ -279,7 +279,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         let requestRevision = CodexAuthRevision.current()
-        lastRefreshStartedAt = Date()
+        let requestStartedAt = Date()
+        lastRefreshStartedAt = requestStartedAt
         codexAuthRevision = requestRevision
         refreshGeneration += 1
         let generation = refreshGeneration
@@ -318,7 +319,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 case .success(let snapshot):
                     self.notifications.checkThresholds(snapshot.quota, account: snapshot.account)
                     self.notifications.scheduleResetCreditExpiry(snapshot.rateLimitResetCredits,
-                                                                  account: snapshot.account)
+                        account: snapshot.account, requestStartedAt: requestStartedAt)
+                    // Notification validation must use the server response, not
+                    // the deadline stabilized for menu display and wake scheduling.
+                    self.notifications.scheduleResets(snapshot.quota, account: snapshot.account,
+                                                       requestStartedAt: requestStartedAt)
                     self.quota = snapshot.quota
                     self.account = snapshot.account
                     let refreshedAt = Date()
@@ -332,12 +337,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     if let identity = self.resetSchedule.resolvedAccount {
                         self.selectRecordAccount(identity)
                         self.wakeSettings.selectAccount(identity)
-                        self.notifications.scheduleResets(scheduledQuota,
-                            account: CodexAccount(email: identity, planType: snapshot.account?.planType))
                         self.wakeScheduler.tick(quota: snapshot.quota, offline: self.offline,
                                                 quotaFetchedAt: refreshedAt, now: refreshedAt)
                     }
                 case .failure(let error):
+                    self.notifications.invalidateResetAccount()
                     self.failure = error.localizedDescription
                     self.codexExecutableMissing = (error as? QuotaError)?.isMissingExecutable == true
                     self.settingsWindow.update(.codex, status: error.localizedDescription)
@@ -354,23 +358,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func render(allowingTrackedUpdateTransition: Bool = false) {
-        settingsWindow.updateMenuBarQuota(.codex, quota: quota?.effectiveQuota(account: account))
+        let effectiveQuota = quota?.effectiveQuota(account: account)
+        settingsWindow.updateMenuBarQuota(.codex, quota: effectiveQuota)
         statusWindow.update(quota: quota, fetching: fetching, failure: failure)
         let showingPreviousUsage = failure != nil
             && QuotaMenuView.canShowPreviousUsage(quota, updatedAt: updatedAt)
         let failureScreen = failure != nil && !showingPreviousUsage
         let unavailable = offline || codexExecutableMissing || failureScreen
         let percent = unavailable ? "" : MenuBarFormat.render(providerSettings.menuBarFormat(.codex),
-            quota: quota?.effectiveQuota(account: account), showRemaining: providerSettings.showRemaining(.codex))
+            quota: effectiveQuota, showRemaining: providerSettings.showRemaining(.codex))
         if let button = item?.button {
             iconUnavailable = unavailable
             updateStatusSpinner()
             button.image = codexStatusImage()
             button.imagePosition = unavailable || percent.isEmpty ? .imageOnly : .imageLeading
-            button.attributedTitle = NSAttributedString(string: unavailable || percent.isEmpty ? "" : " " + percent, attributes: [
+            let title = NSAttributedString(string: unavailable || percent.isEmpty ? "" : " " + percent, attributes: [
                 .font: NSFont.monospacedDigitSystemFont(ofSize: unavailable ? 9 : 11, weight: .medium),
                 .foregroundColor: unavailable ? NSColor.systemGray : NSColor.labelColor
             ])
+            if !button.attributedTitle.isEqual(to: title) { button.attributedTitle = title }
             let unavailableTitle = L10n.text(offline ? "네트워크 연결 없음"
                 : codexExecutableMissing ? "Codex를 찾을 수 없음" : "사용량 조회 실패")
             let usageAccessibility = "Codex " + percent

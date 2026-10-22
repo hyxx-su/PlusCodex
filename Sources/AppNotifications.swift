@@ -5,12 +5,16 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
     static let foregroundPresentationOptions: UNNotificationPresentationOptions = [.banner, .list, .sound]
     private static let resetNames = ["primary", "secondary"]
 
-    private struct ResetTarget {
+    private struct ResetTarget: Equatable {
         let timestamp: Double
         let windowDuration: TimeInterval?
+        let usedPercent: Double
+        let plan: String
         let account: String
         let label: String
         let sound: String
+        let observedAt: Date
+        let confirmedAt: Double?
     }
 
     private let center = UNUserNotificationCenter.current()
@@ -19,20 +23,48 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
     private let readCleanup = ThreadNotificationReadCleanup()
     private let threadPreferences: ThreadNotificationPreferences
     private let resetCreditExpiry: ResetCreditExpiryNotifications
-    private var lastResetSnapshot: (quota: Quota, account: CodexAccount?)?
     private var resetTargets: [String: ResetTarget] = [:]
-    private var resetSyncInProgress = false
-    private let cycleLedger = ResetCycleLedger()
+    private(set) var resetSyncInProgress = false
+    private let cycleLedger: ResetCycleLedger
+    private let resetClock: () -> Date
+    private let readPendingResets: (@escaping ([UNNotificationRequest]) -> Void) -> Void
+    private let readResetAuthorization: (@escaping (Bool) -> Void) -> Void
+    private let addReset: (UNNotificationRequest, @escaping (Error?) -> Void) -> Void
+    private let removeReset: ([String]) -> Void
     private var resetSyncRequested = false
     private var pendingUpdateBuilds = Set<String>()
     var onUpdateNotificationOpened: (() -> Void)?
     var isAttentionRequestCurrent: ((String, String?) -> Bool)?
 
     init(settings: NotificationSettings = NotificationSettings(),
-         threadPreferences: ThreadNotificationPreferences = .shared) {
+         threadPreferences: ThreadNotificationPreferences = .shared,
+         resetDefaults: UserDefaults = .standard,
+         resetClock: @escaping () -> Date = Date.init,
+         readPendingResets: ((@escaping ([UNNotificationRequest]) -> Void) -> Void)? = nil,
+         readResetAuthorization: ((@escaping (Bool) -> Void) -> Void)? = nil,
+         addReset: ((UNNotificationRequest, @escaping (Error?) -> Void) -> Void)? = nil,
+         removeReset: (([String]) -> Void)? = nil) {
         notificationSettings = settings
         self.threadPreferences = threadPreferences
         resetCreditExpiry = ResetCreditExpiryNotifications(settings: settings)
+        cycleLedger = ResetCycleLedger(defaults: resetDefaults)
+        self.resetClock = resetClock
+        self.readPendingResets = readPendingResets ?? { completion in
+            UNUserNotificationCenter.current().getPendingNotificationRequests(completionHandler: completion)
+        }
+        self.readResetAuthorization = readResetAuthorization ?? { completion in
+            UNUserNotificationCenter.current().getNotificationSettings {
+                completion($0.authorizationStatus == .authorized || $0.authorizationStatus == .provisional)
+            }
+        }
+        self.addReset = addReset ?? { request, completion in
+            NotificationDelivery.shared.add(request, duration: settings.notificationPlaybackDuration, completion: completion)
+        }
+        self.removeReset = removeReset ?? { ids in
+            ids.forEach { NotificationDelivery.shared.cancel($0) }
+            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ids)
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
+        }
         super.init()
         settings.onChange = { [weak self] in self?.notificationSettingsDidChange() }
     }
@@ -110,9 +142,8 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
         center.delegate = self
         autoCleanup.synchronize()
         resetCreditExpiry.start()
-        // A disabled reset must not leave an old OS request active when the
-        // first usage fetch is offline or fails after relaunch.
-        if !notificationSettings.isEnabled(.reset) { cancelPendingResetsIfDisabled() }
+        // Cancel legacy timers even when the first fetch fails or the app is offline.
+        reconcileResets()
         guard requestAuthorization,
               notificationSettings.anyEnabled || threadPreferences.hasEnabledOverrides else { return }
         center.requestAuthorization(options: [.alert, .sound]) { _, error in
@@ -206,36 +237,70 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
                                      content: content, trigger: nil))
     }
 
-    func scheduleResets(_ quota: Quota, account: CodexAccount?) {
+    func scheduleResets(_ quota: Quota, account: CodexAccount?, requestStartedAt: Date? = nil) {
+        let observedAt = requestStartedAt ?? resetClock()
+        let age = resetClock().timeIntervalSince(observedAt)
+        // A slow or out-of-order response must not replace a newer baseline.
+        guard age.isFinite, age >= 0, age <= 60,
+              resetTargets.values.allSatisfy({ observedAt >= $0.observedAt }) else { return }
         let quota = quota.effectiveQuota(account: account)
-        // Refresh, launch, sleep recovery and network recovery share this path.
-        // The notification center, not process memory, is the source of truth.
-        lastResetSnapshot = (quota, account)
+        let plan = quota.resolvedPlan(fallback: account?.planType)?
+            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        let previous = resetTargets
         resetTargets.removeAll()
-        if notificationSettings.isEnabled(.reset) {
-            let sound = resetSoundSignature
+        if notificationSettings.isEnabled(.reset),
+           let email = account?.email?.trimmingCharacters(in: .whitespacesAndNewlines), !email.isEmpty {
+            let accountScope = email.lowercased()
             for (name, window) in [("primary", quota.primary), ("secondary", quota.secondary)] {
-                guard let window, let timestamp = window.resetsAt, timestamp.isFinite else { continue }
-                resetTargets["reset-\(name)"] = ResetTarget(
-                    timestamp: timestamp,
-                    windowDuration: window.windowDurationMins.map { TimeInterval($0) * 60 },
-                    account: account?.email ?? "",
-                    label: window.displayLabel(planType: account?.planType, isPrimary: name == "primary"),
-                    sound: sound)
+                guard let window, let timestamp = window.resetsAt, timestamp.isFinite,
+                      window.usedPercent.isFinite, (0...100).contains(window.usedPercent),
+                      timestamp > 0, timestamp < Date.distantFuture.timeIntervalSince1970,
+                      let minutes = window.windowDurationMins, minutes > 0 else { continue }
+                let duration = TimeInterval(minutes) * 60
+                let prior = previous[name]
+                var confirmedAt: Double?
+                if let prior, prior.account == accountScope, prior.windowDuration == duration, prior.plan == plan {
+                    // A request spanning the boundary cannot validate the reset.
+                    // Keep its original deadline so the next post-boundary fetch can.
+                    if observedAt.timeIntervalSince1970 < prior.timestamp,
+                       Self.isPreviousCycleDue(pendingAt: prior.timestamp, latestAt: timestamp,
+                                               now: resetClock().timeIntervalSince1970,
+                                               windowDuration: duration) {
+                        resetTargets[name] = prior
+                        continue
+                    }
+                    if prior.timestamp == timestamp {
+                        // A failed submission can retry only after another successful fetch.
+                        confirmedAt = prior.confirmedAt
+                    } else if (window.usedPercent < prior.usedPercent || (prior.usedPercent == 0 && window.usedPercent == 0)),
+                              Self.isPreviousCycleDue(pendingAt: prior.timestamp, latestAt: timestamp,
+                                                       now: observedAt.timeIntervalSince1970,
+                                                       windowDuration: duration) {
+                        confirmedAt = prior.timestamp
+                    }
+                }
+                // A date correction or plan change alone is not evidence of a reset.
+                // Nonempty usage must fall as well; an unused window stays at zero.
+                resetTargets[name] = ResetTarget(timestamp: timestamp, windowDuration: duration,
+                    usedPercent: window.usedPercent, plan: plan,
+                    account: accountScope,
+                    label: window.displayLabel(planType: quota.resolvedPlan(fallback: account?.planType),
+                                               isPrimary: name == "primary"),
+                    sound: resetSoundSignature, observedAt: observedAt, confirmedAt: confirmedAt)
             }
         }
         reconcileResets()
     }
 
     func invalidateResetAccount() {
-        lastResetSnapshot = nil
         resetTargets.removeAll()
         invalidateResetCreditExpiry()
         reconcileResets()
     }
 
-    func scheduleResetCreditExpiry(_ summary: RateLimitResetCreditsSummary?, account: CodexAccount?) {
-        resetCreditExpiry.update(summary, account: account?.email)
+    func scheduleResetCreditExpiry(_ summary: RateLimitResetCreditsSummary?, account: CodexAccount?,
+                                   requestStartedAt: Date? = nil) {
+        resetCreditExpiry.update(summary, account: account?.email, requestStartedAt: requestStartedAt)
     }
 
     func invalidateResetCreditExpiry() {
@@ -244,16 +309,6 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
 
     private var resetSoundSignature: String {
         "\(notificationSettings.customSoundName ?? "default")|\(notificationSettings.soundDuration)|\(notificationSettings.soundVolume)"
-    }
-
-    static func resetRequestMatches(_ request: UNNotificationRequest?, timestamp: Double,
-                                    account: String, label: String, sound: String) -> Bool {
-        guard let request, request.trigger != nil else { return false }
-        let info = request.content.userInfo
-        return info["resetAt"] as? Double == timestamp
-            && info["resetAccount"] as? String == account
-            && info["resetLabel"] as? String == label
-            && info["resetSound"] as? String == sound
     }
 
     static func resetIdentifier(name: String, timestamp: Double) -> String {
@@ -266,121 +321,105 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
 
     static func isPreviousCycleDue(pendingAt: Double?, latestAt: Double, now: Double,
                                    windowDuration: TimeInterval?) -> Bool {
-        guard let pendingAt, pendingAt <= now, latestAt > now,
-              let windowDuration, windowDuration > 0 else { return false }
-        let difference = latestAt - pendingAt
-        // Preserve an overdue OS request only when the server has advanced to
-        // the next cycle, not when it merely corrected this cycle. Monthly
-        // calendar windows can vary by several days; shorter windows are strict.
-        let tolerance = windowDuration <= 5 * 60 * 60 ? 10 * 60 : max(60 * 60, windowDuration * 0.1)
-        return abs(difference - windowDuration) <= tolerance
+        guard let pendingAt, pendingAt.isFinite, latestAt.isFinite, now.isFinite,
+              pendingAt <= now, now - pendingAt <= 300, latestAt > now,
+              let windowDuration, windowDuration.isFinite, windowDuration > 0 else { return false }
+        // Require a freshly observed cycle advance, not just the local clock
+        // passing a cached deadline. Never catch up hours-old reset banners.
+        let tolerance = windowDuration >= 28 * 86400 ? 3 * 86400.0 : min(600, windowDuration * 0.1)
+        return abs((latestAt - pendingAt) - windowDuration) <= tolerance
+    }
+
+    private func resetIsCurrent(_ target: ResetTarget, name: String, now: Date) -> Bool {
+        guard notificationSettings.isEnabled(.reset),
+              let current = resetTargets[name], current.account == target.account,
+              current.timestamp == target.timestamp, current.confirmedAt == target.confirmedAt,
+              let deadline = target.confirmedAt,
+              current.observedAt.timeIntervalSince1970 >= deadline,
+              now.timeIntervalSince(current.observedAt) >= 0,
+              now.timeIntervalSince(current.observedAt) <= 60,
+              now.timeIntervalSince1970 - deadline <= 300 else { return false }
+        return true
     }
 
     private func reconcileResets() {
-        guard !resetSyncInProgress else {
-            resetSyncRequested = true
-            return
-        }
+        guard !resetSyncInProgress else { resetSyncRequested = true; return }
         resetSyncInProgress = true
-        let snapshotStartedAt = Date()
-        center.getPendingNotificationRequests { [weak self] requests in
+        readPendingResets { [weak self] requests in
             DispatchQueue.main.async {
                 guard let self else { return }
-                let pending = requests.filter { Self.resetName(for: $0.identifier) != nil }
-                NotificationDelivery.shared.remember(requests, defaultDuration: self.notificationSettings.notificationPlaybackDuration,
-                                                     snapshotStartedAt: snapshotStartedAt)
-                let pendingByID = Dictionary(uniqueKeysWithValues: pending.map { ($0.identifier, $0) })
-                let group = DispatchGroup()
-                let now = Date().timeIntervalSince1970
-                for request in pending {
-                    guard let name = Self.resetName(for: request.identifier),
-                          let account = request.content.userInfo["resetAccount"] as? String,
-                          let deadline = request.content.userInfo["resetAt"] as? Double,
-                          let target = self.resetTargets["reset-\(name)"], target.account == account,
-                          let duration = target.windowDuration else { continue }
-                    self.cycleLedger.observeExisting(account: account, name: name, deadline: deadline, duration: duration)
+                // Never leave an unvalidated future request in macOS, including
+                // requests created by an older build. Immediate submissions are not timers.
+                for request in requests where Self.resetName(for: request.identifier) != nil && request.trigger != nil {
+                    if let name = Self.resetName(for: request.identifier),
+                       let account = request.content.userInfo["resetAccount"] as? String,
+                       let deadline = request.content.userInfo["resetAt"] as? Double {
+                        self.cycleLedger.cancelFuture(account: account, name: name, deadline: deadline,
+                                                       now: self.resetClock().timeIntervalSince1970)
+                    }
+                    self.removeReset([request.identifier])
                 }
-                for request in pending {
-                    guard let name = Self.resetName(for: request.identifier),
-                          let target = self.resetTargets["reset-\(name)"] else {
-                        self.cancelLedgerReservation(request, now: now)
-                        NotificationDelivery.shared.cancel(request.identifier)
-                        self.center.removePendingNotificationRequests(withIdentifiers: [request.identifier])
-                        continue
-                    }
-                    let targetID = Self.resetIdentifier(name: name, timestamp: target.timestamp)
-                    if request.identifier == targetID, target.timestamp > now {
-                        // The add below atomically replaces this ID if its content
-                        // changed; removing it first would create a delivery gap.
-                        continue
-                    }
-                    if request.identifier == targetID,
-                       Self.resetRequestMatches(request, timestamp: target.timestamp,
-                           account: target.account, label: target.label, sound: target.sound) {
-                        continue
-                    }
-                    let pendingAt = request.content.userInfo["resetAt"] as? Double
-                        ?? (request.trigger as? UNTimeIntervalNotificationTrigger)?
-                            .nextTriggerDate()?.timeIntervalSince1970
-                    if let pendingAt, pendingAt <= now,
-                       request.content.userInfo["resetAccount"] as? String == target.account,
-                       !self.cycleLedger.permits(account: target.account, name: name, deadline: target.timestamp, now: now) {
-                        // Preserve an already-due OS request rather than replacing
-                        // it with a second notification for a shifted deadline.
-                        continue
-                    }
-                    if Self.isPreviousCycleDue(pendingAt: pendingAt, latestAt: target.timestamp,
-                        now: now, windowDuration: target.windowDuration),
-                       request.content.userInfo["resetAccount"] as? String == target.account {
-                        continue
-                    }
-                    NotificationDelivery.shared.cancel(request.identifier)
-                    self.cancelLedgerReservation(request, now: now)
-                    self.center.removePendingNotificationRequests(withIdentifiers: [request.identifier])
+                let now = self.resetClock()
+                guard self.resetTargets.contains(where: { name, target in
+                    guard let deadline = target.confirmedAt else { return false }
+                    return self.resetIsCurrent(target, name: name, now: now)
+                        && self.cycleLedger.permits(account: target.account, name: name,
+                                                    deadline: deadline, now: now.timeIntervalSince1970)
+                }) else {
+                    self.sendValidatedResets(authorized: false)
+                    return
                 }
-                for name in Self.resetNames {
-                    guard let target = self.resetTargets["reset-\(name)"], target.timestamp > now else { continue }
-                    let id = Self.resetIdentifier(name: name, timestamp: target.timestamp)
-                    guard self.cycleLedger.permits(account: target.account, name: name,
-                                                   deadline: target.timestamp, now: now) else { continue }
-                    if Self.resetRequestMatches(pendingByID[id], timestamp: target.timestamp,
-                        account: target.account, label: target.label, sound: target.sound) {
-                        if let duration = target.windowDuration {
-                            self.cycleLedger.registered(account: target.account, name: name,
-                                                        deadline: target.timestamp, duration: duration)
-                        }
-                        continue
+                self.readResetAuthorization { [weak self] authorized in
+                    DispatchQueue.main.async {
+                        self?.sendValidatedResets(authorized: authorized)
                     }
-                    let content = UNMutableNotificationContent()
-                    NotificationIconProvider.apply(to: content, provider: .codex)
-                    content.title = L10n.text("Codex %@ 초기화 시간", target.label)
-                    content.body = L10n.text("사용량 초기화 예정 시간이 되었습니다. PlusCodex에서 남은 사용량을 확인하세요.")
-                    content.sound = self.notificationSettings.sound
-                    content.userInfo = ["resetAt": target.timestamp, "resetAccount": target.account,
-                                        "resetLabel": target.label, "resetSound": target.sound]
-                    let interval = max(1, target.timestamp - Date().timeIntervalSince1970)
-                    group.enter()
-                    // A cycle-specific ID lets an overdue OS request survive while
-                    // the next cycle is booked. The same ID replaces a stale copy.
-                    NotificationDelivery.shared.add(UNNotificationRequest(identifier: id, content: content,
-                        trigger: UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)), duration: self.notificationSettings.notificationPlaybackDuration) { error in
-                        DispatchQueue.main.async {
-                            if let error { NSLog("PlusCodex reset notification failed: %@", error.localizedDescription) }
-                            else if let duration = target.windowDuration {
+                }
+            }
+        }
+    }
+
+    private func sendValidatedResets(authorized: Bool) {
+        let group = DispatchGroup()
+        let now = resetClock()
+        if authorized {
+            for name in Self.resetNames {
+                guard let target = resetTargets[name], resetIsCurrent(target, name: name, now: now),
+                      let deadline = target.confirmedAt, let duration = target.windowDuration,
+                      cycleLedger.permits(account: target.account, name: name, deadline: deadline,
+                                          now: now.timeIntervalSince1970) else { continue }
+                let id = Self.resetIdentifier(name: name + "-" + ThreadRecordScope.key(target.account), timestamp: deadline)
+                let content = UNMutableNotificationContent()
+                NotificationIconProvider.apply(to: content, provider: .codex)
+                content.title = L10n.text("Codex %@ 초기화 시간", target.label)
+                content.body = L10n.text("사용량 초기화 예정 시간이 되었습니다. PlusCodex에서 남은 사용량을 확인하세요.")
+                content.sound = notificationSettings.sound
+                content.userInfo = ["resetAt": deadline, "resetAccount": target.account,
+                                    "resetLabel": target.label, "resetSound": target.sound]
+                group.enter()
+                addReset(UNNotificationRequest(identifier: id, content: content, trigger: nil)) { [weak self] error in
+                    DispatchQueue.main.async {
+                        if let self {
+                            if let error {
+                                NSLog("PlusCodex reset notification failed: %@", error.localizedDescription)
+                            } else {
                                 self.cycleLedger.registered(account: target.account, name: name,
-                                                            deadline: target.timestamp, duration: duration)
+                                                            deadline: deadline, duration: duration)
+                                if !self.resetIsCurrent(target, name: name, now: self.resetClock()) {
+                                    self.removeReset([id])
+                                }
                             }
-                            group.leave()
                         }
+                        group.leave()
                     }
                 }
-                group.notify(queue: .main) {
-                    self.resetSyncInProgress = false
-                    if self.resetSyncRequested {
-                        self.resetSyncRequested = false
-                        self.reconcileResets()
-                    }
-                }
+            }
+        }
+        group.notify(queue: .main) { [weak self] in
+            guard let self else { return }
+            self.resetSyncInProgress = false
+            if self.resetSyncRequested {
+                self.resetSyncRequested = false
+                self.reconcileResets()
             }
         }
     }
@@ -388,30 +427,9 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
     private func notificationSettingsDidChange() {
         autoCleanup.synchronize()
         resetCreditExpiry.settingsDidChange()
-        if let snapshot = lastResetSnapshot {
-            scheduleResets(snapshot.quota, account: snapshot.account)
-        } else if !notificationSettings.isEnabled(.reset) {
-            cancelPendingResetsIfDisabled()
-        }
-    }
-
-    private func cancelLedgerReservation(_ request: UNNotificationRequest, now: Double) {
-        guard let name = Self.resetName(for: request.identifier),
-              let account = request.content.userInfo["resetAccount"] as? String,
-              let deadline = request.content.userInfo["resetAt"] as? Double else { return }
-        cycleLedger.cancelFuture(account: account, name: name, deadline: deadline, now: now)
-    }
-
-    private func cancelPendingResetsIfDisabled() {
-        center.getPendingNotificationRequests { [weak self] requests in
-            DispatchQueue.main.async {
-            guard let self, !self.notificationSettings.isEnabled(.reset) else { return }
-            requests.forEach { self.cancelLedgerReservation($0, now: Date().timeIntervalSince1970) }
-            let ids = requests.map(\.identifier).filter { Self.resetName(for: $0) != nil }
-            ids.forEach { NotificationDelivery.shared.cancel($0) }
-            self.center.removePendingNotificationRequests(withIdentifiers: ids)
-            }
-        }
+        // Cached quota must not become fresh evidence when a setting changes.
+        resetTargets.removeAll()
+        reconcileResets()
     }
 
     private func submit(_ request: UNNotificationRequest, attempt: Int = 0) {
