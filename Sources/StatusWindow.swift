@@ -41,16 +41,18 @@ final class StatusWindow: NSWindowController {
     }
 
     func update(quota: Quota?, fetching: Bool, failure: String?) {
-        retry.isEnabled = !fetching
+        if retry.isEnabled == fetching { retry.isEnabled = !fetching }
+        let text: String
         if let failure {
-            status.stringValue = L10n.text("사용량 조회 실패\n%@\n앱은 실행 중입니다. Codex 설치 및 로그인 상태를 확인해 주세요.", failure)
+            text = L10n.text("사용량 조회 실패\n%@\n앱은 실행 중입니다. Codex 설치 및 로그인 상태를 확인해 주세요.", failure)
         } else if let quota {
             let limits = [quota.primary, quota.secondary].compactMap { $0 }
                 .map { L10n.text("%@ %d%% 남음", $0.label, $0.remaining) }.joined(separator: " · ")
-            status.stringValue = L10n.text("사용량 연결 정상\n%@", limits) + (fetching ? L10n.text("\n추가 정보를 조회 중입니다…") : "")
+            text = L10n.text("사용량 연결 정상\n%@", limits) + (fetching ? L10n.text("\n추가 정보를 조회 중입니다…") : "")
         } else {
-            status.stringValue = fetching ? L10n.text("사용량 조회 중…\n네트워크와 Codex 응답을 기다리고 있습니다.") : L10n.text("사용량 조회 준비 중…")
+            text = fetching ? L10n.text("사용량 조회 중…\n네트워크와 Codex 응답을 기다리고 있습니다.") : L10n.text("사용량 조회 준비 중…")
         }
+        if status.stringValue != text { status.stringValue = text }
     }
 
     func reloadLocalization() {

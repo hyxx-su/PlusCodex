@@ -30,20 +30,11 @@ struct ResetCreditExpiryTarget: Equatable {
         identifier = Self.prefix + digest
     }
 
-    func matches(_ request: UNNotificationRequest, sound: String) -> Bool {
-        let info = request.content.userInfo
-        return request.identifier == identifier && request.trigger != nil
-            && info["expiryAccount"] as? String == accountScope
-            && info["expiryCreditID"] as? String == creditID
-            && info["expiryAt"] as? Double == expiresAt
-            && info["expiryReminderAt"] as? Double == reminderAt
-            && info["expirySound"] as? String == sound
-    }
 }
 
-/// Persist accepted OS reservations, not an assumption that submission succeeded.
-/// Once their deadline passes, retain a conservative receipt even if the user
-/// dismissed the banner. Reopening the app must not repeat that credit's reminder.
+/// Persist successful submissions so relaunching cannot repeat a credit's reminder.
+/// Legacy reservations whose deadline passed remain conservatively consumed;
+/// cancelling a future legacy reservation releases it for fresh validation.
 final class ResetCreditExpiryLedger {
     private struct Entry: Codable, Equatable {
         let fireAt: Double
@@ -104,9 +95,7 @@ final class ResetCreditExpiryNotifications {
     private let calendar: () -> Calendar
     private var accountScope: String?
     private var credits: [String: RateLimitResetCredit] = [:]
-    private var observedCreditIDs = Set<String>()
-    private var preserveUnlisted = false
-    private var hasSnapshot = false
+    private var fetchedAt: Date?
     private var syncRequested = false
     private(set) var synchronizing = false
 
@@ -141,50 +130,37 @@ final class ResetCreditExpiryNotifications {
         self.remove = remove ?? { ids in
             ids.forEach { NotificationDelivery.shared.cancel($0) }
             UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ids)
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
         }
     }
 
     func start() {
-        if !settings.isEnabled(.resetCreditExpiry) { invalidateAccount() }
+        // Old OS timers cannot validate redeemed credits while the app is closed.
+        invalidateAccount()
     }
 
-    func update(_ summary: RateLimitResetCreditsSummary?, account: String?) {
-        guard let account = account?.trimmingCharacters(in: .whitespacesAndNewlines), !account.isEmpty else { return }
-        let scope = ThreadRecordScope.key(account)
-        if accountScope != scope {
-            credits.removeAll()
-            observedCreditIDs.removeAll()
-            preserveUnlisted = true
-            accountScope = scope
+    func update(_ summary: RateLimitResetCreditsSummary?, account: String?, requestStartedAt: Date? = nil) {
+        let observedAt = requestStartedAt ?? clock()
+        let age = clock().timeIntervalSince(observedAt)
+        guard age.isFinite, age >= 0, age <= 60,
+              fetchedAt.map({ observedAt >= $0 }) ?? true else { return }
+        credits.removeAll()
+        fetchedAt = observedAt
+        guard let account = account?.trimmingCharacters(in: .whitespacesAndNewlines), !account.isEmpty else {
+            invalidateAccount()
+            return
         }
-        hasSnapshot = true
-        if let summary {
-            if summary.availableCount <= 0 {
-                credits.removeAll()
-                observedCreditIDs.removeAll()
-                preserveUnlisted = false
-            } else if let rows = summary.credits {
-                // A capped list is not proof that an omitted credit was redeemed.
-                preserveUnlisted = summary.availableCount > rows.filter { $0.status == "available" }.count
-                if !preserveUnlisted { credits.removeAll() }
-                observedCreditIDs = Set(rows.map(\.id))
-                for credit in rows {
-                    if credit.status == "available", credit.resetType == "codexRateLimits" {
-                        credits[credit.id] = credit
-                    } else {
-                        credits.removeValue(forKey: credit.id)
-                    }
-                }
-            } else {
-                preserveUnlisted = true
+        accountScope = ThreadRecordScope.key(account)
+        // Missing/capped rows are not proof of redemption, but neither are they
+        // permission to send. Only credits explicitly present in this fetch qualify.
+        if let summary, summary.availableCount > 0, let rows = summary.credits {
+            // Conflicting duplicate IDs must not become valid just because the
+            // available row happened to be last in the server response.
+            let groups = Dictionary(grouping: rows, by: \.id)
+            let availableRows = groups.values.filter { $0.contains { $0.status == "available" } }.count
+            if availableRows <= summary.availableCount {
+                for (id, rows) in groups where rows.count == 1 { credits[id] = rows[0] }
             }
-        }
-        let now = clock().timeIntervalSince1970
-        // Partial detail responses can persist for a long time; never retain
-        // expired reward rows indefinitely while preserving omitted live ones.
-        credits = credits.filter {
-            guard let expiry = $0.value.expiresAt, expiry.isFinite else { return false }
-            return expiry > now && expiry < Date.distantFuture.timeIntervalSince1970
         }
         reconcile()
     }
@@ -192,34 +168,30 @@ final class ResetCreditExpiryNotifications {
     func invalidateAccount() {
         accountScope = nil
         credits.removeAll()
-        observedCreditIDs.removeAll()
-        preserveUnlisted = false
-        hasSnapshot = true
+        fetchedAt = nil
         reconcile()
     }
 
     func settingsDidChange() {
-        if hasSnapshot || !settings.isEnabled(.resetCreditExpiry) { reconcile() }
+        // Re-enabling a setting is not a fresh server check.
+        fetchedAt = nil
+        reconcile()
     }
 
     private func targets(now: Date) -> [String: ResetCreditExpiryTarget] {
-        guard settings.isEnabled(.resetCreditExpiry), let scope = accountScope else { return [:] }
+        guard settings.isEnabled(.resetCreditExpiry), let scope = accountScope,
+              let fetchedAt, now.timeIntervalSince(fetchedAt) >= 0,
+              now.timeIntervalSince(fetchedAt) <= 60 else { return [:] }
         var result: [String: ResetCreditExpiryTarget] = [:]
+        let currentCalendar = calendar()
         for credit in credits.values {
             guard let target = ResetCreditExpiryTarget(credit: credit, accountScope: scope, now: now,
-                                                       calendar: calendar()) else { continue }
+                                                       calendar: currentCalendar),
+                  target.reminderAt <= fetchedAt.timeIntervalSince1970,
+                  target.expiresAt > now.timeIntervalSince1970 + 1 else { continue }
             result[target.identifier] = target
         }
         return result
-    }
-
-    private func preservesUnknown(_ request: UNNotificationRequest, now: Date) -> Bool {
-        let info = request.content.userInfo
-        guard settings.isEnabled(.resetCreditExpiry), preserveUnlisted,
-              info["expiryAccount"] as? String == accountScope,
-              let id = info["expiryCreditID"] as? String, !observedCreditIDs.contains(id),
-              let expiry = info["expiryAt"] as? Double, expiry > now.timeIntervalSince1970 else { return false }
-        return true
     }
 
     private func cancel(_ id: String, now: Date) {
@@ -237,36 +209,32 @@ final class ResetCreditExpiryNotifications {
         readPending { [weak self] requests in
             DispatchQueue.main.async {
                 guard let self else { return }
+                let now = self.clock()
+                for request in requests where request.identifier.hasPrefix(ResetCreditExpiryTarget.prefix) && request.trigger != nil {
+                    self.ledger.observe(request, now: now)
+                    self.cancel(request.identifier, now: now)
+                }
+                guard self.targets(now: now).values.contains(where: { self.ledger.permits($0.identifier, now: now) }) else {
+                    self.reconcile(authorized: false)
+                    return
+                }
                 self.readAuthorization { [weak self] authorized in
                     DispatchQueue.main.async {
-                        self?.reconcile(requests: requests, authorized: authorized)
+                        self?.reconcile(authorized: authorized)
                     }
                 }
             }
         }
     }
 
-    private func reconcile(requests: [UNNotificationRequest], authorized: Bool) {
+    private func reconcile(authorized: Bool) {
         let now = clock()
         let desired = targets(now: now)
-        var matching = Set<String>()
-        for request in requests where request.identifier.hasPrefix(ResetCreditExpiryTarget.prefix) {
-            ledger.observe(request, now: now)
-            guard let target = desired[request.identifier] else {
-                if !preservesUnknown(request, now: now) { cancel(request.identifier, now: now) }
-                continue
-            }
-            if target.matches(request, sound: soundSignature) || !ledger.permits(target.identifier, now: now) {
-                matching.insert(target.identifier)
-            }
-        }
         let group = DispatchGroup()
         if authorized {
             for target in desired.values.sorted(by: { $0.identifier < $1.identifier }) {
-                guard !matching.contains(target.identifier), ledger.permits(target.identifier, now: now) else { continue }
-                let fireAt = max(target.reminderAt, now.timeIntervalSince1970 + 1)
-                // Do not submit a catch-up reminder which would arrive after expiry.
-                guard fireAt < target.expiresAt else { continue }
+                guard ledger.permits(target.identifier, now: now) else { continue }
+                let fireAt = now.timeIntervalSince1970
                 let content = UNMutableNotificationContent()
                 NotificationIconProvider.apply(to: content, provider: .codex)
                 content.title = L10n.text("Codex 초기화권 만료 예정")
@@ -282,10 +250,8 @@ final class ResetCreditExpiryNotifications {
                     "expiryAccount": target.accountScope, "expiryCreditID": target.creditID,
                     "expiryAt": target.expiresAt, "expiryReminderAt": target.reminderAt,
                     "expiryFireAt": fireAt, "expirySound": soundSignature]
-                let trigger = UNTimeIntervalNotificationTrigger(
-                    timeInterval: max(1, fireAt - clock().timeIntervalSince1970), repeats: false)
                 group.enter()
-                add(UNNotificationRequest(identifier: target.identifier, content: content, trigger: trigger)) { [weak self] error in
+                add(UNNotificationRequest(identifier: target.identifier, content: content, trigger: nil)) { [weak self] error in
                     DispatchQueue.main.async {
                         if let self {
                             if let error {

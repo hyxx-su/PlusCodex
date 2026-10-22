@@ -10,6 +10,9 @@ private final class ExpiryNotificationCenterFixture {
     var holdAdditions = false
     var held: [(UNNotificationRequest, (Error?) -> Void)] = []
     var requestsRead = 0
+    var authorizationReads = 0
+    var holdAuthorization = false
+    var authorization: ((Bool) -> Void)?
 
     init(now: Date) { self.now = now }
 
@@ -41,7 +44,11 @@ private final class ExpiryNotificationCenterFixture {
             calendar: { calendar }, readPending: { completion in
                 self.requestsRead += 1
                 completion(Array(self.pending.values))
-            }, readAuthorization: { $0(self.authorized) }, add: { self.add($0, completion: $1) },
+            }, readAuthorization: { completion in
+                self.authorizationReads += 1
+                if self.holdAuthorization { self.authorization = completion }
+                else { completion(self.authorized) }
+            }, add: { self.add($0, completion: $1) },
             remove: { ids in ids.forEach { self.pending.removeValue(forKey: $0) } })
     }
 }
@@ -104,54 +111,35 @@ private final class ExpiryNotificationCenterFixture {
             .identifier != target.identifier, "Opaque credit IDs are case-sensitive")
 
         isolated { defaults, settings, center in
-            precondition(settings.isEnabled(.resetCreditExpiry), "Expiry reminders default to enabled")
             let scheduler = center.scheduler(settings: settings, defaults: defaults, calendar: calendar)
+            scheduler.update(summary([credit()]), account: "account-a@example.com")
+            drain(scheduler)
+            precondition(center.additions == 0, "Future expiry reminders must not be booked with macOS")
+            precondition(center.authorizationReads == 0, "Future reminders need no permission IPC")
+            center.now = reminder.addingTimeInterval(5)
+            scheduler.settingsDidChange()
+            drain(scheduler)
+            precondition(center.additions == 0, "Changing settings cannot validate cached credits")
             scheduler.update(summary([credit()]), account: "Account-A@Example.com")
             drain(scheduler)
-            precondition(center.additions == 1 && center.pending.count == 1)
+            precondition(center.additions == 1)
             let request = center.pending[target.identifier]!
-            precondition(request.content.sound != nil)
-            precondition(request.content.userInfo["expiryFireAt"] as? Double == reminder.timeIntervalSince1970)
+            precondition(request.trigger == nil && request.content.sound != nil)
+            precondition(request.content.userInfo["expiryFireAt"] as? Double == center.now.timeIntervalSince1970)
             precondition(request.content.userInfo["notificationKind"] as? String == "resetCreditExpiry")
             let saved = defaults.data(forKey: "resetCreditExpiryLedger.v1")
             for _ in 0..<25 { scheduler.update(summary([credit()]), account: "account-a@example.com") }
             drain(scheduler)
-            precondition(center.additions == 1, "Polling must not replace an unchanged reservation")
-            precondition(defaults.data(forKey: "resetCreditExpiryLedger.v1") == saved, "Polling must not rewrite receipts")
-            scheduler.update(summary([credit(expiry: revised.expiresAt)]), account: "account-a@example.com")
-            drain(scheduler)
-            precondition(center.additions == 2 && center.pending.count == 1)
-            precondition(center.pending[target.identifier]?.content.userInfo["expiryAt"] as? Double == revised.expiresAt)
-            scheduler.update(summary([], count: 0), account: "account-a@example.com")
-            drain(scheduler)
-            precondition(center.pending.isEmpty, "Using the last credit cancels its reminder")
-            scheduler.update(summary([credit()]), account: "account-a@example.com")
-            drain(scheduler)
-            precondition(center.additions == 3, "A cancelled future reservation may be booked again")
-        }
-
-        isolated { defaults, settings, center in
-            let scheduler = center.scheduler(settings: settings, defaults: defaults, calendar: calendar)
-            scheduler.update(summary([credit()]), account: "account-a@example.com")
-            drain(scheduler)
-            center.now = reminder.addingTimeInterval(5)
-            center.pending.removeAll() // Simulate delivery followed by dismissing the banner.
+            precondition(center.additions == 1 && defaults.data(forKey: "resetCreditExpiryLedger.v1") == saved)
+            precondition(center.authorizationReads == 1, "A consumed credit must not re-read permission")
+            center.pending.removeAll()
             let relaunched = center.scheduler(settings: settings, defaults: defaults, calendar: calendar)
             relaunched.update(summary([credit()]), account: "account-a@example.com")
             drain(relaunched)
-            precondition(center.additions == 1, "Relaunch must not repeat a dismissed reminder")
-            relaunched.update(summary([credit(expiry: revised.expiresAt)]), account: "account-a@example.com")
-            drain(relaunched)
-            precondition(center.additions == 1, "An expiry correction must not repeat an already due reminder")
+            precondition(center.additions == 1, "Relaunch must not repeat an accepted immediate reminder")
             relaunched.update(summary([credit()]), account: "account-b@example.com")
             drain(relaunched)
-            precondition(center.additions == 2 && center.pending.count == 1, "Receipts are account-scoped")
-            precondition(center.pending[otherAccount.identifier]?.content.userInfo["expiryFireAt"] as? Double
-                == center.now.timeIntervalSince1970 + 1, "Late discovery catches up once before expiry")
-            center.now = expiry
-            relaunched.update(summary([credit()]), account: "account-b@example.com")
-            drain(relaunched)
-            precondition(center.pending.isEmpty, "An expired credit must not notify")
+            precondition(center.additions == 2 && center.pending[otherAccount.identifier] != nil)
         }
 
         isolated { defaults, settings, center in
@@ -159,75 +147,71 @@ private final class ExpiryNotificationCenterFixture {
             scheduler.update(summary([credit()]), account: "account-a@example.com")
             drain(scheduler)
             center.now = reminder.addingTimeInterval(5)
-            scheduler.update(summary([credit()]), account: "account-a@example.com")
-            drain(scheduler)
-            precondition(center.additions == 1 && center.pending.count == 1,
-                         "Sleep recovery preserves the already-due OS request instead of adding a second one")
-            center.now = expiry
-            scheduler.update(RateLimitResetCreditsSummary(availableCount: 1, credits: nil), account: "account-a@example.com")
-            drain(scheduler)
-            precondition(center.pending.isEmpty, "Unknown detail rows must not keep expired reminders alive")
-            center.now = expiry.addingTimeInterval(-0.5)
-            let nearExpiry = center.scheduler(settings: settings, defaults: defaults, calendar: calendar)
-            nearExpiry.update(summary([credit("last-second")]), account: "account-a@example.com")
-            drain(nearExpiry)
-            precondition(center.additions == 1, "A late reminder must not be scheduled to arrive after expiry")
-        }
-
-        isolated { defaults, settings, center in
-            let scheduler = center.scheduler(settings: settings, defaults: defaults, calendar: calendar)
+            for missing in [nil, RateLimitResetCreditsSummary(availableCount: 1, credits: nil),
+                            summary([], count: 0), summary([credit(status: "redeemed")]),
+                            summary([credit(status: "redeeming")]), summary([credit(expiry: nil)]),
+                            summary([credit(expiry: revised.expiresAt)])] {
+                scheduler.update(missing, account: "account-a@example.com")
+                drain(scheduler)
+                precondition(center.additions == 0, "Unverified, redeemed or postponed credits must not notify")
+            }
             scheduler.update(summary([credit()]), account: nil)
-            precondition(!scheduler.synchronizing && center.additions == 0, "Unknown identity must not receive another account's metadata")
+            drain(scheduler)
+            precondition(center.additions == 0, "Unknown identity cannot reuse prior credit data")
+            scheduler.update(summary([credit()]), account: "account-a@example.com", requestStartedAt: reminder.addingTimeInterval(-1))
+            drain(scheduler)
+            precondition(center.additions == 0, "A fetch started before the reminder is not a due-time check")
+            scheduler.update(summary([credit()]), account: "account-a@example.com", requestStartedAt: center.now.addingTimeInterval(-61))
+            drain(scheduler)
+            precondition(center.additions == 0, "Delayed responses are not fresh evidence")
+            center.now = expiry.addingTimeInterval(-0.5)
             scheduler.update(summary([credit()]), account: "account-a@example.com")
             drain(scheduler)
-            scheduler.update(nil, account: "account-a@example.com")
+            center.now = expiry
+            scheduler.update(summary([credit()]), account: "account-a@example.com")
             drain(scheduler)
-            scheduler.update(RateLimitResetCreditsSummary(availableCount: 1, credits: nil), account: "account-a@example.com")
-            drain(scheduler)
-            precondition(center.pending.count == 1 && center.additions == 1, "Missing details are not redemption evidence")
-            let relaunched = center.scheduler(settings: settings, defaults: defaults, calendar: calendar)
-            relaunched.update(RateLimitResetCreditsSummary(availableCount: 1, credits: nil), account: "account-a@example.com")
-            drain(relaunched)
-            precondition(center.pending.count == 1, "Relaunch preserves a same-account OS reservation when details are unknown")
-            relaunched.update(nil, account: "account-b@example.com")
-            drain(relaunched)
-            precondition(center.pending.isEmpty, "Account changes cancel old reminders even when new details are unknown")
-            relaunched.update(summary([credit()]), account: "account-b@example.com")
-            drain(relaunched)
-            settings.setEnabled(false, for: .resetCreditExpiry)
-            relaunched.settingsDidChange()
-            drain(relaunched)
-            precondition(center.pending.isEmpty)
-            settings.setEnabled(true, for: .resetCreditExpiry)
-            relaunched.settingsDidChange()
-            drain(relaunched)
-            precondition(center.pending.count == 1, "Re-enabling restores only the current account's future reminder")
-            relaunched.invalidateAccount()
-            drain(relaunched)
-            precondition(center.pending.isEmpty)
+            precondition(center.additions == 0, "Expired or imminently expiring credits must not notify")
         }
 
         isolated { defaults, settings, center in
             let scheduler = center.scheduler(settings: settings, defaults: defaults, calendar: calendar)
             scheduler.update(summary([credit(), credit("credit-2")]), account: "account-a@example.com")
             drain(scheduler)
+            center.now = reminder.addingTimeInterval(5)
             scheduler.update(summary([credit("credit-2")], count: 2), account: "account-a@example.com")
             drain(scheduler)
-            precondition(center.pending.count == 2, "Capped detail rows must not cancel omitted credits")
-            scheduler.update(summary([credit(status: "redeemed"), credit("credit-2")], count: 1), account: "account-a@example.com")
-            drain(scheduler)
-            precondition(center.pending.count == 1 && center.pending[target.identifier] == nil)
-            scheduler.update(summary([credit("credit-2", expiry: nil)], count: 1), account: "account-a@example.com")
-            drain(scheduler)
-            precondition(center.pending.isEmpty, "A credit whose expiry was removed must not keep an old deadline")
+            precondition(center.additions == 1 && center.pending[target.identifier] == nil,
+                         "A capped list may notify only explicitly confirmed credits")
         }
 
         isolated { defaults, settings, center in
+            let content = UNMutableNotificationContent()
+            content.userInfo = ["expiryAccount": scope, "expiryCreditID": "credit-1",
+                                "expiryFireAt": reminder.timeIntervalSince1970,
+                                "expiryAt": expiry.timeIntervalSince1970]
+            center.pending[target.identifier] = UNNotificationRequest(identifier: target.identifier,
+                content: content, trigger: UNTimeIntervalNotificationTrigger(timeInterval: 3600, repeats: false))
+            let unrelated = UNNotificationRequest(identifier: "completion-unrelated", content: content,
+                trigger: UNTimeIntervalNotificationTrigger(timeInterval: 3600, repeats: false))
+            center.pending[unrelated.identifier] = unrelated
+            let scheduler = center.scheduler(settings: settings, defaults: defaults, calendar: calendar)
+            scheduler.start()
+            drain(scheduler)
+            precondition(center.pending.count == 1 && center.pending[unrelated.identifier] != nil,
+                         "Launch removes legacy credit timers even before an offline fetch")
+            center.now = reminder.addingTimeInterval(5)
+            scheduler.update(summary([credit()]), account: "account-a@example.com")
+            drain(scheduler)
+            precondition(center.additions == 1, "Cancelling a future reservation must not consume the reminder")
+        }
+
+        isolated { defaults, settings, center in
+            center.now = reminder.addingTimeInterval(5)
             let scheduler = center.scheduler(settings: settings, defaults: defaults, calendar: calendar)
             center.authorized = false
             scheduler.update(summary([credit()]), account: "account-a@example.com")
             drain(scheduler)
-            precondition(center.additions == 0 && defaults.data(forKey: "resetCreditExpiryLedger.v1") == nil)
+            precondition(center.additions == 0)
             center.authorized = true
             center.failNext = true
             scheduler.update(summary([credit()]), account: "account-a@example.com")
@@ -235,16 +219,56 @@ private final class ExpiryNotificationCenterFixture {
             precondition(center.pending.isEmpty && defaults.data(forKey: "resetCreditExpiryLedger.v1") == nil)
             scheduler.update(summary([credit()]), account: "account-a@example.com")
             drain(scheduler)
-            precondition(center.additions == 2 && center.pending.count == 1, "Submission failure retries on the next successful fetch")
-            settings.setEnabled(false, for: .resetCreditExpiry)
-            let relaunched = center.scheduler(settings: settings, defaults: defaults, calendar: calendar)
-            relaunched.start()
-            drain(relaunched)
-            precondition(center.pending.isEmpty, "Disabled reminders are cancelled at launch before fetching usage")
+            precondition(center.additions == 2 && center.pending.count == 1)
+        }
+
+        for rows in [[credit(status: "redeemed"), credit()], [credit(), credit(status: "redeemed")],
+                     [credit(), credit()], [credit(), credit("credit-2")]] {
+            isolated { defaults, settings, center in
+                center.now = reminder.addingTimeInterval(5)
+                let scheduler = center.scheduler(settings: settings, defaults: defaults, calendar: calendar)
+                scheduler.update(summary(rows, count: 1), account: "account-a@example.com")
+                drain(scheduler)
+                precondition(center.additions == 0 && center.authorizationReads == 0,
+                             "Duplicate IDs or a contradictory available count must not notify")
+            }
+        }
+
+        for offset in [-1.0, -61, 1, .nan] {
+            isolated { defaults, settings, center in
+                center.now = reminder.addingTimeInterval(5)
+                let scheduler = center.scheduler(settings: settings, defaults: defaults, calendar: calendar)
+                scheduler.update(summary([], count: 0), account: "account-a@example.com")
+                drain(scheduler)
+                scheduler.update(summary([credit()]), account: "account-a@example.com",
+                                 requestStartedAt: center.now.addingTimeInterval(offset))
+                drain(scheduler)
+                precondition(center.additions == 0, "An old or invalid response cannot resurrect a redeemed credit")
+            }
         }
 
         for change in 0..<3 {
             isolated { defaults, settings, center in
+                center.now = reminder.addingTimeInterval(5)
+                center.holdAuthorization = true
+                let scheduler = center.scheduler(settings: settings, defaults: defaults, calendar: calendar)
+                scheduler.update(summary([credit()]), account: "account-a@example.com")
+                waitUntil { center.authorization != nil }
+                if change == 0 { center.now = center.now.addingTimeInterval(61) }
+                if change == 1 { scheduler.update(nil, account: "account-a@example.com") }
+                if change == 2 { center.now = expiry }
+                center.holdAuthorization = false
+                let completion = center.authorization!
+                center.authorization = nil
+                completion(true)
+                drain(scheduler)
+                precondition(center.additions == 0, "Recheck freshness and expiry immediately before submission")
+            }
+        }
+
+        for change in 0..<4 {
+            isolated { defaults, settings, center in
+                center.now = reminder.addingTimeInterval(5)
                 let scheduler = center.scheduler(settings: settings, defaults: defaults, calendar: calendar)
                 center.holdAdditions = true
                 scheduler.update(summary([credit()]), account: "account-a@example.com")
@@ -253,15 +277,17 @@ private final class ExpiryNotificationCenterFixture {
                     scheduler.update(summary([], count: 0), account: "account-a@example.com")
                 } else if change == 1 {
                     scheduler.update(nil, account: "account-b@example.com")
-                } else {
+                } else if change == 2 {
                     settings.setEnabled(false, for: .resetCreditExpiry)
                     scheduler.settingsDidChange()
+                } else {
+                    scheduler.invalidateAccount()
                 }
                 center.release()
                 drain(scheduler)
-                precondition(center.pending.isEmpty, "An in-flight add must not resurrect cancelled, old-account or disabled reminders")
+                precondition(center.pending.isEmpty, "An in-flight add must not resurrect invalid reminders")
             }
         }
-        print("PASS: reset-credit expiry dates, DST, decoding compatibility, receipts, redemption, accounts, settings, retries and in-flight cancellation")
+        print("PASS: fresh credit validation, no future timers, partial responses, expiry, accounts, settings, retries and cancellation")
     }
 }
