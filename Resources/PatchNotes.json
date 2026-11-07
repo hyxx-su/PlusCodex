@@ -1,5 +1,35 @@
 [
   {
+    "version": "v1.2.2",
+    "publishedAt": "2026-11-07T00:00:00Z",
+    "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.2.2",
+    "body": "# PlusCodex v1.2.2\n\n- 메뉴바 애니메이션 프레임을 재사용해 반복적인 화면 처리 비용 감소\n- 변경되지 않은 완료 작업 기록의 반복 저장 감소\n- 읽음이 확인된 완료 작업의 알림을 더 빠르게 정리\n- Antigravity로 전환했을 때 현재 채팅 읽음 확인을 앞당기고 추가 확인 대기 단축\n- 설정 선택 버튼의 글자·화살표를 눌렀을 때 메뉴가 열리지 않을 수 있는 문제 수정\n- AI 메뉴바 아이콘 우클릭 메뉴에 설정 추가, 종료 바로 위에 배치\n- 모든 AI를 껐을 때 표시되는 PlusCodex 아이콘에도 우클릭 설정·종료 메뉴 추가\n\n## English\n\n- Reuse menu-bar animation frames to reduce repeated rendering work\n- Avoid repeatedly saving unchanged completed-task records\n- Clear notifications sooner after a completed task is confirmed as read\n- Check the visible chat sooner when switching to Antigravity and shorten the follow-up confirmation wait\n- Fix settings pickers that may not open when their text or arrow is clicked\n- Add Settings above Quit in provider menu-bar context menus\n- Add Settings and Quit to the fallback PlusCodex icon’s context menu when all providers are disabled\n\nPlusCodex v1.0.0~v1.9.9는 베타 버전입니다. / Versions v1.0.0 through v1.9.9 are beta releases.",
+    "summary": {
+      "ko": "• 메뉴바 성능·읽음 알림 정리 개선\n• 설정 선택 버튼·우클릭 메뉴 개선",
+      "en": "• Faster menu-bar rendering and read cleanup\n• Improved pickers and context menus"
+    },
+    "highlights": {
+      "ko": [
+        "메뉴바 애니메이션 프레임을 재사용해 반복적인 화면 처리 비용 감소",
+        "변경되지 않은 완료 작업 기록의 반복 저장 감소",
+        "읽음이 확인된 완료 작업의 알림을 더 빠르게 정리",
+        "Antigravity로 전환했을 때 현재 채팅 읽음 확인을 앞당기고 추가 확인 대기 단축",
+        "설정 선택 버튼의 글자·화살표를 눌렀을 때 메뉴가 열리지 않을 수 있는 문제 수정",
+        "AI 메뉴바 아이콘 우클릭 메뉴에 설정 추가, 종료 바로 위에 배치",
+        "모든 AI를 껐을 때 표시되는 PlusCodex 아이콘에도 우클릭 설정·종료 메뉴 추가"
+      ],
+      "en": [
+        "Reuse menu-bar animation frames to reduce repeated rendering work",
+        "Avoid repeatedly saving unchanged completed-task records",
+        "Clear notifications sooner after a completed task is confirmed as read",
+        "Check the visible chat sooner when switching to Antigravity and shorten the follow-up confirmation wait",
+        "Fix settings pickers that may not open when their text or arrow is clicked",
+        "Add Settings above Quit in provider menu-bar context menus",
+        "Add Settings and Quit to the fallback PlusCodex icon’s context menu when all providers are disabled"
+      ]
+    }
+  },
+  {
     "version": "v1.2.1",
     "publishedAt": "2026-10-23T00:00:00Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.2.1",

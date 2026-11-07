@@ -1,3 +1,61 @@
+# PlusCodex v1.2.2
+
+메뉴바 처리 비용과 읽은 작업의 알림 정리 지연을 줄이고, 설정 선택 버튼과 우클릭 메뉴를 개선했습니다.
+
+PlusCodex의 **v1.0.0~v1.9.9는 베타 버전**입니다. 기존 앱의 업데이트 경로를 유지하기 위해 GitHub Latest로 제공합니다.
+
+## 주요 변경사항
+
+### 성능
+
+- 메뉴바 애니메이션 프레임을 재사용해 반복적인 화면 처리 비용 감소
+- 기존 애니메이션 속도 유지, 표시 내용·화면 배율·외관이 바뀌면 프레임 갱신
+- 변경되지 않은 완료 작업 기록의 반복 저장 감소
+
+### 읽음 및 알림
+
+- 읽음이 확인된 완료 작업의 알림을 운영체제 알림 목록 조회 완료 전부터 정리
+- Antigravity로 전환했을 때 현재 채팅을 바로 확인하고, 읽음 확정을 위한 추가 확인 대기 단축
+- 읽음 확인 시간과 작업 구분을 유지해 다른 채팅이나 새 작업의 알림이 함께 삭제되지 않도록 처리
+
+### 메뉴바 및 설정
+
+- 설정 선택 버튼의 글자·화살표를 눌렀을 때 메뉴가 열리지 않을 수 있는 문제 수정
+- AI 메뉴바 아이콘 우클릭 메뉴에 아이콘 없는 **설정…** 추가, **PlusCodex 종료** 바로 위에 배치
+- 모든 AI가 꺼진 상태의 PlusCodex 아이콘에도 우클릭 **설정… / PlusCodex 종료** 메뉴 추가
+- 기본 PlusCodex 아이콘을 왼쪽 클릭하면 기존처럼 설정 열기
+
+## 설치 및 업데이트
+
+- 기존 앱: 앱의 업데이트 확인 기능 이용
+- 수동 설치: [PlusCodex-1.2.2.dmg](https://github.com/hyxx-su/PlusCodex/releases/download/v1.2.2/PlusCodex-1.2.2.dmg)
+- 지원 환경: Apple Silicon Mac, macOS 14 이상
+- 기존 설정과 저장된 깨우기 채팅 유지
+
+## 알려진 제한 사항
+
+- 읽음 감지는 외부 앱의 상태 전달과 권한에 영향을 받으며 알림 정리 시점은 환경마다 다를 수 있음
+- CPU 개선 폭은 실행 중인 작업·표시 내용·화면 환경에 따라 달라지며 일정한 감소율을 보장하지 않음
+- 다른 Mac의 설치·업데이트와 모든 외부 앱 버전의 실사용 동작은 별도 확인 필요
+- 이 배포본은 Apple Development 서명이며 **Developer ID 서명·Apple 공증은 적용되지 않음**
+- Sparkle 업데이트 서명은 업데이트 파일과 피드의 무결성을 검증하며 Apple 공증을 대체하지 않음
+
+## English
+
+- Reuse menu-bar animation frames to reduce repeated rendering work.
+- Avoid repeatedly saving unchanged completed-task records.
+- Clear notifications sooner after a completed task is confirmed as read.
+- Check the visible chat sooner when switching to Antigravity and shorten the follow-up confirmation wait.
+- Fix settings pickers that may not open when their text or arrow is clicked.
+- Add Settings above Quit in provider menu-bar context menus.
+- Add Settings and Quit to the fallback PlusCodex icon’s context menu when all providers are disabled.
+- Existing animation timing, settings and saved wake chats are preserved.
+- Read detection depends on external app state and permissions. Notification cleanup timing and CPU improvements vary by environment.
+- Versions v1.0.0 through v1.9.9 are beta releases. This release remains Latest to preserve the existing update path.
+- Apple Silicon and macOS 14 or later. Apple Development signed; no Developer ID signing or Apple notarization.
+
+---
+
 # PlusCodex v1.2.1
 
 초기화·만료 알림의 정확도를 높이고 사용량 화면의 반복 갱신 비용을 줄였습니다.
