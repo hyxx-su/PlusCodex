@@ -19,13 +19,24 @@ enum StatusMenuBuilder {
         let quit: NSMenuItem
     }
 
-    static func makeContextMenu(disableTitle: String, target: AnyObject,
-                                disableAction: Selector, quitAction: Selector) -> NSMenu {
+    static func makeContextMenu(disableTitle: String? = nil, target: AnyObject,
+                                settingsAction: Selector, disableAction: Selector? = nil, quitAction: Selector) -> NSMenu {
         let menu = NSMenu()
-        let disable = NSMenuItem(title: disableTitle, action: disableAction, keyEquivalent: "")
-        disable.target = target
-        menu.addItem(disable)
-        menu.addItem(.separator())
+        if let disableTitle, let disableAction {
+            let disable = NSMenuItem(title: disableTitle, action: disableAction, keyEquivalent: "")
+            disable.target = target
+            menu.addItem(disable)
+            menu.addItem(.separator())
+        }
+        let settings = NSMenuItem(title: L10n.text("설정") + "…", action: settingsAction, keyEquivalent: ",")
+        settings.target = target
+        settings.image = nil
+        // macOS 27 can supply a standard Settings image. Use its public visibility
+        // property dynamically so builds with older SDKs remain supported.
+        if settings.responds(to: NSSelectorFromString("setPreferredImageVisibility:")) {
+            settings.setValue(2, forKey: "preferredImageVisibility") // NSMenuItemImageVisibilityHidden
+        }
+        menu.addItem(settings)
         let quit = NSMenuItem(title: L10n.text("PlusCodex 종료"), action: quitAction, keyEquivalent: "q")
         quit.target = target
         menu.addItem(quit)

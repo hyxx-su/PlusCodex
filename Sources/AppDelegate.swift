@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var activityConnected = false
     private var activityCompatibilityIssue = false
     private var spinTimer: Timer?
+    private let statusImageRenderer = StatusBarImageRenderer(provider: .codex)
     private var spinFrame = 0
     private var iconUnavailable = false
     private var activityItem: NSMenuItem?
@@ -370,13 +371,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let button = item?.button {
             iconUnavailable = unavailable
             updateStatusSpinner()
-            button.image = codexStatusImage()
-            button.imagePosition = unavailable || percent.isEmpty ? .imageOnly : .imageLeading
             let title = NSAttributedString(string: unavailable || percent.isEmpty ? "" : " " + percent, attributes: [
                 .font: NSFont.monospacedDigitSystemFont(ofSize: unavailable ? 9 : 11, weight: .medium),
                 .foregroundColor: unavailable ? NSColor.systemGray : NSColor.labelColor
             ])
-            if !button.attributedTitle.isEqual(to: title) { button.attributedTitle = title }
+            statusImageRenderer.configure(title: title, unavailable: unavailable)
+            updateStatusImage()
             let unavailableTitle = L10n.text(offline ? "네트워크 연결 없음"
                 : codexExecutableMissing ? "Codex를 찾을 수 없음" : "사용량 조회 실패")
             let usageAccessibility = "Codex " + percent
@@ -508,8 +508,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 status.autosaveName = "PlusCodex.fallback"
                 status.button?.image = CodexStatusIcon.plusCodexImage(size: 18)
                 status.button?.imagePosition = .imageOnly
-                status.button?.target = self
-                status.button?.action = #selector(openSettings)
+                status.button?.configureMenuTracking(target: self, action: #selector(fallbackStatusClicked))
                 fallbackItem = status
             }
             let title = L10n.text("PlusCodex 설정")
@@ -529,6 +528,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         render()
     }
 
+    @objc private func fallbackStatusClicked() {
+        guard let button = fallbackItem?.button else { return }
+        if StatusMenuPresentation.isRightClick {
+            fallbackContextMenu().popUpFollowingSystemAppearance(from: button)
+        } else {
+            openSettings()
+        }
+    }
+
+    private func fallbackContextMenu() -> NSMenu {
+        StatusMenuBuilder.makeContextMenu(target: self, settingsAction: #selector(openSettings),
+                                         quitAction: #selector(quitApp))
+    }
+
     @objc private func statusClicked() {
         guard let button = item?.button else { return }
         if StatusMenuPresentation.isRightClick {
@@ -542,6 +555,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func contextMenu() -> NSMenu {
         StatusMenuBuilder.makeContextMenu(disableTitle: L10n.text("Codex 끄기"), target: self,
+                                           settingsAction: #selector(openSettings),
                                            disableAction: #selector(disableCodex), quitAction: #selector(quitApp))
     }
 
@@ -585,6 +599,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var testHookDashboardView: NSView? { dashboardItem?.view }
     var testHookSettingsWindow: AISettingsWindow { settingsWindow }
     var testHookContextMenu: NSMenu { contextMenu() }
+    var testHookFallbackContextMenu: NSMenu { fallbackContextMenu() }
+    func testHookUpdateFallbackItem() { updateFallbackItem() }
+    var testHookFallbackItem: NSStatusItem? { fallbackItem }
     var testHookMenu: NSMenu? { builtItems?.menu }
     var testHookMenuItemCount: Int {
         guard let built = builtItems else { return 0 }
@@ -635,10 +652,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                   reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
     }
 
-    private func codexStatusImage() -> NSImage? {
-        spinTimer != nil && !iconUnavailable
-            ? CodexStatusIcon.spinningImage(size: 18, frame: spinFrame)
-            : CodexStatusIcon.image(size: 18, offline: iconUnavailable)
+    private func updateStatusImage() {
+        guard let button = item?.button else { statusImageRenderer.reset(); return }
+        statusImageRenderer.display(on: button, frame: spinTimer != nil && !iconUnavailable ? spinFrame : nil)
     }
 
     private func updateStatusSpinner() {
@@ -647,7 +663,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let timer = Timer(timeInterval: 1.0 / 16, repeats: true) { [weak self] _ in
                 guard let self else { return }
                 self.spinFrame = (self.spinFrame + 1) % CodexStatusIcon.spinFrameCount
-                self.item?.button?.image = self.codexStatusImage()
+                self.updateStatusImage()
             }
             spinTimer = timer
             RunLoop.main.add(timer, forMode: .common)
@@ -656,7 +672,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             timer.invalidate()
             spinTimer = nil
             spinFrame = 0
-            item?.button?.image = codexStatusImage()
+            updateStatusImage()
         }
     }
 

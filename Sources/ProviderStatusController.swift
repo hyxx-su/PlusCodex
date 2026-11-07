@@ -31,6 +31,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
     private var activityMonitoringStarted = false
     private var activityPolling = false
     private var activityTimer: Timer?
+    private var visibleReadConfirmationTimer: Timer?
     private var completionTracker: CompletionTracker
     private var attentionTracker = AttentionTracker()
     private var readReceipts: ThreadActivityReadReceipts
@@ -40,6 +41,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
     private var selectedActivityAccount: String?
     private var iconUnavailable = false
     private var spinTimer: Timer?
+    private lazy var statusImageRenderer = StatusBarImageRenderer(provider: provider)
     private var spinFrame = 0
     var onOpen: (() -> Void)?
     var onSettings: (() -> Void)?
@@ -70,6 +72,11 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
         completionTracker = CompletionTracker(defaults: activityDefaults, account: "gemini:local")
         readReceipts = ThreadActivityReadReceipts(defaults: activityDefaults, account: "gemini:local")
         super.init()
+        if provider == .gemini {
+            NSWorkspace.shared.notificationCenter.addObserver(self,
+                selector: #selector(foregroundApplicationChanged),
+                name: NSWorkspace.didActivateApplicationNotification, object: nil)
+        }
         NotificationCenter.default.addObserver(self, selector: #selector(threadNotificationChanged),
             name: .threadNotificationPreferenceChanged, object: nil)
         menu.autoenablesItems = false
@@ -90,6 +97,45 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
             actions.append(row)
         }
         render()
+    }
+
+    deinit {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        activityTimer?.invalidate()
+        visibleReadConfirmationTimer?.invalidate()
+        spinTimer?.invalidate()
+    }
+
+    private func resetVisibleReadCandidate() {
+        visibleReadCandidate = nil
+        visibleReadConfirmationTimer?.invalidate()
+        visibleReadConfirmationTimer = nil
+    }
+
+    @objc private func foregroundApplicationChanged() {
+        resetVisibleReadCandidate()
+        guard AntigravityConversationReader.foregroundPID != nil else { return }
+        // Reuse the guarded poll: activation must not start overlapping requests.
+        pollActivities()
+    }
+
+    private func scheduleVisibleReadConfirmation(observedAt: Double) {
+        visibleReadConfirmationTimer?.invalidate()
+        visibleReadConfirmationTimer = nil
+        guard let candidate = visibleReadCandidate,
+              acknowledgedReadTurns[candidate.id] != candidate.turn else { return }
+        // Preserve the one-second reading dwell without waiting for the next
+        // two-second background poll. Only an unacknowledged visible result gets
+        // this one-shot request; pollActivities still checks enablement/overlap.
+        let delay = max(0.05, 1 - (observedAt - candidate.since))
+        let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            self.visibleReadConfirmationTimer = nil
+            self.pollActivities()
+        }
+        visibleReadConfirmationTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        RunLoop.main.add(timer, forMode: .eventTracking)
     }
 
     func startActivityMonitoring() {
@@ -115,7 +161,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
         completionTracker = CompletionTracker(defaults: activityDefaults, account: resolved)
         readReceipts = ThreadActivityReadReceipts(defaults: activityDefaults, account: resolved)
         acknowledgedReadTurns.removeAll()
-        visibleReadCandidate = nil
+        resetVisibleReadCandidate()
     }
 
     private func updateActivityMonitoring() {
@@ -131,7 +177,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
             }
             pollActivities()
         } else {
-            visibleReadCandidate = nil
+            resetVisibleReadCandidate()
             activityTimer?.invalidate()
             activityTimer = nil
             activityPolling = false
@@ -150,7 +196,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
             !NSRunningApplication.runningApplications(withBundleIdentifier: $0).isEmpty
         }
         guard antigravityRunning else {
-            visibleReadCandidate = nil
+            resetVisibleReadCandidate()
             if activityConnected || !activities.isEmpty {
                 activities = []
                 activityConnected = false
@@ -174,7 +220,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
                     self.applyPolledActivities(fetched.activities, viewedAt: fetched.viewedAt, connected: true,
                         visibleConversationID: stillVisible ? visibleID : nil)
                 } else if self.activityConnected {
-                    self.visibleReadCandidate = nil
+                    self.resetVisibleReadCandidate()
                     self.activityConnected = false
                     self.updateActivityView()
                 }
@@ -242,6 +288,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
             readReceipts.acknowledgeExternally(activity)
             onRead?(activity)
         }
+        scheduleVisibleReadConfirmation(observedAt: observedAt)
         updateActivityView()
         if completedAny {
             nextFetch = throttledUntil
@@ -463,13 +510,10 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
         let unavailable = offline || (failure != nil && !showingPreviousUsage)
         iconUnavailable = unavailable
         updateStatusSpinner()
-        item?.button?.image = providerStatusImage()
-        item?.button?.imagePosition = unavailable || percent.isEmpty ? .imageOnly : .imageLeading
         let title = NSAttributedString(string: unavailable ? "" : percent, attributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium), .foregroundColor: NSColor.labelColor])
-        if let button = item?.button, !button.attributedTitle.isEqual(to: title) {
-            button.attributedTitle = title
-        }
+        statusImageRenderer.configure(title: title, unavailable: unavailable)
+        updateStatusImage()
         let unavailableTitle = L10n.text(offline ? "네트워크 연결 없음" : "사용량 조회 실패")
         let usageAccessibility = provider.name + percent
         item?.button?.setAccessibilityLabel(unavailable ? provider.name + " " + unavailableTitle
@@ -555,10 +599,9 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
             reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
     }
 
-    private func providerStatusImage() -> NSImage? {
-        spinTimer != nil && !iconUnavailable
-            ? CodexStatusIcon.spinningImage(size: 18, frame: spinFrame, provider: provider)
-            : CodexStatusIcon.image(size: 18, offline: iconUnavailable, provider: provider)
+    private func updateStatusImage() {
+        guard let button = item?.button else { statusImageRenderer.reset(); return }
+        statusImageRenderer.display(on: button, frame: spinTimer != nil && !iconUnavailable ? spinFrame : nil)
     }
 
     private func updateStatusSpinner() {
@@ -567,7 +610,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
             let timer = Timer(timeInterval: 1.0 / 16, repeats: true) { [weak self] _ in
                 guard let self else { return }
                 self.spinFrame = (self.spinFrame + 1) % CodexStatusIcon.spinFrameCount
-                self.item?.button?.image = self.providerStatusImage()
+                self.updateStatusImage()
             }
             spinTimer = timer
             RunLoop.main.add(timer, forMode: .common)
@@ -576,7 +619,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
             timer.invalidate()
             spinTimer = nil
             spinFrame = 0
-            item?.button?.image = providerStatusImage()
+            updateStatusImage()
         }
     }
 
@@ -595,6 +638,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
     }
     private func contextMenu() -> NSMenu {
         return StatusMenuBuilder.makeContextMenu(disableTitle: L10n.text("%@ 끄기", provider.name), target: self,
+                                           settingsAction: #selector(settingsClicked),
                                            disableAction: #selector(disable), quitAction: #selector(quit))
     }
     func menuWillOpen(_ menu: NSMenu) {
@@ -623,6 +667,7 @@ final class ProviderStatusController: NSObject, NSMenuDelegate {
     var testHookHasStatusItem: Bool { item != nil }
     var testHookStatusItemVisible: Bool { hasVisibleStatusItem }
     var testHookActivityItem: NSMenuItem { activityItem }
+    var testHookReadConfirmationDelay: TimeInterval? { visibleReadConfirmationTimer?.fireDate.timeIntervalSinceNow }
     func testHookSetActivities(_ value: [ThreadActivity], connected: Bool = true) {
         activities = value
         activityConnected = connected

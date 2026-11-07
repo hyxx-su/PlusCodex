@@ -14,6 +14,12 @@ final class ThreadNotificationReadCleanup {
     private let remove: ([String]) -> Void
     private let now: () -> Date
     private var readScopes: [String: Date] = [:]
+    private struct SubmittedRequest {
+        let threadID: String
+        let scope: String
+        let submittedAt: Date
+    }
+    private var submittedRequests: [String: SubmittedRequest] = [:]
     private struct ReadTarget {
         let threadID: String
         let scope: String?
@@ -36,6 +42,19 @@ final class ThreadNotificationReadCleanup {
         }
         self.remove = remove ?? {
             UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: $0)
+            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: $0)
+        }
+    }
+
+    func recordSubmission(_ request: UNNotificationRequest) {
+        guard request.trigger == nil,
+              let threadID = request.content.userInfo["threadID"] as? String,
+              let scope = request.content.userInfo["notificationScope"] as? String else { return }
+        // Retain identities only. Older/restarted notifications still use the OS query.
+        submittedRequests[request.identifier] = SubmittedRequest(threadID: threadID, scope: scope, submittedAt: now())
+        if submittedRequests.count > 512,
+           let oldest = submittedRequests.min(by: { $0.value.submittedAt < $1.value.submittedAt })?.key {
+            submittedRequests.removeValue(forKey: oldest)
         }
     }
 
@@ -50,6 +69,16 @@ final class ThreadNotificationReadCleanup {
             if readScopes.count > 512,
                let oldest = readScopes.min(by: { $0.value < $1.value })?.key {
                 readScopes.removeValue(forKey: oldest)
+            }
+            // A terminal turn cannot create another valid alert. Clear known IDs
+            // before waiting for the delivered-notification snapshot, including
+            // immediate requests that the OS has accepted but not yet presented.
+            let ids = submittedRequests.filter {
+                $0.value.threadID == activity.id && $0.value.scope == scope && $0.value.submittedAt <= readAt
+            }.map(\.key)
+            if !ids.isEmpty {
+                remove(ids)
+                ids.forEach { submittedRequests.removeValue(forKey: $0) }
             }
         }
         pendingReads[scope ?? activity.id] = ReadTarget(threadID: activity.id, scope: scope, readAt: readAt)
@@ -75,7 +104,10 @@ final class ThreadNotificationReadCleanup {
                         Self.matches(entry, threadID: $0.threadID, scope: $0.scope, readAt: $0.readAt)
                     }
                 }.map(\.identifier)
-                if !ids.isEmpty { self.remove(ids) }
+                if !ids.isEmpty {
+                    self.remove(ids)
+                    ids.forEach { self.submittedRequests.removeValue(forKey: $0) }
+                }
                 self.queryScheduled = false
                 self.scheduleQuery()
             }

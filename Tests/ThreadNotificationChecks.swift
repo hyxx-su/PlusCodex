@@ -97,7 +97,69 @@ import UserNotifications
         completed["completed"] = true
         precondition(ThreadActivityMonitor.pendingRequests(in: [completed]).isEmpty)
         checkReadCleanup()
+        checkImmediateReadCleanup()
         print("PASS: inherited task defaults, explicit ON/OFF persistence, new-turn isolation, legacy mutes, retry scopes, missing-turn guards")
+    }
+
+    private static func checkImmediateReadCleanup() {
+        let now = Date(timeIntervalSince1970: 1000)
+        var activity = ThreadActivity(id: "fast-thread", title: "", runtime: "idle",
+            latestTurn: ThreadTurnState(key: "turn", value: ["turnId": "turn", "status": "completed"]),
+            unread: false, updatedAt: 999)
+        let scope = ThreadNotificationPreferences.scope(for: activity)!
+        typealias Entry = ThreadNotificationReadCleanup.Entry
+        var fetched: (([Entry]) -> Void)?
+        var queries = 0
+        var removed: [String] = []
+        let cleanup = ThreadNotificationReadCleanup(now: { now }, fetch: {
+            queries += 1
+            fetched = $0
+        }, remove: { removed += $0 })
+        func record(_ id: String, thread: String = "fast-thread", scope: String?, scheduled: Bool = false) {
+            let content = UNMutableNotificationContent()
+            content.userInfo["threadID"] = thread
+            if let scope { content.userInfo["notificationScope"] = scope }
+            let trigger = scheduled ? UNTimeIntervalNotificationTrigger(timeInterval: 60, repeats: false) : nil
+            cleanup.recordSubmission(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
+        }
+        for id in ["completion", "failure", "attention"] { record(id, scope: scope) }
+        record("next-turn", scope: "fast-thread:next")
+        record("other-chat", thread: "other", scope: scope)
+        record("no-scope", scope: nil)
+        record("scheduled", scope: scope, scheduled: true)
+        activity.stateConfirmed = false
+        cleanup.read(activity)
+        precondition(removed.isEmpty && queries == 0)
+        activity.stateConfirmed = true
+        activity.runtime = "active"
+        cleanup.read(activity)
+        precondition(removed.isEmpty, "An active turn must not lose alerts before delivery is verified")
+        activity.runtime = "idle"
+        cleanup.read(activity)
+        precondition(Set(removed) == ["completion", "failure", "attention"] && queries == 0,
+                     "Known completed-turn IDs must clear synchronously before any OS query")
+        cleanup.read(activity)
+        precondition(removed.count == 3, "Repeated reads must not repeat the immediate removal")
+        let deadline = Date().addingTimeInterval(0.05)
+        while Date() < deadline { _ = RunLoop.main.run(mode: .default, before: deadline) }
+        precondition(queries == 1)
+        fetched!([Entry(identifier: "before-relaunch", userInfo: ["threadID": activity.id,
+            "notificationScope": scope], deliveredAt: now)])
+        let finish = Date().addingTimeInterval(0.05)
+        while Date() < finish { _ = RunLoop.main.run(mode: .default, before: finish) }
+        precondition(Set(removed) == ["completion", "failure", "attention", "before-relaunch"],
+                     "Notifications from before relaunch must still use the snapshot fallback")
+
+        var boundedRemoved: [String] = []
+        let bounded = ThreadNotificationReadCleanup(now: { now }, fetch: { _ in }, remove: { boundedRemoved += $0 })
+        for index in 0..<513 {
+            let content = UNMutableNotificationContent()
+            content.userInfo = ["threadID": activity.id, "notificationScope": scope]
+            bounded.recordSubmission(UNNotificationRequest(identifier: "bounded-\(index)", content: content, trigger: nil))
+        }
+        bounded.read(activity)
+        precondition(boundedRemoved.count == 512, "Fast cleanup metadata must remain bounded")
+        print("PASS: immediate task-read removal before OS lookup, next-turn/other-chat isolation, pending guards, restart fallback and bounded metadata")
     }
 
     private static func checkReadCleanup() {
