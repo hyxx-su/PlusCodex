@@ -3,6 +3,7 @@ import AppKit
 @main struct AppearanceSoundChecks {
     static func main() {
         _ = NSApplication.shared
+        checkStatusBarRendering()
         var lightIcon: NSImage?
         NSAppearance(named: .aqua)!.performAsCurrentDrawingAppearance {
             lightIcon = CodexStatusIcon.image(size: 18, offline: false)
@@ -91,4 +92,63 @@ import AppKit
         precondition(delivery.reserve(identifier: "expired", start: now.addingTimeInterval(30), duration: 2, now: now.addingTimeInterval(30)))
         print("AppearanceSoundChecks passed")
     }
+}
+
+private func checkStatusBarRendering() {
+    let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    defer { NSStatusBar.system.removeStatusItem(item) }
+    let button = item.button!
+    for name in [NSAppearance.Name.aqua, .darkAqua, .accessibilityHighContrastAqua,
+                 .accessibilityHighContrastDarkAqua] {
+        button.appearance = NSAppearance(named: name)
+        for provider in AIProvider.allCases {
+            let renderer = StatusBarImageRenderer(provider: provider)
+            let title = NSAttributedString(string: " 36% | 4시간 58분", attributes: [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
+                .foregroundColor: NSColor.labelColor])
+            renderer.configure(title: title, unavailable: false)
+            button.setAccessibilityLabel(provider.name + " usage")
+            renderer.display(on: button, frame: nil)
+            let nativeWidth = button.bounds.width
+            for frame in 0..<48 { renderer.display(on: button, frame: frame) }
+            precondition(abs(button.bounds.width - nativeWidth) < 0.5,
+                         "Preparing frames must preserve native menu-bar width")
+            precondition(renderer.cachedFrameCount == 24 && renderer.bitmapBytes <= 8 * 1024 * 1024)
+            let repeated = button.image
+            renderer.display(on: button, frame: 47)
+            precondition(button.image === repeated && button.image?.isTemplate == true)
+            precondition(button.image!.representations.allSatisfy { $0 is NSBitmapImageRep })
+            precondition(button.accessibilityLabel() == provider.name + " usage",
+                         "Replacing the visual title must preserve spoken usage")
+            renderer.configure(title: NSAttributedString(string: " 80%", attributes: [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)]), unavailable: false)
+            renderer.display(on: button, frame: 0)
+            precondition(renderer.cachedFrameCount == 1 && button.image !== repeated,
+                         "Usage changes must discard old frames")
+            let oldAppearanceFrame = button.image
+            // Some macOS versions normalize high-contrast status-bar overrides
+            // to Aqua/Dark Aqua. Switch from the resolved appearance.
+            let resolved = button.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua])
+            button.appearance = NSAppearance(named: resolved == .aqua ? .darkAqua : .aqua)
+            renderer.display(on: button, frame: 0)
+            precondition(button.image !== oldAppearanceFrame && renderer.cachedFrameCount == 1,
+                         "Appearance changes must invalidate prepared frames")
+            button.appearance = NSAppearance(named: name)
+            renderer.display(on: button, frame: nil)
+            precondition(renderer.cachedFrameCount == 0 && button.attributedTitle.string == " 80%")
+            renderer.configure(title: NSAttributedString(string: ""), unavailable: true)
+            renderer.display(on: button, frame: 0)
+            precondition(renderer.cachedFrameCount == 0 && button.image?.isTemplate == false)
+            renderer.configure(title: NSAttributedString(string: "😀 36%"), unavailable: false)
+            renderer.display(on: button, frame: 0)
+            precondition(renderer.cachedFrameCount == 0 && button.attributedTitle.string == "😀 36%")
+            renderer.configure(title: NSAttributedString(string: String(repeating: "W", count: 80),
+                attributes: [.font: NSFont.systemFont(ofSize: 48)]), unavailable: false)
+            renderer.display(on: button, frame: 0)
+            renderer.display(on: button, frame: 1)
+            precondition(renderer.cachedFrameCount == 0 && button.attributedTitle.length == 80,
+                         "Oversized frames must use the native display without truncation")
+        }
+    }
+    print("PASS: bounded status frames, native widths, appearances, usage changes, accessibility and fallbacks")
 }

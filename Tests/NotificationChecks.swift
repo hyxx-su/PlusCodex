@@ -3,6 +3,7 @@ import UserNotifications
 
 @main struct NotificationChecks {
     static func main() {
+        checkCompletionPersistenceWork()
         var tracker = CompletionTracker()
         var reconnectTracker = CompletionTracker()
         var longTask = ThreadActivity(id: "long", title: "Long task", runtime: "active", unread: false, updatedAt: 1)
@@ -510,6 +511,56 @@ private func checkValidatedResetNotifications() {
         drain(notifications)
         precondition(fixture.pending.isEmpty, "Account invalidation also removes an in-flight immediate submission")
     }
+}
+
+private final class CompletionPersistenceDefaults: UserDefaults {
+    var recordWrites = 0
+    override func set(_ value: Any?, forKey key: String) {
+        if key.hasPrefix("threadCompletionTurns.v2.") { recordWrites += 1 }
+        super.set(value, forKey: key)
+    }
+}
+
+private func checkCompletionPersistenceWork() {
+    let suite = "PlusCodex.completion-persistence.\(UUID().uuidString)"
+    let defaults = CompletionPersistenceDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let now = Date()
+    let key = "threadCompletionTurns.v2." + ThreadRecordScope.key("persistence-test")
+    var row = ThreadActivity(id: "persistence-thread", title: "Persistence", runtime: "active", unread: false, updatedAt: 1)
+    row.latestTurn = ThreadTurnState(key: "turn", id: "turn", status: "inProgress")
+    var tracker = CompletionTracker(defaults: defaults, account: "persistence-test")
+    precondition(tracker.update([row], connected: true, now: now).isEmpty)
+    precondition(defaults.recordWrites == 1)
+    let original = defaults.data(forKey: key)
+    defaults.recordWrites = 0
+    for _ in 0..<100 { precondition(tracker.update([row], connected: true, now: now).isEmpty) }
+    precondition(defaults.recordWrites == 0 && defaults.data(forKey: key) == original,
+                 "Unchanged stream status must not rewrite completion records")
+    row.runtime = "idle"
+    row.latestTurn?.status = "completed"
+    precondition(tracker.update([row], connected: true, now: now).count == 1)
+    precondition(defaults.recordWrites == 1, "Actual completion must persist immediately")
+    defaults.recordWrites = 0
+    var restored = CompletionTracker(defaults: defaults, account: "persistence-test")
+    precondition(restored.update([row], connected: true, now: now).isEmpty)
+    precondition(defaults.recordWrites == 0, "Relaunch must retain duplicate notification protection without rewriting")
+    precondition(restored.update([], connected: true, now: now.addingTimeInterval(31 * 86400)).isEmpty)
+    precondition(defaults.recordWrites == 1)
+    let cleared = try! JSONSerialization.jsonObject(with: defaults.data(forKey: key)!) as! [String: Any]
+    precondition(cleared.isEmpty, "Aged records must still be removed and persisted")
+    // Startup can prune a record before any new task arrives. That removal also
+    // needs to reach disk on the next connected update.
+    defaults.set(try! JSONSerialization.data(withJSONObject: ["old:turn": [
+        "thread": "old", "turn": "turn", "running": false, "notified": true,
+        "savedAt": now.addingTimeInterval(-31 * 86400).timeIntervalSinceReferenceDate
+    ]]), forKey: key)
+    defaults.recordWrites = 0
+    var prunedAtLaunch = CompletionTracker(defaults: defaults, account: "persistence-test")
+    precondition(prunedAtLaunch.update([], connected: true, now: now).isEmpty)
+    precondition(defaults.recordWrites == 1, "Startup pruning must be persisted without requiring a new turn")
+    let startupCleared = try! JSONSerialization.jsonObject(with: defaults.data(forKey: key)!) as! [String: Any]
+    precondition(startupCleared.isEmpty)
 }
 
 private final class ResetNotificationFixture {

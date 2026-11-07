@@ -38,6 +38,38 @@ import ServiceManagement
             }
         }
         let root = window.window!.contentView!
+        func verifyPickerHitTargets(_ button: NSButton, in root: NSView) {
+            root.layoutSubtreeIfNeeded()
+            let decorations = button.subviews.filter { $0 is NSTextField || $0 is NSImageView }
+            precondition(decorations.count == 2, "Exercise both the visible title and chevron")
+            var points = [NSPoint(x: button.bounds.midX, y: button.bounds.midY),
+                          NSPoint(x: 1, y: button.bounds.midY),
+                          NSPoint(x: button.bounds.maxX - 1, y: button.bounds.midY)]
+            points += decorations.map {
+                $0.convert(NSPoint(x: $0.bounds.midX, y: $0.bounds.midY), to: button)
+            }
+            for point in points {
+                let windowPoint = button.convert(point, to: nil)
+                let hit = root.superview?.hitTest(windowPoint)
+                precondition(hit === button,
+                             "Picker decoration must route to its button: \(button.accessibilityLabel() ?? "")")
+                precondition(hit?.mouseDownCanMoveWindow == false,
+                             "A picker click must not become a settings-window drag")
+            }
+            let outside = button.convert(NSPoint(x: -2, y: button.bounds.midY), to: button.superview)
+            precondition(button.hitTest(outside) == nil, "A picker must not capture adjacent controls")
+            button.isHidden = true
+            let center = button.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), to: nil)
+            precondition(root.superview?.hitTest(center) !== button, "A hidden picker must not capture clicks")
+            button.isHidden = false
+        }
+        precondition(window.window!.isMovableByWindowBackground,
+                     "Cover picker hits with the production window-drag configuration")
+        for identifier in ["appLanguage", "codexWakeModel"] {
+            let picker = descendants(root).compactMap { $0 as? NSButton }
+                .first { $0.identifier?.rawValue == identifier }!
+            verifyPickerHitTargets(picker, in: root)
+        }
         precondition(window.window is SettingsTextEditingWindow,
                      "The actual settings window must route field-editor shortcuts without an Edit menu")
         let discord = descendants(root).compactMap { $0 as? NSButton }
@@ -176,6 +208,10 @@ import ServiceManagement
                 let hit = root.superview?.hitTest(point)
                 precondition(hit === control || hit?.isDescendant(of: control) == true,
                              "\(control.accessibilityLabel() ?? "알림 컨트롤") click intercepted by \(String(describing: hit))")
+                if let picker = control as? NSButton,
+                   ["알림 소리", "재생 시간"].contains(picker.accessibilityLabel() ?? "") {
+                    verifyPickerHitTargets(picker, in: root)
+                }
             }
         }
         verifyNotificationControls(in: window, expectedCount: 5)

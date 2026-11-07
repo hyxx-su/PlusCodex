@@ -110,11 +110,15 @@ import AppKit
         applyVisible(running: true, time: 0)
         applyVisible(time: 2)
         precondition(axCompletions == 1 && axReads == 0, "A fresh completion still submits first")
+        precondition((0.8...1.1).contains(ax.testHookReadConfirmationDelay ?? -1),
+                     "A visible completion must schedule confirmation before the next two-second poll")
         applyVisible(time: 2.1)
         precondition(axReads == 0, "Repeated immediate menu refreshes are not evidence of reading")
-        applyVisible(time: 4)
+        applyVisible(time: 3)
         precondition(axReads == 1 && ax.testHookActivityItem.isHidden,
                      "An open chat must clear despite Antigravity's stale view timestamp")
+        precondition(ax.testHookReadConfirmationDelay == nil,
+                     "Acknowledged chats must not keep the extra confirmation timer running")
         applyVisible(time: 6)
         precondition(axReads == 1 && axCompletions == 1)
         applyVisible(input: 2020, modified: 2021, running: true, time: 8)
@@ -124,9 +128,12 @@ import AppKit
                      "Another chat, absent permission, or another foreground app must not clear the result")
         applyVisible(input: 2020, modified: 2030, time: 14)
         applyVisible(input: 2020, modified: 2030, visible: nil, time: 16)
+        precondition(ax.testHookReadConfirmationDelay == nil,
+                     "Leaving the visible conversation must cancel its confirmation")
         applyVisible(input: 2020, modified: 2030, time: 18)
         precondition(axReads == 1, "Switching away resets the reading observation")
         applyVisible(input: 2020, modified: 2030, time: 20, connected: false)
+        precondition(ax.testHookReadConfirmationDelay == nil)
         applyVisible(input: 2020, modified: 2030, time: 22)
         precondition(axReads == 1, "Disconnection resets the observation")
         applyVisible(input: 2020, modified: 2030, time: 40)
@@ -136,7 +143,7 @@ import AppKit
         applyVisible(input: 2020, modified: 2031, time: 44)
         precondition(axReads == 2 && ax.testHookActivityItem.isHidden)
         precondition(ax.testHookContextMenu.items.filter { !$0.isSeparatorItem }.map(\.title)
-            == [L10n.text("%@ 끄기", "Gemini"), L10n.text("PlusCodex 종료")],
+            == [L10n.text("%@ 끄기", "Gemini"), L10n.text("설정") + "…", L10n.text("PlusCodex 종료")],
             "Accessibility setup belongs to Gemini activation, not its context menu")
         print("PASS: foreground URL validation, stale-view cleanup, reading dwell, other-chat isolation, permission fallback, reconnect/sleep guards and new-turn notifications")
         print("PASS: Gemini completion/failure/attention callbacks, same-step new turns, stable task identity, external reads, no duplicate alerts, initial cleanup and explicit unread")
