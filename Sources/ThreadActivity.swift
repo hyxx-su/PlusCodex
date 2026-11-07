@@ -129,6 +129,7 @@ struct CompletionTracker {
     }
     private let defaults: UserDefaults?
     private var savedTurns: [String: TurnRecord] = [:]
+    private var needsPersistence = false
     private let storageKey: String
     private var previous: [String: ThreadActivity] = [:]
     private var notifiedTurnIDs: [String: Set<String>] = [:]
@@ -140,6 +141,7 @@ struct CompletionTracker {
         if let data = defaults?.data(forKey: storageKey),
            let records = try? JSONDecoder().decode([String: TurnRecord].self, from: data) {
             savedTurns = records.filter { Date().timeIntervalSince($0.value.savedAt) < 30 * 86400 }
+            needsPersistence = savedTurns.count != records.count
             for record in savedTurns.values where record.notified {
                 notifiedTurnIDs[record.thread, default: []].insert(record.turn)
             }
@@ -195,6 +197,7 @@ struct CompletionTracker {
                 if savedTurns[key]?.running != running || savedTurns[key]?.notified != notified {
                     savedTurns[key] = TurnRecord(thread: activity.id, turn: turn.id, running: running,
                                                  notified: notified, savedAt: now)
+                    needsPersistence = true
                 }
             } else if becameIdle {
                 results.append(ThreadTurnResult(activity: activity, kind: .completed))
@@ -202,9 +205,17 @@ struct CompletionTracker {
             previous[activity.id] = activity
         }
         previous = previous.filter { id, _ in retainingIDs.contains(id) || rows.contains(where: { $0.id == id }) }
-        savedTurns = savedTurns.filter { now.timeIntervalSince($0.value.savedAt) < 30 * 86400 }
-        if let defaults, let data = try? JSONEncoder().encode(savedTurns) {
+        let retainedTurns = savedTurns.filter { now.timeIntervalSince($0.value.savedAt) < 30 * 86400 }
+        if retainedTurns.count != savedTurns.count {
+            savedTurns = retainedTurns
+            needsPersistence = true
+        }
+        // Encoding the same dictionary can reorder JSON keys and trigger a new
+        // preferences write on every stream patch. Persist actual record changes;
+        // keep the flag set if encoding fails so a later update can retry.
+        if needsPersistence, let defaults, let data = try? JSONEncoder().encode(savedTurns) {
             if defaults.data(forKey: storageKey) != data { defaults.set(data, forKey: storageKey) }
+            needsPersistence = false
         }
         return results
     }

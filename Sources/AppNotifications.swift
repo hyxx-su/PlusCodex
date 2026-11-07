@@ -444,7 +444,10 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate {
                     NotificationDelivery.shared.cancel(request.identifier)
                     return
                 }
-                guard let error else { return }
+                guard let error else {
+                    self.readCleanup.recordSubmission(request)
+                    return
+                }
                 NSLog("PlusCodex notification failed: %@", error.localizedDescription)
                 guard attempt < 2 else { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + Double((attempt + 1) * 5)) { [weak self] in

@@ -248,6 +248,12 @@ private final class LanguagePickerButton: NSButton {
         return max(0, (displayTitle as NSString).size(withAttributes: [.font: font]).width)
     }
 
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // Treat decorative labels and the chevron as one control, so their
+        // background-drag behavior cannot take precedence over the button action.
+        super.hitTest(point) == nil ? nil : self
+    }
+
     fileprivate var preferredWidth: CGFloat {
         return max(minimumWidth,
                    ceil(measuredTitleWidth + groupGap + chevronWidth + leadingInset + trailingInset))
