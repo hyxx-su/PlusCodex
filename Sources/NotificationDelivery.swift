@@ -4,6 +4,12 @@ import UserNotifications
 /// Reserve one OS sound at a time without bypassing macOS notification/Focus
 /// preferences. Overlapping notifications still deliver their banner and text.
 final class NotificationDelivery {
+    enum DeliveryError: LocalizedError {
+        case soundBusy
+        var errorDescription: String? {
+            L10n.text("다른 알림음이 재생 중입니다. 잠시 후 다시 테스트하세요.")
+        }
+    }
     static let shared = NotificationDelivery(defaults: .standard)
     private let lock = NSLock()
     private var sounds: [String: DateInterval] = [:]
@@ -76,17 +82,27 @@ final class NotificationDelivery {
         }
     }
 
-    func add(_ request: UNNotificationRequest, duration: TimeInterval,
-             completion: @escaping (Error?) -> Void) {
+    func prepare(_ request: UNNotificationRequest, duration: TimeInterval,
+                 requiresSound: Bool = false, now: Date = Date()) throws -> UNNotificationRequest {
         let content = request.content.mutableCopy() as! UNMutableNotificationContent
         content.userInfo["plusCodexSoundDuration"] = duration
         let start = (request.trigger as? UNTimeIntervalNotificationTrigger)?.nextTriggerDate()
-            ?? (request.trigger as? UNCalendarNotificationTrigger)?.nextTriggerDate() ?? Date()
+            ?? (request.trigger as? UNCalendarNotificationTrigger)?.nextTriggerDate() ?? now
         if content.sound != nil,
-           !reserve(identifier: request.identifier, start: start, duration: duration) {
+           !reserve(identifier: request.identifier, start: start, duration: duration, now: now) {
+            // A user-initiated sound test must not succeed with a silent banner.
+            // Let its caller retry without changing another notification's reservation.
+            if requiresSound { throw DeliveryError.soundBusy }
             content.sound = nil
         }
-        let prepared = UNNotificationRequest(identifier: request.identifier, content: content, trigger: request.trigger)
+        return UNNotificationRequest(identifier: request.identifier, content: content, trigger: request.trigger)
+    }
+
+    func add(_ request: UNNotificationRequest, duration: TimeInterval, requiresSound: Bool = false,
+             completion: @escaping (Error?) -> Void) {
+        let prepared: UNNotificationRequest
+        do { prepared = try prepare(request, duration: duration, requiresSound: requiresSound) }
+        catch { completion(error); return }
         UNUserNotificationCenter.current().add(prepared) { [weak self] error in
             if error != nil { self?.cancel(request.identifier) }
             completion(error)
