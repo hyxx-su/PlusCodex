@@ -20,6 +20,7 @@ struct ActivityIPCChecks {
             "version": 11, "sourceClientId": "owner", "params": ["hostId": "local", "conversationId": "thread",
             "change": ["type": "snapshot", "revision": 5, "conversationState": state]]]
         let parsed = try ActivityIPCDecoder.decode(JSONSerialization.data(withJSONObject: original))
+        try checkMonitorVersions(original)
         let params = parsed["params"] as! [String: Any]
         let change = params["change"] as! [String: Any]
         let projected = change["conversationState"] as! [String: Any]
@@ -60,6 +61,53 @@ struct ActivityIPCChecks {
         } catch {}
         print("PASS: projected snapshot, numeric bridging, approval metadata, patches and malformed IPC")
         if CommandLine.arguments.contains("--stress") { try stress() }
+    }
+
+    private static func checkMonitorVersions(_ original: [String: Any]) throws {
+        let id = UUID().uuidString
+        for version in [11, 13] {
+            let monitor = ThreadActivityMonitor { _, _ in }
+            var message = original
+            message["version"] = version
+            var params = message["params"] as! [String: Any]
+            params["conversationId"] = id
+            var change = params["change"] as! [String: Any]
+            var state = change["conversationState"] as! [String: Any]
+            state["requests"] = []
+            state["threadRuntimeStatus"] = ["type": "active", "activeFlags": []] as [String: Any]
+            state["turns"] = [["text": "unprojected v13 history"]]
+            change["conversationState"] = state
+            params["change"] = change
+            message["params"] = params
+            func receive() throws -> ThreadActivity? {
+                let decoded = try ActivityIPCDecoder.decode(JSONSerialization.data(withJSONObject: message))
+                return try monitor.testHookReceive(decoded, following: id)
+            }
+            let active = try receive()
+            precondition(active?.isRunning == true && active?.latestTurn?.id == "turn-1",
+                         "Supported snapshots must reach the monitor, not just the decoder")
+            params["change"] = ["type": "patches", "baseRevision": 5, "revision": 6,
+                "patches": [["op": "replace", "path": ["threadRuntimeStatus", "type"], "value": "idle"],
+                            ["op": "replace", "path": ["hasUnreadTurn"], "value": true]]]
+            message["params"] = params
+            let completed = try receive()
+            precondition(completed?.isRunning == false && completed?.isVisible == true)
+            params["change"] = ["type": "patches", "baseRevision": 6, "revision": 7,
+                "patches": [["op": "replace", "path": ["hasUnreadTurn"], "value": false]]]
+            message["params"] = params
+            let read = try receive()
+            precondition(read?.isVisible == false)
+        }
+        for version: Int? in [nil, 12, 14] {
+            let monitor = ThreadActivityMonitor { _, _ in }
+            var message = original
+            message["version"] = version
+            do {
+                _ = try monitor.testHookReceive(message, following: "thread")
+                preconditionFailure("Unverified or absent state protocol versions must still be rejected")
+            } catch { }
+        }
+        print("PASS: v11/v13 monitor snapshots, active-to-idle patches, read cleanup and unknown-version rejection")
     }
 
     private static func footprint(peak: Bool = false) -> UInt64 {

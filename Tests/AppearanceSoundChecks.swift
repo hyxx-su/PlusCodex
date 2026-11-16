@@ -1,8 +1,10 @@
 import AppKit
+import UserNotifications
 
 @main struct AppearanceSoundChecks {
-    static func main() {
+    static func main() throws {
         _ = NSApplication.shared
+        try checkSoundTestOverlap()
         checkStatusBarRendering()
         var lightIcon: NSImage?
         NSAppearance(named: .aqua)!.performAsCurrentDrawingAppearance {
@@ -92,6 +94,37 @@ import AppKit
         precondition(delivery.reserve(identifier: "expired", start: now.addingTimeInterval(30), duration: 2, now: now.addingTimeInterval(30)))
         print("AppearanceSoundChecks passed")
     }
+}
+
+private func checkSoundTestOverlap() throws {
+    let delivery = NotificationDelivery()
+    let now = Date()
+    let content = UNMutableNotificationContent()
+    content.sound = .default
+    func request(_ id: String) -> UNNotificationRequest {
+        UNNotificationRequest(identifier: id, content: content, trigger: nil)
+    }
+    let first = try delivery.prepare(request("completion"), duration: 14, now: now)
+    precondition(first.content.sound != nil)
+    do {
+        _ = try delivery.prepare(request("sound-test"), duration: 14, requiresSound: true,
+                                 now: now.addingTimeInterval(12))
+        preconditionFailure("An overlapping explicit test must not silently succeed")
+    } catch NotificationDelivery.DeliveryError.soundBusy { }
+    precondition(delivery.testHookReservationMetadataCount == 1,
+                 "A waiting test must not replace the current sound reservation")
+    let overlapping = try delivery.prepare(request("other-completion"), duration: 14,
+                                           now: now.addingTimeInterval(12))
+    precondition(overlapping.content.sound == nil, "Ordinary task alerts retain overlap suppression")
+    let retry = try delivery.prepare(request("sound-test"), duration: 14, requiresSound: true,
+                                     now: now.addingTimeInterval(15))
+    precondition(retry.content.sound != nil && retry.trigger == nil)
+    precondition(retry.content.userInfo["plusCodexSoundDuration"] as? Double == 14)
+    delivery.cancel("sound-test")
+    let replacement = try delivery.prepare(request("sound-test-new"), duration: 14, requiresSound: true,
+                                           now: now.addingTimeInterval(15))
+    precondition(replacement.content.sound != nil, "Cancelling a test must allow a new test")
+    print("PASS: explicit sound test waits instead of becoming silent; retry, cancellation and task overlap policy")
 }
 
 private func checkStatusBarRendering() {
