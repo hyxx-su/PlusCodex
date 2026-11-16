@@ -326,3 +326,6 @@
 "손쉬운 사용 권한 요청" = "Request Accessibility";
 "손쉬운 사용 권한이 필요합니다" = "Accessibility permission is required";
 "손쉬운 사용 설정을 열지 못했습니다. 시스템 설정에서 PlusCodex 권한을 확인해 주세요." = "Could not open Accessibility settings. Check PlusCodex permissions in System Settings.";
+"알림 소리 권한이 필요합니다." = "Notification sound permission is required.";
+"시스템 설정에서 PlusCodex의 알림 소리를 켠 뒤 다시 테스트하세요." = "Enable notification sounds for PlusCodex in System Settings, then try again.";
+"다른 알림음이 재생 중입니다. 잠시 후 다시 테스트하세요." = "Another notification sound is playing. Please try again shortly.";

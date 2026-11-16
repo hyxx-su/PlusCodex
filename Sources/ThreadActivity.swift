@@ -849,7 +849,11 @@ final class ThreadActivityMonitor {
             return
         }
         guard method == "thread-stream-state-changed" else { return }
-        guard message["version"] as? Int == 11 else { throw ActivityError.protocolMismatch }
+        // v13 retains the runtime, read-state and turn-history fields projected
+        // by ActivityIPCDecoder. Keep unknown versions fail-closed.
+        guard let version = message["version"] as? Int, [11, 13].contains(version) else {
+            throw ActivityError.protocolMismatch
+        }
         guard let id = params["conversationId"] as? String, followed.contains(id),
               let change = params["change"] as? [String: Any],
               let revision = change["revision"] as? Int,
@@ -967,6 +971,12 @@ final class ThreadActivityMonitor {
             }
         }
         publish(connected: true)
+    }
+
+    func testHookReceive(_ message: [String: Any], following id: String) throws -> ThreadActivity? {
+        followed.insert(id)
+        try handle(message)
+        return activities[id]
     }
 
     private func publish(connected: Bool) {

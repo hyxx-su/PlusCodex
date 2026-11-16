@@ -2339,6 +2339,16 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
                     if alert.runModal() == .alertFirstButtonReturn { self.openNotifications() }
                     return
                 }
+                guard status.soundSetting == .enabled else {
+                    self.finishSoundTestNotification(requestID)
+                    let alert = NSAlert()
+                    alert.messageText = L10n.text("알림 소리 권한이 필요합니다.")
+                    alert.informativeText = L10n.text("시스템 설정에서 PlusCodex의 알림 소리를 켠 뒤 다시 테스트하세요.")
+                    alert.addButton(withTitle: L10n.text("알림 설정 열기"))
+                    alert.addButton(withTitle: L10n.text("취소"))
+                    if alert.runModal() == .alertFirstButtonReturn { self.openNotifications() }
+                    return
+                }
                 let content = UNMutableNotificationContent()
                 NotificationIconProvider.apply(to: content, provider: .codex)
                 content.title = L10n.text("알림 테스트")
@@ -2356,9 +2366,10 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
     private func submitSoundTestNotification(_ content: UNMutableNotificationContent,
                                              requestID: String,
                                              alertStyle: UNAlertStyle,
-                                             center: UNUserNotificationCenter) {
+                                             center: UNUserNotificationCenter,
+                                             attempt: Int = 0) {
         guard activeSoundTestRequestID == requestID else { return }
-        if let previousID = lastSoundTestRequestID {
+        if let previousID = lastSoundTestRequestID, previousID != requestID {
             // Only remove the previous test; a delayed lookup must never cancel the new request.
             center.removeDeliveredNotifications(withIdentifiers: [previousID])
             center.removePendingNotificationRequests(withIdentifiers: [previousID])
@@ -2371,7 +2382,8 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
             ? notificationSettings.soundDuration : 2.0
 
         let request = UNNotificationRequest(identifier: requestID, content: content, trigger: nil)
-        NotificationDelivery.shared.add(request, duration: notificationSettings.notificationPlaybackDuration) { [weak self] error in
+        NotificationDelivery.shared.add(request, duration: notificationSettings.notificationPlaybackDuration,
+                                        requiresSound: true) { [weak self] error in
             DispatchQueue.main.async {
                 guard let self else { return }
                 guard self.activeSoundTestRequestID == requestID else {
@@ -2379,6 +2391,16 @@ final class AISettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldD
                     center.removePendingNotificationRequests(withIdentifiers: [requestID])
                     center.removeDeliveredNotifications(withIdentifiers: [requestID])
                     NotificationDelivery.shared.cancel(requestID)
+                    return
+                }
+                if let deliveryError = error as? NotificationDelivery.DeliveryError,
+                   case .soundBusy = deliveryError, attempt < 20 {
+                    // Retry only this explicit test. Cancellation/new tests invalidate
+                    // requestID; ordinary task alerts retain their overlap policy.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                        self?.submitSoundTestNotification(content, requestID: requestID,
+                            alertStyle: alertStyle, center: center, attempt: attempt + 1)
+                    }
                     return
                 }
                 guard let error else {
