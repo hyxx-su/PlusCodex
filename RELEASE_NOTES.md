@@ -1,3 +1,53 @@
+# PlusCodex v1.2.3
+
+최신 Codex에서 진행 중인 작업을 감지하지 못하는 문제와 알림음 테스트가 소리 없이 표시될 수 있는 문제를 개선했습니다.
+
+PlusCodex의 **v1.0.0~v1.9.9는 베타 버전**입니다. 기존 앱의 업데이트 경로를 유지하기 위해 GitHub Latest로 제공합니다.
+
+## 주요 변경사항
+
+### Codex 작업 감지
+
+- 최신 Codex의 작업 상태 전달 형식에 대응해 진행 중인 작업 감지 복구
+- 기존 형식과의 호환성 및 작업 완료·읽음 상태 처리 유지
+- 확인되지 않은 프로토콜 버전은 계속 거부해 잘못된 상태 판단 방지
+
+### 알림음 테스트
+
+- 다른 알림음이 재생 중이면 테스트를 즉시 무음으로 표시하지 않고 최대 20초 동안 재시도
+- 대기 중 테스트 취소 가능, 제한 시간 안에 재생할 수 없으면 안내 표시
+- macOS 알림 소리 권한이 꺼져 있으면 시스템 설정 안내
+- 일반 작업 알림의 소리 중복 방지 정책 유지
+
+## 설치 및 업데이트
+
+- 기존 앱: 앱의 업데이트 확인 기능 이용
+- 수동 설치: [PlusCodex-1.2.3.dmg](https://github.com/hyxx-su/PlusCodex/releases/download/v1.2.3/PlusCodex-1.2.3.dmg)
+- 지원 환경: Apple Silicon Mac, macOS 14 이상
+- 기존 설정과 저장된 깨우기 채팅 유지
+
+## 알려진 제한 사항
+
+- 알림 소리는 macOS 알림 권한·집중 모드·출력 장치 설정에 영향을 받음
+- 이번 Codex 호환성 수정은 작업 상태 감지에 해당하며, 최신 Codex의 자동 깨우기 데스크톱 연결은 별도 검증 필요
+- 다른 Mac의 실제 설치·업데이트와 알림음 청취는 별도 확인 필요
+- 이 배포본은 Apple Development 서명이며 **Developer ID 서명·Apple 공증은 적용되지 않음**
+- Sparkle 업데이트 서명은 업데이트 파일과 피드의 무결성을 검증하며 Apple 공증을 대체하지 않음
+
+## English
+
+- Restore running-task detection with the latest Codex state protocol, while preserving older supported versions and read-state handling.
+- Reject unverified protocol versions rather than interpreting them as supported activity data.
+- Retry explicit sound tests for up to 20 seconds when another notification sound overlaps; cancellation remains available.
+- Explain when a test cannot play and guide users to System Settings when notification sounds are disabled.
+- Preserve normal task-notification overlap suppression, existing settings and saved wake chats.
+- Notification audio depends on macOS permissions, Focus and output-device settings. Actual playback and installation on other Macs require separate verification.
+- The Codex compatibility fix covers activity detection; the automatic-wake desktop bridge still requires separate verification against the latest Codex.
+- Versions v1.0.0 through v1.9.9 are beta releases. This release remains Latest to preserve the existing update path.
+- Apple Silicon and macOS 14 or later. Apple Development signed; no Developer ID signing or Apple notarization.
+
+---
+
 # PlusCodex v1.2.2
 
 메뉴바 처리 비용과 읽은 작업의 알림 정리 지연을 줄이고, 설정 선택 버튼과 우클릭 메뉴를 개선했습니다.

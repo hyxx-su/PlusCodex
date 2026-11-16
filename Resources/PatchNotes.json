@@ -1,5 +1,29 @@
 [
   {
+    "version": "v1.2.3",
+    "publishedAt": "2026-11-16T00:00:00Z",
+    "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.2.3",
+    "body": "# PlusCodex v1.2.3\n\n- 최신 Codex의 작업 상태 전달 형식에 대응해 진행 중인 작업 감지 복구\n- 기존 Codex 작업 감지 호환성과 읽음 상태 처리 유지\n- 다른 알림음과 겹친 알림 테스트를 잠시 대기 후 재시도하도록 개선\n- 알림 소리 권한이 꺼진 경우 시스템 설정 안내 추가\n\n## English\n\n- Restore running-task detection with the latest Codex state protocol\n- Preserve existing Codex detection compatibility and read-state handling\n- Retry explicit sound tests after overlapping notification sounds instead of silently muting the test\n- Guide users to System Settings when notification sounds are disabled\n\nPlusCodex v1.0.0~v1.9.9는 베타 버전입니다. / Versions v1.0.0 through v1.9.9 are beta releases.",
+    "summary": {
+      "ko": "• 최신 Codex 작업 감지 호환성 개선\n• 알림음 테스트 대기·권한 안내 개선",
+      "en": "• Restore latest Codex task detection\n• Improve sound-test retries and permission guidance"
+    },
+    "highlights": {
+      "ko": [
+        "최신 Codex의 작업 상태 전달 형식에 대응해 진행 중인 작업 감지 복구",
+        "기존 Codex 작업 감지 호환성과 읽음 상태 처리 유지",
+        "다른 알림음과 겹친 알림 테스트를 잠시 대기 후 재시도하도록 개선",
+        "알림 소리 권한이 꺼진 경우 시스템 설정 안내 추가"
+      ],
+      "en": [
+        "Restore running-task detection with the latest Codex state protocol",
+        "Preserve existing Codex detection compatibility and read-state handling",
+        "Retry explicit sound tests after overlapping notification sounds instead of silently muting the test",
+        "Guide users to System Settings when notification sounds are disabled"
+      ]
+    }
+  },
+  {
     "version": "v1.2.2",
     "publishedAt": "2026-11-07T00:00:00Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.2.2",
