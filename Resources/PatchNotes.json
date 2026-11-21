@@ -1,5 +1,29 @@
 [
   {
+    "version": "v1.2.4",
+    "publishedAt": "2026-11-21T00:00:00Z",
+    "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.2.4",
+    "body": "# PlusCodex v1.2.4\n\n- 최신 Codex에서 기존 작업 감지 연결이 없어졌을 때 로컬 작업 기록으로 감지 복구\n- 작업 완료·실패·중단을 구분하고 현재 작업의 읽음이 확인되면 알림 정리\n- 조회 사이 다음 작업이 시작돼도 직전에 관측한 작업의 종료 확인\n- 계정 전환 시 이전 작업 표시와 지연된 알림이 섞이지 않도록 처리\n\n복구 경로는 Codex가 실행 중일 때 약 2초 간격으로 확인합니다. 승인 대기 세부 상태는 제공되지 않으며, 오래 갱신되지 않은 실행 기록은 상태 미확인으로 표시합니다.\n\n## English\n\n- Restore task detection from local metadata when the latest Codex no longer exposes the legacy connection\n- Distinguish completed, failed and interrupted turns and clear alerts after the matching turn is confirmed read\n- Resolve the previously observed turn even when another turn starts between polls\n- Prevent previous-account activity and delayed callbacks from carrying over after account changes\n\nThe fallback checks approximately every two seconds while Codex is running. Detailed approval state is unavailable; stale running records are shown as unconfirmed.\n\nPlusCodex v1.0.0~v1.9.9는 베타 버전입니다. / Versions v1.0.0 through v1.9.9 are beta releases.",
+    "summary": {
+      "ko": "• 최신 Codex 작업 감지 복구\n• 완료·읽음 및 계정 전환 처리 보강",
+      "en": "• Restore latest Codex task detection\n• Improve completion, read and account handling"
+    },
+    "highlights": {
+      "ko": [
+        "최신 Codex에서 기존 작업 감지 연결이 없어졌을 때 로컬 작업 기록으로 감지 복구",
+        "작업 완료·실패·중단을 구분하고 현재 작업의 읽음이 확인되면 알림 정리",
+        "조회 사이 다음 작업이 시작돼도 직전에 관측한 작업의 종료 확인",
+        "계정 전환 시 이전 작업 표시와 지연된 알림이 섞이지 않도록 처리"
+      ],
+      "en": [
+        "Restore task detection from local metadata when the latest Codex no longer exposes the legacy connection",
+        "Distinguish completed, failed and interrupted turns and clear alerts after the matching turn is confirmed read",
+        "Resolve the previously observed turn even when another turn starts between polls",
+        "Prevent previous-account activity and delayed callbacks from carrying over after account changes"
+      ]
+    }
+  },
+  {
     "version": "v1.2.3",
     "publishedAt": "2026-11-16T00:00:00Z",
     "url": "https://github.com/hyxx-su/PlusCodex/releases/tag/v1.2.3",

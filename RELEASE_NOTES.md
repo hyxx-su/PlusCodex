@@ -1,3 +1,60 @@
+# PlusCodex v1.2.4
+
+최근 Codex 업데이트 이후 진행 중인 작업이 표시되지 않거나 작업 완료 알림이 오지 않는 문제를 개선했습니다.
+
+PlusCodex의 **v1.0.0~v1.9.9는 베타 버전**입니다. 기존 앱의 업데이트 경로를 유지하기 위해 GitHub Latest로 제공합니다.
+
+## 주요 변경사항
+
+### Codex 작업 감지
+
+- 기존 작업 감지 연결을 사용할 수 없으면 Codex의 로컬 작업 상태·읽음 기록을 읽기 전용으로 확인
+- 실행 중인 작업과 정상 완료·실패·중단을 구분하고 기존 연결을 사용하는 Codex도 계속 지원
+- 조회 사이 다음 작업이 시작돼도 직전에 관측한 작업의 종료 확인
+- 현재 작업과 일치하는 읽음 기록이 확인될 때만 해당 알림 정리
+
+### 계정 전환 및 안정성
+
+- 알려진 다른 계정의 작업을 제외하고 계정 전환 전 관측 상태와 지연된 콜백의 혼입 방지
+- 소유자 정보가 없는 기존 로컬 채팅은 현재 앱 실행·계정 관측 범위로 제한
+- 오래된 실행 기록이나 DB 조회 실패를 작업 완료로 처리하지 않음
+- 대화 본문이나 인증 토큰을 읽지 않고 제목·작업 식별자·상태·시각·계정 식별자만 사용
+
+## 설치 및 업데이트
+
+- 기존 앱: 앱의 업데이트 확인 기능 이용
+- 수동 설치: [PlusCodex-1.2.4.dmg](https://github.com/hyxx-su/PlusCodex/releases/download/v1.2.4/PlusCodex-1.2.4.dmg)
+- 지원 환경: Apple Silicon Mac, macOS 14 이상
+- 기존 설정과 저장된 깨우기 채팅 유지
+
+## 알려진 제한 사항
+
+- 새 복구 경로는 Codex가 실행 중이고 계정 메타데이터를 확인할 수 있을 때 약 2초 간격으로 동작
+- 로컬에 기록되는 데스크톱 작업이 대상이며 모든 원격·클라우드 작업 감지를 보장하지 않음
+- 복구 경로에서는 승인·입력 대기의 실시간 세부 상태를 제공하지 않음
+- 기록이 120초 넘게 갱신되지 않은 실행 작업은 상태 미확인으로 표시하며, 이를 완료로 판단하지 않음
+- 내부 DB 형식에 의존하므로 향후 Codex 업데이트에 추가 대응이 필요할 수 있음
+- 자동 깨우기 연결은 이번 수정 범위에 포함되지 않음
+- 다른 Mac의 실제 설치·업데이트와 실제 알림음 청취는 별도 확인 필요
+- 이 배포본은 Apple Development 서명이며 **Developer ID 서명·Apple 공증은 적용되지 않음**
+- Sparkle 업데이트 서명은 업데이트 파일과 피드의 무결성을 검증하며 Apple 공증을 대체하지 않음
+
+## English
+
+- Restore task detection using read-only local lifecycle and read-state metadata when Codex's legacy activity connection is unavailable.
+- Preserve the legacy connection path and distinguish completion, failure and interruption.
+- Resolve previously observed turns even when another turn starts between polls; clear notifications only for matching read receipts.
+- Exclude known other-account records and invalidate previous-account observations and delayed callbacks. Limit shared legacy records to the current desktop/account observation window.
+- Do not read conversation bodies or authentication tokens. Use only titles, identifiers, status, timestamps and account metadata.
+- The fallback checks approximately every two seconds while Codex is running and account metadata is available. It covers locally recorded desktop tasks, not all remote/cloud sessions.
+- Detailed approval/input-waiting state is unavailable. Running records unchanged for over 120 seconds become unconfirmed, not completed.
+- Future Codex database changes may require further compatibility updates. Automatic wake is outside this change.
+- Installation on other Macs and actual notification audio require separate verification.
+- Versions v1.0.0 through v1.9.9 are beta releases. This release remains Latest to preserve the update path.
+- Apple Silicon and macOS 14 or later. Apple Development signed; no Developer ID signing or Apple notarization.
+
+---
+
 # PlusCodex v1.2.3
 
 최신 Codex에서 진행 중인 작업을 감지하지 못하는 문제와 알림음 테스트가 소리 없이 표시될 수 있는 문제를 개선했습니다.

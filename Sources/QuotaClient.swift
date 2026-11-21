@@ -113,14 +113,28 @@ struct CodexAccount: Decodable {
     }
 }
 
-private struct AccountResponse: Decodable {
+struct CodexActivityPrincipal: Equatable {
+    let userID: String
+    let accountID: String
+}
+
+struct AccountResponse: Decodable {
     let account: CodexAccount?
+    let userId: String?
+    let workspaceRouting: WorkspaceRouting?
+    struct WorkspaceRouting: Decodable { let chatgptAccountId: String? }
+    var activityPrincipal: CodexActivityPrincipal? {
+        guard let userId, !userId.isEmpty,
+              let id = workspaceRouting?.chatgptAccountId, !id.isEmpty else { return nil }
+        return CodexActivityPrincipal(userID: userId, accountID: id)
+    }
 }
 
 struct QuotaSnapshot {
     let quota: Quota
     let account: CodexAccount?
     var rateLimitResetCredits: RateLimitResetCreditsSummary? = nil
+    var activityPrincipal: CodexActivityPrincipal? = nil
 }
 
 /// Detects a Codex sign-in change without reading or retaining credentials.
@@ -229,18 +243,20 @@ final class QuotaClient {
         let quota = result.codex ?? Quota(primary: nil, secondary: nil)
         // Do not publish raw Plus windows before resolving an in-place plan upgrade.
         // Account details are optional; a failed identity lookup must not hide valid usage.
-        let account: CodexAccount?
+        let accountResponse: AccountResponse?
         do {
             try send(["id": 3, "method": "account/read", "params": ["refreshToken": false]])
-            account = try JSONDecoder().decode(AccountResponse.self, from: response(3, timeout: 3)).account
+            accountResponse = try JSONDecoder().decode(AccountResponse.self, from: response(3, timeout: 3))
         } catch {
-            account = nil
+            accountResponse = nil
         }
+        let account = accountResponse?.account
         let plan = quota.resolvedPlan(fallback: account?.planType)
         let resolvedAccount = account != nil || plan != nil
             ? CodexAccount(email: account?.email, planType: plan) : nil
         let effective = quota.effectiveQuota(account: resolvedAccount)
         onQuota?(effective)
-        return QuotaSnapshot(quota: effective, account: resolvedAccount, rateLimitResetCredits: result.rateLimitResetCredits)
+        return QuotaSnapshot(quota: effective, account: resolvedAccount, rateLimitResetCredits: result.rateLimitResetCredits,
+                             activityPrincipal: accountResponse?.activityPrincipal)
     }
 }

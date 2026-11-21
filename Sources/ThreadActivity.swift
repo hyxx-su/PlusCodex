@@ -406,31 +406,52 @@ final class ThreadActivityMonitor {
     private var revisions: [String: Int] = [:]
     private var lastPublished: [ThreadActivity] = []
     private var lastConnected = false
+    private var hasPublished = false
+    private var usingHistoryFallback = false
     private var completionTracker = CompletionTracker()
     private let accountLock = NSLock()
     private var requestedAccount: String?
     private var activeAccount: String?
+    private var requestedPrincipal: CodexActivityPrincipal?
+    private var activePrincipal: CodexActivityPrincipal?
+    private var requestedGeneration: UInt64 = 0
+    private var activeGeneration: UInt64 = 0
+    private var legacyHistoryNotBefore: Date?
     private var awaitingSince: [String: Date] = [:]
-    func selectAccount(_ account: String?) {
+    func selectAccount(_ account: String?, principal: CodexActivityPrincipal? = nil) {
         accountLock.lock()
+        if requestedAccount != account || requestedPrincipal != principal { requestedGeneration &+= 1 }
         requestedAccount = account
+        requestedPrincipal = principal
         accountLock.unlock()
     }
-    private func accountIsCurrent(_ account: String?) -> Bool {
+    private func accountIsCurrent(_ account: String?, generation: UInt64) -> Bool {
         accountLock.lock()
         defer { accountLock.unlock() }
-        return requestedAccount == account
+        return requestedAccount == account && requestedGeneration == generation
     }
 
     private func synchronizeAccount() {
         accountLock.lock()
         let account = requestedAccount
+        let principal = requestedPrincipal
+        let generation = requestedGeneration
         accountLock.unlock()
-        guard account != activeAccount else { return }
+        guard generation != activeGeneration else { return }
+        if activeAccount != nil { legacyHistoryNotBefore = Date() }
         activeAccount = account
+        activePrincipal = principal
+        activeGeneration = generation
         completionTracker = account.map { CompletionTracker(defaults: .standard, account: $0) } ?? CompletionTracker()
         attentionTracker = AttentionTracker()
-        awaitingSnapshots.formUnion(activities.keys)
+        activities.removeAll()
+        lastPublished.removeAll()
+        lastConnected = false
+        hasPublished = false
+        awaitingSnapshots.removeAll()
+        awaitingSince.removeAll()
+        owners.removeAll()
+        revisions.removeAll()
         followed.removeAll()
         pendingReadActivities.removeAll()
         snapshotRequests.removeAll()
@@ -558,6 +579,7 @@ final class ThreadActivityMonitor {
         while true {
             do {
                 try connect()
+                usingHistoryFallback = false
                 try send(["type": "request", "requestId": UUID().uuidString,
                           "method": "initialize", "version": 0,
                           "params": ["clientType": "codex-quota"]])
@@ -628,6 +650,11 @@ final class ThreadActivityMonitor {
                 revisions.removeAll()
                 pendingReadActivities.removeAll()
                 snapshotRequests.removeAll()
+                if refreshHistoryFallback() {
+                    Thread.sleep(forTimeInterval: 2)
+                    continue
+                }
+                usingHistoryFallback = false
                 publish(connected: false)
                 if case ActivityError.protocolMismatch = error {
                     RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) { self.onCompatibilityChanged?(true) }
@@ -639,6 +666,78 @@ final class ThreadActivityMonitor {
                 }
             }
         }
+    }
+
+    /// Use the existing serial monitor and notification pipeline. No extra
+    /// app-server process, transcript scan, or writer is started for this path.
+    private func refreshHistoryFallback() -> Bool {
+        synchronizeAccount()
+        let account = activeAccount
+        let generation = activeGeneration
+        guard account != nil, let principal = activePrincipal,
+              let desktop = NSRunningApplication.runningApplications(withBundleIdentifier: "com.openai.codex")
+                .first(where: { !$0.isTerminated }),
+              let launched = desktop.launchDate else { return false }
+        do {
+            let snapshot = try CodexHistoryActivity.read(home: Self.codexHome,
+                desktopLaunchedAt: launched, principal: principal, retainingIDs: Set(activities.keys),
+                observedTurns: activities.compactMapValues(\.latestTurn), legacyNotBefore: legacyHistoryNotBefore)
+            guard accountIsCurrent(account, generation: generation) else { return false }
+            if !usingHistoryFallback {
+                NSLog("PlusCodex activity monitor: using read-only paginated history metadata")
+                usingHistoryFallback = true
+            }
+            applyHistorySnapshot(snapshot)
+            return true
+        } catch { return false }
+    }
+
+    private func applyHistorySnapshot(_ snapshot: CodexHistoryActivity.Snapshot) {
+        // A completed turn may be followed by a new turn between polls. Resolve
+        // the previously observed turn before replacing it with the latest one.
+        if !snapshot.previousTurns.isEmpty {
+            var intermediate = activities
+            for row in snapshot.previousTurns { intermediate[row.id] = row }
+            applyHistorySnapshot(CodexHistoryActivity.Snapshot(activities: Array(intermediate.values),
+                readIDs: snapshot.previousReadIDs, archivedIDs: []))
+        }
+        let previous = activities
+        activities = Dictionary(uniqueKeysWithValues: snapshot.activities.map { activity in
+            var row = activity
+            // A read receipt can lag behind the history transaction. Preserve a
+            // locally observed result until that exact turn is acknowledged.
+            if row.latestTurn?.status == "completed", !snapshot.readIDs.contains(row.id),
+               let prior = previous[row.id], prior.latestTurn?.id == row.latestTurn?.id,
+               prior.isRunning || prior.unread { row.unread = true }
+            return (row.id, row)
+        })
+        awaitingSnapshots = Set(snapshot.activities.filter { !$0.stateConfirmed }.map(\.id))
+        for row in snapshot.activities where snapshot.readIDs.contains(row.id) {
+            let prior = previous[row.id]
+            if prior?.latestTurn?.id != row.latestTurn?.id || prior?.isRunning == true || prior?.unread != false {
+                pendingReadActivities[row.id] = row
+            }
+        }
+        let account = activeAccount
+        let generation = activeGeneration
+        if !snapshot.archivedIDs.isEmpty {
+            RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) {
+                guard self.accountIsCurrent(account, generation: generation) else { return }
+                for id in snapshot.archivedIDs { self.onArchive?(id) }
+            }
+        }
+        publish(connected: true)
+    }
+
+    func testHookHistorySnapshot(_ snapshot: CodexHistoryActivity.Snapshot) {
+        synchronizeAccount()
+        usingHistoryFallback = true
+        applyHistorySnapshot(snapshot)
+    }
+
+    func testHookDisconnected() {
+        synchronizeAccount()
+        publish(connected: false)
     }
 
     private func connect() throws {
@@ -980,8 +1079,9 @@ final class ThreadActivityMonitor {
     }
 
     private func publish(connected: Bool) {
-        synchronizeAccount()
         let account = activeAccount
+        let generation = activeGeneration
+        guard accountIsCurrent(account, generation: generation) else { return }
         let now = Date()
         awaitingSince = awaitingSince.filter { awaitingSnapshots.contains($0.key) }
         for id in awaitingSnapshots where awaitingSince[id] == nil { awaitingSince[id] = now }
@@ -992,7 +1092,7 @@ final class ThreadActivityMonitor {
         let results = completionTracker.update(confirmed, connected: connected, retainingIDs: awaitingSnapshots)
         if !results.isEmpty {
             RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) {
-                guard self.accountIsCurrent(account) else { return }
+                guard self.accountIsCurrent(account, generation: generation) else { return }
                 for result in results {
                     switch result.kind {
                     case .completed: self.onCompletion?(result.activity)
@@ -1005,7 +1105,7 @@ final class ThreadActivityMonitor {
         let attentionEvents = attentionTracker.update(confirmed, connected: connected)
         if !attentionEvents.isEmpty {
             RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) {
-                guard self.accountIsCurrent(account) else { return }
+                guard self.accountIsCurrent(account, generation: generation) else { return }
                 for event in attentionEvents { self.onAttention?(event) }
             }
             CFRunLoopWakeUp(CFRunLoopGetMain())
@@ -1014,13 +1114,13 @@ final class ThreadActivityMonitor {
         pendingReadActivities.removeAll()
         if !readActivities.isEmpty {
             RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) {
-                guard self.accountIsCurrent(account) else { return }
+                guard self.accountIsCurrent(account, generation: generation) else { return }
                 for activity in readActivities { self.onRead?(activity) }
             }
             CFRunLoopWakeUp(CFRunLoopGetMain())
         }
         let rows = activities.values.filter {
-            $0.isVisible && ThreadRecoveryPolicy.shouldRetain(waitingSince: awaitingSince[$0.id], now: now)
+            $0.isVisible && (usingHistoryFallback || ThreadRecoveryPolicy.shouldRetain(waitingSince: awaitingSince[$0.id], now: now))
         }.map { activity -> ThreadActivity in
             var row = activity
             row.stateConfirmed = connected && !awaitingSnapshots.contains(row.id)
@@ -1032,12 +1132,13 @@ final class ThreadActivityMonitor {
         }
         // Snapshot recovery belongs to each row's stateConfirmed flag. It must
         // not turn a healthy transport into a disconnection when no row is visible.
-        guard rows != lastPublished || connected != lastConnected else { return }
+        guard !hasPublished || rows != lastPublished || connected != lastConnected else { return }
+        hasPublished = true
         lastPublished = rows
         lastConnected = connected
         // Menu tracking uses a separate run-loop mode; deliver updates there as well.
         RunLoop.main.perform(inModes: [.default, .eventTracking, .modalPanel]) {
-            guard self.accountIsCurrent(account) else { return }
+            guard self.accountIsCurrent(account, generation: generation) else { return }
             self.onUpdate(rows, connected)
         }
         CFRunLoopWakeUp(CFRunLoopGetMain())
