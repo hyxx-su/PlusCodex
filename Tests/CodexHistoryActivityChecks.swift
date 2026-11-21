@@ -148,6 +148,55 @@ struct CodexHistoryActivityChecks {
             legacyNotBefore: now.addingTimeInterval(60), now: now)
         precondition(switched.activities.isEmpty, "An account switch must not revive earlier shared legacy work")
 
+        // Optional account metadata can disappear during a quota refresh even
+        // though the selected account has not changed. Keep its observed work.
+        let fixtureAccount = "history-metadata-\(UUID().uuidString)"
+        defer {
+            UserDefaults.standard.removeObject(forKey: "threadCompletionTurns.v2." + ThreadRecordScope.key(fixtureAccount))
+        }
+        var recoveredCompletions = 0
+        var recoveredRows: [ThreadActivity] = []
+        let recovering = ThreadActivityMonitor { rows, _ in recoveredRows = rows }
+        recovering.onCompletion = { _ in recoveredCompletions += 1 }
+        func drain() {
+            let deadline = Date().addingTimeInterval(0.03)
+            while Date() < deadline { _ = RunLoop.main.run(mode: .default, before: deadline) }
+        }
+        try execute(history, "UPDATE thread_turns SET started_at=\(seconds - 30) WHERE turn_id='next-turn';")
+        recovering.selectAccount(fixtureAccount)
+        recovering.testHookDisconnected()
+        drain()
+        recovering.selectAccount(fixtureAccount, principal: principal)
+        recovering.testHookHistorySnapshot(try read())
+        drain()
+        let originalBoundary = recovering.testHookLegacyHistoryNotBefore
+        precondition(originalBoundary == nil, "The first available metadata must not shorten the initial observation window")
+        recovering.selectAccount(fixtureAccount)
+        recovering.testHookDisconnected()
+        drain()
+        precondition(recovering.testHookLegacyHistoryNotBefore == originalBoundary)
+        precondition(recoveredRows.first?.stateConfirmed == false && recoveredCompletions == 0)
+        try execute(history, "UPDATE thread_turns SET status='completed' WHERE turn_id='next-turn';")
+        recovering.selectAccount(fixtureAccount, principal: principal)
+        recovering.testHookDisconnected()
+        precondition(recovering.testHookLegacyHistoryNotBefore == originalBoundary)
+        let recovered = try CodexHistoryActivity.read(home: fixture, desktopLaunchedAt: launch, principal: principal,
+            legacyNotBefore: recovering.testHookLegacyHistoryNotBefore, now: now)
+        precondition(recovered.activities.count == 1, "Metadata recovery must rediscover older legacy turns")
+        recovering.testHookHistorySnapshot(recovered)
+        drain()
+        recovering.testHookHistorySnapshot(recovered)
+        drain()
+        precondition(recoveredCompletions == 1 && recoveredRows.first?.unread == true,
+                     "A completion during metadata loss must be delivered exactly once after recovery")
+        let otherPrincipal = CodexActivityPrincipal(userID: principal.userID, accountID: "other-account")
+        recovering.selectAccount(fixtureAccount, principal: otherPrincipal)
+        recovering.selectAccount(fixtureAccount, principal: principal)
+        recovering.testHookDisconnected()
+        drain()
+        precondition(recoveredRows.isEmpty && recovering.testHookLegacyHistoryNotBefore != originalBoundary,
+                     "A real same-email A -> B -> A switch must clear history and advance the legacy boundary")
+
         let decoded = try JSONDecoder().decode(AccountResponse.self, from: Data("""
             {"account":{"email":"fixture@example.invalid","planType":"plus"},"userId":"fixture-user",
              "workspaceRouting":{"chatgptAccountId":"fixture-account"}}

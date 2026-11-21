@@ -416,11 +416,25 @@ final class ThreadActivityMonitor {
     private var activePrincipal: CodexActivityPrincipal?
     private var requestedGeneration: UInt64 = 0
     private var activeGeneration: UInt64 = 0
+    private var lastRequestedPrincipal: CodexActivityPrincipal?
+    private var requestedIdentityGeneration: UInt64 = 0
+    private var activeIdentityGeneration: UInt64 = 0
     private var legacyHistoryNotBefore: Date?
     private var awaitingSince: [String: Date] = [:]
     func selectAccount(_ account: String?, principal: CodexActivityPrincipal? = nil) {
         accountLock.lock()
         if requestedAccount != account || requestedPrincipal != principal { requestedGeneration &+= 1 }
+        // Missing optional metadata suspends history reads, but is not a new
+        // identity. Remember real switches even if A -> B -> A occurs between polls.
+        if requestedAccount != account {
+            requestedIdentityGeneration &+= 1
+            lastRequestedPrincipal = principal
+        } else if let principal {
+            if let lastRequestedPrincipal, principal != lastRequestedPrincipal {
+                requestedIdentityGeneration &+= 1
+            }
+            lastRequestedPrincipal = principal
+        }
         requestedAccount = account
         requestedPrincipal = principal
         accountLock.unlock()
@@ -436,12 +450,17 @@ final class ThreadActivityMonitor {
         let account = requestedAccount
         let principal = requestedPrincipal
         let generation = requestedGeneration
+        let identityGeneration = requestedIdentityGeneration
         accountLock.unlock()
         guard generation != activeGeneration else { return }
-        if activeAccount != nil { legacyHistoryNotBefore = Date() }
+        let identityChanged = identityGeneration != activeIdentityGeneration
+        if identityChanged && activeAccount != nil { legacyHistoryNotBefore = Date() }
         activeAccount = account
         activePrincipal = principal
         activeGeneration = generation
+        activeIdentityGeneration = identityGeneration
+        hasPublished = false
+        guard identityChanged else { return }
         completionTracker = account.map { CompletionTracker(defaults: .standard, account: $0) } ?? CompletionTracker()
         attentionTracker = AttentionTracker()
         activities.removeAll()
@@ -739,6 +758,8 @@ final class ThreadActivityMonitor {
         synchronizeAccount()
         publish(connected: false)
     }
+
+    var testHookLegacyHistoryNotBefore: Date? { legacyHistoryNotBefore }
 
     private func connect() throws {
         let path = Self.codexHome.appendingPathComponent("ipc/ipc.sock").path
