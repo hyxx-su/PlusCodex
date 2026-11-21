@@ -62,7 +62,7 @@ jobs:
           - group: notifications
             tests: NotificationChecks NotificationAutoCleanupChecks ResetCreditExpiryChecks NotificationSoundChecks ThreadNotificationChecks PermissionOnboardingChecks UsageDisplayChecks
           - group: activity
-            tests: ActivityChecks ActivityIPCChecks LiveMenuChecks GeminiActivityChecks CodexWakeChecks CodexWakeBridgeChecks CodexWakeAccountChecks
+            tests: ActivityChecks ActivityIPCChecks CodexHistoryActivityChecks LiveMenuChecks GeminiActivityChecks CodexWakeChecks CodexWakeBridgeChecks CodexWakeAccountChecks
           - group: settings
             tests: MenuBuilderChecks UpdateLoadingChecks UpdaterChecks ProviderChecks ClaudeFallbackChecks SettingsChecks SettingsTextEditingChecks SettingsDockChecks PresentationChecks MenuBarFormatChecks StatusWindowChecks CompactSettingsChecks PatchNotesChecks
     steps:

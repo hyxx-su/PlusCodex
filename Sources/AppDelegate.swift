@@ -33,11 +33,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var builtItems: StatusMenuBuilder.Items?
     private var readReceipts = ThreadActivityReadReceipts()
     private var recordAccount: String?
-    private func selectRecordAccount(_ identity: String?) {
+    private func selectRecordAccount(_ identity: String?, principal: CodexActivityPrincipal? = nil) {
+        activityMonitor?.selectAccount(identity, principal: principal)
         guard recordAccount != identity else { return }
         recordAccount = identity
         readReceipts = identity.map { ThreadActivityReadReceipts(defaults: .standard, account: $0) } ?? ThreadActivityReadReceipts()
-        activityMonitor?.selectAccount(identity)
     }
     private let notificationSettings = NotificationSettings()
     private lazy var notifications = AppNotifications(settings: notificationSettings)
@@ -336,7 +336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     self.codexExecutableMissing = false
                     self.settingsWindow.update(.codex, status: snapshot.account?.email ?? L10n.text("연결됨 · 사용량 조회 완료"))
                     if let identity = self.resetSchedule.resolvedAccount {
-                        self.selectRecordAccount(identity)
+                        self.selectRecordAccount(identity, principal: snapshot.activityPrincipal)
                         self.wakeSettings.selectAccount(identity)
                         self.wakeScheduler.tick(quota: snapshot.quota, offline: self.offline,
                                                 quotaFetchedAt: refreshedAt, now: refreshedAt)

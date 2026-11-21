@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 # Keep the default suite and CI shards on the same allowlist. Live-account checks stay opt-in.
-TEST_NAMES=(ReliabilityChecks AppearanceSoundChecks CLIInstallationChecks QuotaTests QuotaAlertChecks QuotaLayoutChecks IssueReportChecks NotificationChecks NotificationAutoCleanupChecks ResetCreditExpiryChecks NotificationSoundChecks MenuBuilderChecks IntroChecks PermissionOnboardingChecks ActivityChecks ActivityIPCChecks LiveMenuChecks ThreadNotificationChecks UpdateLoadingChecks UpdaterChecks ProviderChecks GeminiActivityChecks ClaudeFallbackChecks SettingsChecks SettingsTextEditingChecks SettingsDockChecks BackgroundKeychainChecks PresentationChecks CodexWakeChecks CodexWakeBridgeChecks CodexWakeAccountChecks UsageDisplayChecks MenuBarFormatChecks StatusWindowChecks CompactSettingsChecks PatchNotesChecks)
+TEST_NAMES=(ReliabilityChecks AppearanceSoundChecks CLIInstallationChecks QuotaTests QuotaAlertChecks QuotaLayoutChecks IssueReportChecks NotificationChecks NotificationAutoCleanupChecks ResetCreditExpiryChecks NotificationSoundChecks MenuBuilderChecks IntroChecks PermissionOnboardingChecks ActivityChecks ActivityIPCChecks CodexHistoryActivityChecks LiveMenuChecks ThreadNotificationChecks UpdateLoadingChecks UpdaterChecks ProviderChecks GeminiActivityChecks ClaudeFallbackChecks SettingsChecks SettingsTextEditingChecks SettingsDockChecks BackgroundKeychainChecks PresentationChecks CodexWakeChecks CodexWakeBridgeChecks CodexWakeAccountChecks UsageDisplayChecks MenuBarFormatChecks StatusWindowChecks CompactSettingsChecks PatchNotesChecks)
 SELECTED_TESTS=("${TEST_NAMES[@]}")
 if [[ $# -gt 0 ]]; then
     SELECTED_TESTS=("$@")
